@@ -159,6 +159,8 @@ public sealed partial class ProfilesViewModel : ObservableObject
             StatusText = $"已导入 {item.Name}";
             ImportUrl = "";
             ImportName = "";
+            // 导入即应用：生成 runtime 配置并热重载内核，避免出现“已激活但无节点”。
+            await _host.ApplyActiveProfileAsync();
             await LoadAsync();
         }
         catch (Exception ex)
@@ -190,6 +192,8 @@ public sealed partial class ProfilesViewModel : ObservableObject
             StatusText = "正在导入文件…";
             var item = await _host.Profiles.ImportFromFileAsync(file.Path);
             StatusText = $"已导入 {item.Name}";
+            // 导入即应用：生成 runtime 配置并热重载内核。
+            await _host.ApplyActiveProfileAsync();
             await LoadAsync();
         }
         catch (Exception ex)

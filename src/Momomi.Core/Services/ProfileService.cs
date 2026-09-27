@@ -144,6 +144,8 @@ public sealed class ProfileService : IProfileService
             ? meta.Name ?? $"订阅 {DateTime.Now:MM-dd HH:mm}"
             : name!.Trim();
         var content = await FetchContentAsync(url, ct).ConfigureAwait(false);
+        if (!LooksLikeClashConfig(content))
+            throw new InvalidOperationException("下载内容不是有效的 Clash 配置（可能是错误页或需要代理访问）。");
 
         var fileName = $"{SafeFileName(displayName)}-{DateTimeOffset.Now.ToUnixTimeSeconds()}.yaml";
         var filePath = Path.Combine(ProfilesDirectory, fileName);
@@ -284,6 +286,8 @@ public sealed class ProfileService : IProfileService
         {
             var meta = await FetchSubscriptionMetaAsync(item.Source, ct).ConfigureAwait(false);
             var content = await FetchContentAsync(item.Source, ct).ConfigureAwait(false);
+            // 校验内容确为订阅配置：否则错误页/HTML 会覆盖掉可用配置。
+            if (!LooksLikeClashConfig(content)) return false;
             await File.WriteAllTextAsync(item.FilePath, content, ct).ConfigureAwait(false);
             await _repo.UpdateContentAsync(id, meta.UserInfo).ConfigureAwait(false);
             return true;
@@ -292,6 +296,20 @@ public sealed class ProfileService : IProfileService
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// 粗判内容是否为 Clash/mihomo 配置：必须含 proxies / proxy-providers / proxy-groups
+    /// 之一，且不是 HTML。用于防止把错误页写进订阅文件。
+    /// </summary>
+    private static bool LooksLikeClashConfig(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return false;
+        var trimmed = content.TrimStart();
+        if (trimmed.StartsWith('<')) return false;
+        return content.Contains("proxies:", StringComparison.Ordinal)
+            || content.Contains("proxy-providers:", StringComparison.Ordinal)
+            || content.Contains("proxy-groups:", StringComparison.Ordinal);
     }
 
     public async Task<bool> SetActiveAsync(long id, CancellationToken ct = default)
