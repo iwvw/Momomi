@@ -173,6 +173,79 @@ public sealed partial class SettingsPage : Page
         return false;
     }
 
+    /// <summary>快捷键录入：在只读输入框内按下组合键即录制；Backspace 清空。</summary>
+    private async void Hotkey_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (sender is not TextBox box || box.Tag is not string action) return;
+        e.Handled = true;
+
+        // 忽略单独的修饰键（等待主键）。
+        if (e.Key is Windows.System.VirtualKey.Control or Windows.System.VirtualKey.Menu
+            or Windows.System.VirtualKey.Shift or Windows.System.VirtualKey.LeftWindows
+            or Windows.System.VirtualKey.RightWindows)
+        {
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.Back)
+        {
+            var cleared = await ViewModel.ApplyHotkeyAsync(action, "");
+            if (cleared) box.Text = "";
+            return;
+        }
+
+        var mods = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
+        var alt = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Menu);
+        var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
+        var win = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.LeftWindows);
+
+        var modifiers = new System.Text.StringBuilder();
+        if ((mods & Windows.UI.Core.CoreVirtualKeyStates.Down) == Windows.UI.Core.CoreVirtualKeyStates.Down) modifiers.Append("Ctrl+");
+        if ((alt & Windows.UI.Core.CoreVirtualKeyStates.Down) == Windows.UI.Core.CoreVirtualKeyStates.Down) modifiers.Append("Alt+");
+        if ((shift & Windows.UI.Core.CoreVirtualKeyStates.Down) == Windows.UI.Core.CoreVirtualKeyStates.Down) modifiers.Append("Shift+");
+        if ((win & Windows.UI.Core.CoreVirtualKeyStates.Down) == Windows.UI.Core.CoreVirtualKeyStates.Down) modifiers.Append("Win+");
+
+        var text = modifiers + KeyName(e.Key);
+        if (!Momomi.App.Services.HotkeyParser.TryParse(text, out _, out _))
+        {
+            ViewModel.StatusText = "快捷键无效：需至少一个修饰键 + 一个可用的主键";
+            return;
+        }
+
+        var ok = await ViewModel.ApplyHotkeyAsync(action, text);
+        if (ok) box.Text = text;
+    }
+
+    /// <summary>把 VirtualKey 转成解析器认识的名称。</summary>
+    private static string KeyName(Windows.System.VirtualKey key)
+    {
+        var v = (int)key;
+        if (v is >= 0x41 and <= 0x5A) return ((char)v).ToString();   // A-Z
+        if (v is >= 0x30 and <= 0x39) return ((char)v).ToString();   // 0-9
+        if (v is >= 0x70 and <= 0x87) return $"F{v - 0x70 + 1}";      // F1-F24
+        if (v is >= 0x60 and <= 0x69) return $"NumPad{v - 0x60}";     // 小键盘 0-9
+        return key switch
+        {
+            Windows.System.VirtualKey.Space => "Space",
+            Windows.System.VirtualKey.Tab => "Tab",
+            Windows.System.VirtualKey.Enter => "Enter",
+            Windows.System.VirtualKey.Escape => "Esc",
+            Windows.System.VirtualKey.Back => "Backspace",
+            Windows.System.VirtualKey.Delete => "Delete",
+            Windows.System.VirtualKey.Insert => "Insert",
+            Windows.System.VirtualKey.Home => "Home",
+            Windows.System.VirtualKey.End => "End",
+            Windows.System.VirtualKey.PageUp => "PageUp",
+            Windows.System.VirtualKey.PageDown => "PageDown",
+            Windows.System.VirtualKey.Up => "Up",
+            Windows.System.VirtualKey.Down => "Down",
+            Windows.System.VirtualKey.Left => "Left",
+            Windows.System.VirtualKey.Right => "Right",
+            Windows.System.VirtualKey.NumberKeyLock => "NumLock",
+            _ => "",
+        };
+    }
+
     private void CommitTextField(string field, string text)
     {
         switch (field)

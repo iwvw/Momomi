@@ -146,6 +146,76 @@
                 </StackPanel>
 
                 <TextBlock Style="{StaticResource SettingsSectionHeaderTextBlockStyle}"
+                           Text="快捷键" />
+                <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                    <controls:SettingsCard Description="在输入框内按下组合键即可录制，Backspace 清空；至少含一个修饰键" Header="显示主界面">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE765;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <TextBox x:Name="HotkeyShowWindowBox" Width="220" Tag="ShowWindow"
+                                 PlaceholderText="例如 Ctrl+Alt+M"
+                                 IsReadOnly="True"
+                                 Text="{x:Bind ViewModel.HotkeyShowWindow, Mode=TwoWay}"
+                                 KeyDown="Hotkey_KeyDown" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Header="切换系统代理">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE774;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <TextBox x:Name="HotkeySystemProxyBox" Width="220" Tag="ToggleSystemProxy"
+                                 PlaceholderText="例如 Ctrl+Alt+P"
+                                 IsReadOnly="True"
+                                 Text="{x:Bind ViewModel.HotkeyToggleSystemProxy, Mode=TwoWay}"
+                                 KeyDown="Hotkey_KeyDown" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Header="切换 TUN 模式">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE701;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <TextBox x:Name="HotkeyTunBox" Width="220" Tag="ToggleTun"
+                                 PlaceholderText="例如 Ctrl+Alt+T"
+                                 IsReadOnly="True"
+                                 Text="{x:Bind ViewModel.HotkeyToggleTun, Mode=TwoWay}"
+                                 KeyDown="Hotkey_KeyDown" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Header="规则模式">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE8B7;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <TextBox x:Name="HotkeyRuleBox" Width="220" Tag="ModeRule"
+                                 PlaceholderText="例如 Ctrl+Alt+1"
+                                 IsReadOnly="True"
+                                 Text="{x:Bind ViewModel.HotkeyModeRule, Mode=TwoWay}"
+                                 KeyDown="Hotkey_KeyDown" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Header="全局模式">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE8B7;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <TextBox x:Name="HotkeyGlobalBox" Width="220" Tag="ModeGlobal"
+                                 PlaceholderText="例如 Ctrl+Alt+2"
+                                 IsReadOnly="True"
+                                 Text="{x:Bind ViewModel.HotkeyModeGlobal, Mode=TwoWay}"
+                                 KeyDown="Hotkey_KeyDown" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Header="直连模式">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE8B7;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <TextBox x:Name="HotkeyDirectBox" Width="220" Tag="ModeDirect"
+                                 PlaceholderText="例如 Ctrl+Alt+3"
+                                 IsReadOnly="True"
+                                 Text="{x:Bind ViewModel.HotkeyModeDirect, Mode=TwoWay}"
+                                 KeyDown="Hotkey_KeyDown" />
+                    </controls:SettingsCard>
+                </StackPanel>
+
+                <TextBlock Style="{StaticResource SettingsSectionHeaderTextBlockStyle}"
                            Text="网络" />
                 <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
                     <controls:SettingsCard Description="设置 Windows Internet 代理指向本地混合端口" Header="系统代理">

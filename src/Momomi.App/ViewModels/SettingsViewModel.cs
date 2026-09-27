@@ -116,6 +116,38 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial string DownloadProxyPort { get; set; } = "";
 
     [ObservableProperty]
+    public partial string HotkeyShowWindow { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string HotkeyToggleSystemProxy { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string HotkeyToggleTun { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string HotkeyModeRule { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string HotkeyModeGlobal { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string HotkeyModeDirect { get; set; } = "";
+
+    /// <summary>快捷键变更后由设置页调用：注册并持久化，返回是否成功。</summary>
+    public async Task<bool> ApplyHotkeyAsync(string action, string text)
+    {
+        if (!Enum.TryParse<Momomi.App.Services.HotkeyAction>(action, out var hotkeyAction)) return false;
+        var window = global::Momomi.App.App.Main;
+        if (window is null) return false;
+
+        var ok = await window.Hotkeys.SetAsync(hotkeyAction, text).ConfigureAwait(false);
+        StatusText = ok
+            ? (string.IsNullOrWhiteSpace(text) ? "已清除快捷键" : $"快捷键已设为 {text}")
+            : "快捷键注册失败：可能已被其他程序占用";
+        return ok;
+    }
+
+    [ObservableProperty]
     public partial int GithubProxyIndex { get; set; }
 
     [ObservableProperty]
@@ -201,6 +233,13 @@ public sealed partial class SettingsViewModel : ObservableObject
 
             var dpp = await _host.Settings.GetIntAsync("core.downloadProxyPort", 0);
             DownloadProxyPort = dpp > 0 ? dpp.ToString() : "";
+
+            HotkeyShowWindow = await _host.Settings.GetAsync("hotkey.ShowWindow") ?? "";
+            HotkeyToggleSystemProxy = await _host.Settings.GetAsync("hotkey.ToggleSystemProxy") ?? "";
+            HotkeyToggleTun = await _host.Settings.GetAsync("hotkey.ToggleTun") ?? "";
+            HotkeyModeRule = await _host.Settings.GetAsync("hotkey.ModeRule") ?? "";
+            HotkeyModeGlobal = await _host.Settings.GetAsync("hotkey.ModeGlobal") ?? "";
+            HotkeyModeDirect = await _host.Settings.GetAsync("hotkey.ModeDirect") ?? "";
 
             var githubProxy = await _host.Settings.GetAsync("core.githubProxy") ?? "auto";
             var builtinIndex = Array.IndexOf(GithubProxyBuiltins, githubProxy);

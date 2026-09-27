@@ -33,9 +33,12 @@ public sealed partial class MainWindow : Window
 
     public ModeSelectorViewModel ModeSelector { get; }
 
+    public Services.HotkeyManager Hotkeys { get; }
+
     public MainWindow()
     {
         ModeSelector = new ModeSelectorViewModel(AppHost.Host, DispatcherQueue);
+        Hotkeys = new Services.HotkeyManager(AppHost.Host, this);
 
         InitializeComponent();
         Title = "Momomi";
@@ -75,6 +78,40 @@ public sealed partial class MainWindow : Window
         AppHost.Host.Core.StateChanged += OnCoreStateForRestore;
         AppHost.Host.Core.StateChanged += OnCoreStateForAutoQuit;
         ViewModels.AppSignals.SwitchesChanged += (_, _) => Dispatch(UpdateTrayState);
+
+        _ = Hotkeys.LoadAsync();
+    }
+
+    // ---- 快捷键触发的操作（经 DispatcherQueue 回到 UI 线程）----
+
+    /// <summary>快捷键：切换系统代理。</summary>
+    public void HotkeyToggleSystemProxy() => ToggleSystemProxy();
+
+    /// <summary>快捷键：切换 TUN 模式。</summary>
+    public void HotkeyToggleTun()
+    {
+        try
+        {
+            var current = AppHost.Host.Settings.GetBoolAsync("core.tun").GetAwaiter().GetResult();
+            _ = AppHost.Host.Settings.SetBoolAsync("core.tun", !current).GetAwaiter();
+            _ = ModeSelector.SetTunAsync(!current);
+        }
+        catch
+        {
+        }
+    }
+
+    /// <summary>快捷键：切换运行模式（0 规则 / 1 全局 / 2 直连）。</summary>
+    public async Task HotkeySelectModeAsync(int index)
+    {
+        try
+        {
+            await ModeSelector.SelectAsync(index);
+            SyncModeBar();
+        }
+        catch
+        {
+        }
     }
 
     private CancellationTokenSource? _autoQuitCts;
@@ -537,6 +574,7 @@ public sealed partial class MainWindow : Window
 
     private void OnClosed(object sender, WindowEventArgs args)
     {
+        Hotkeys.Dispose();
         _notifyIcon?.Dispose();
         _notifyIcon = null;
         _miniWindow?.ForceClose();
