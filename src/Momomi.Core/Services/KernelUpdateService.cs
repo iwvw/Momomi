@@ -50,22 +50,52 @@ public sealed class KernelUpdateService : IKernelUpdateService
         BinaryPath = Path.Combine(coreDirectory, "mihomo.exe");
         WintunPath = Path.Combine(coreDirectory, "wintun.dll");
 
-        _http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        _http = new HttpClient(new HttpClientHandler
+        {
+            // 内核运行时经本机混合端口下载（借力自身代理访问 GitHub）。
+            Proxy = DownloadProxy.Create(),
+            UseProxy = true,
+        })
+        {
+            Timeout = TimeSpan.FromMinutes(5),
+        };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("Momomi/0.1.0");
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
     }
 
     /// <summary>
-    /// 读取 GitHub 加速代理。返回可拼接的前缀（如 https://gh-proxy.org），
-    /// 未配置或选择直连时返回 null。
+    /// 内置 GitHub 加速源，按顺序尝试，任一成功即用（末尾另有直连兜底）。
+    /// 各源对不同文件表现不一（有的能取 API、有的只能取 release 文件），
+    /// 故取多个并逐一回退。
     /// </summary>
-    private async Task<string?> ReadGithubProxyAsync(CancellationToken ct)
+    private static readonly string[] BuiltinProxies =
     {
-        if (_settings is null) return null;
-        var value = await _settings.GetAsync("core.githubProxy").ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(value)) return null;
-        if (value is "auto" or "direct") return null;
-        return value.TrimEnd('/');
+        "https://gh-proxy.org",
+        "https://ghproxy.net",
+        "https://ghfast.top",
+        "https://gh.llkk.cc",
+    };
+
+    /// <summary>
+    /// 返回候选加速前缀列表，末尾的 null 表示直连兜底。
+    /// auto/空 = 依次尝试全部内置源后直连；direct = 仅直连；自定义 = 该源后直连。
+    /// </summary>
+    private async Task<IReadOnlyList<string?>> GetProxyCandidatesAsync(CancellationToken ct)
+    {
+        if (_settings is null) return new string?[] { null };
+
+        var value = (await _settings.GetAsync("core.githubProxy").ConfigureAwait(false))?.Trim();
+        if (string.Equals(value, "direct", StringComparison.OrdinalIgnoreCase))
+            return new string?[] { null };
+
+        if (string.IsNullOrEmpty(value) || string.Equals(value, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            var list = BuiltinProxies.Select(p => (string?)p).ToList();
+            list.Add(null);
+            return list;
+        }
+
+        return new string?[] { value!.TrimEnd('/'), null };
     }
 
     /// <summary>按配置把 GitHub 域名改写为加速代理前缀形式，非 GitHub 地址原样返回。</summary>
@@ -142,16 +172,33 @@ public sealed class KernelUpdateService : IKernelUpdateService
 
     private async Task<List<KernelRelease>> FetchReleasesAsync(CancellationToken ct)
     {
-        var list = new List<KernelRelease>();
-        var proxy = await ReadGithubProxyAsync(ct).ConfigureAwait(false);
         var apiUrl = $"{ReleasesApi}?per_page=30";
-        if (proxy is not null) apiUrl = ApplyProxy(proxy, apiUrl);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var proxy in await GetProxyCandidatesAsync(ct).ConfigureAwait(false))
+        {
+            ct.ThrowIfCancellationRequested();
+            var url = proxy is null ? apiUrl : ApplyProxy(proxy, apiUrl);
+            if (!seen.Add(url)) continue;
+            try
+            {
+                using var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+                await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+                var list = ParseReleases(doc);
+                if (list.Count > 0) return list;
+            }
+            catch
+            {
+                // 该源失败，尝试下一个。
+            }
+        }
+        return new List<KernelRelease>();
+    }
 
-        using var response = await _http.GetAsync(apiUrl, ct).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
-
+    private static List<KernelRelease> ParseReleases(JsonDocument doc)
+    {
+        var list = new List<KernelRelease>();
         if (doc.RootElement.ValueKind != JsonValueKind.Array) return list;
 
         foreach (var release in doc.RootElement.EnumerateArray())
@@ -242,25 +289,53 @@ public sealed class KernelUpdateService : IKernelUpdateService
 
     private async Task DownloadFileAsync(string url, string destination, IProgress<double>? progress, CancellationToken ct)
     {
-        var proxy = await ReadGithubProxyAsync(ct).ConfigureAwait(false);
-        if (proxy is not null) url = ApplyProxy(proxy, url);
-
-        using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-
-        var total = response.Content.Headers.ContentLength ?? -1;
-        await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        await using var target = File.Create(destination);
-
-        var buffer = new byte[81920];
-        long received = 0;
-        int read;
-        while ((read = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+        Exception? last = null;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var proxy in await GetProxyCandidatesAsync(ct).ConfigureAwait(false))
         {
-            await target.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
-            received += read;
-            if (total > 0) progress?.Report((double)received / total);
+            ct.ThrowIfCancellationRequested();
+            var target = proxy is null ? url : ApplyProxy(proxy, url);
+            // 非 GitHub 地址经各源改写后不变，去重避免重试同一 URL。
+            if (!seen.Add(target)) continue;
+            try
+            {
+                using var response = await _http.GetAsync(target, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+
+                var total = response.Content.Headers.ContentLength ?? -1;
+                await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                await using var file = File.Create(destination);
+
+                var buffer = new byte[81920];
+                long received = 0;
+                int read;
+                while ((read = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+                {
+                    await file.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+                    received += read;
+                    if (total > 0) progress?.Report((double)received / total);
+                }
+
+                // 内容过小视为失败（加速源常返回错误页），换下一个源。
+                if (total > 0 && received < total)
+                {
+                    last = new IOException($"下载不完整：{received}/{total}");
+                    continue;
+                }
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                try { if (File.Exists(destination)) File.Delete(destination); } catch { }
+            }
         }
+
+        throw last ?? new IOException("所有下载源均失败");
     }
 
     private static async Task ExtractKernelFromZipAsync(string zipPath, string destination, CancellationToken ct)

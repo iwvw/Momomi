@@ -66,6 +66,8 @@ public sealed class MomomiHost : IDisposable
     {
         await Database.InitializeAsync().ConfigureAwait(false);
         await Core.InitializeAsync(ct).ConfigureAwait(false);
+        // 载入手动下载代理端口（用于内核未运行时下载内核/geodata）。
+        DownloadProxy.SetManualPort(await Settings.GetIntAsync("core.downloadProxyPort", 0).ConfigureAwait(false));
     }
 
     private void OnProfileRefresh(object? state)

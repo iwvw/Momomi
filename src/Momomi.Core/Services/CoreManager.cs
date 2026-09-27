@@ -186,6 +186,8 @@ public sealed class CoreManager : ICoreManager
             SetState(CoreState.Running, version, portWarning);
             RestoreOwnSystemProxy();
             StartStreams();
+            // 内核已就绪，后续下载（内核/geodata/订阅）经本机混合端口，借力自身代理。
+            DownloadProxy.SetCorePort(await _settings.GetIntAsync("core.mixedPort", 7897).ConfigureAwait(false));
             return true;
         }
         catch (Exception ex)
@@ -382,6 +384,8 @@ public sealed class CoreManager : ICoreManager
 
             _version = null;
             SetState(CoreState.Stopped, null, null);
+            // 内核已停，下载改回直连（代理端口不再可用）。
+            DownloadProxy.SetCorePort(0);
         }
         finally
         {
@@ -511,3 +515,4 @@ public sealed class CoreManager : ICoreManager
         }
     }
 }
+

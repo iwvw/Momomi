@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 0.1.0），留空则用 Directory.Build.props 里的值'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  CONFIGURATION: Release
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            rid: win-x64
+            platform: x64
+          - arch: arm64
+            rid: win-arm64
+            platform: ARM64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ github.event.inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($v) -and $env:GITHUB_REF -like 'refs/tags/v*') {
+            $v = $env:GITHUB_REF -replace '^refs/tags/v', ''
+          }
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = '0.1.0' }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Resolved version: $v"
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          dotnet publish src/Momomi.App/Momomi.App.csproj `
+            -c $env:CONFIGURATION `
+            -r ${{ matrix.rid }} `
+            --self-contained `
+            -p:Platform=${{ matrix.platform }} `
+            -p:Version=${{ steps.ver.outputs.version }} `
+            -o publish
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $zip = "Momomi-$ver-${{ matrix.arch }}-portable.zip"
+          Compress-Archive -Path "publish/*" -DestinationPath $zip -CompressionLevel Optimal
+          Write-Host "Created $zip"
+
+      - name: Install Inno Setup
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+
+      - name: Fetch Simplified Chinese language file
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $dir = "build\languages"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $path = "Files/Languages/ChineseSimplified.isl"
+          # 依次尝试直连与常用加速源（CI runner 在海外，直连通常可用）。
+          $urls = @(
+            "https://raw.githubusercontent.com/jrsoftware/issrc/main/$path",
+            "https://gh-proxy.org/https://raw.githubusercontent.com/jrsoftware/issrc/main/$path",
+            "https://ghproxy.net/https://raw.githubusercontent.com/jrsoftware/issrc/main/$path"
+          )
+          foreach ($u in $urls) {
+            try {
+              Invoke-WebRequest -Uri $u -OutFile "$dir\ChineseSimplified.isl" -TimeoutSec 30
+              Write-Host "Downloaded ChineseSimplified.isl from $u"
+              break
+            } catch {
+              Write-Host "::warning::下载失败：$u"
+            }
+          }
+
+      - name: Build installer
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $isl = "${{ github.workspace }}\build\languages\ChineseSimplified.isl"
+          $args = @(
+            "/DAppVersion=$ver",
+            "/DSourceDir=${{ github.workspace }}\publish",
+            "/DOutputDir=${{ github.workspace }}",
+            "build\installer.iss"
+          )
+          if (Test-Path $isl) { $args = @("/DChineseISL=$isl") + $args }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" @args
+          Get-ChildItem *.exe | ForEach-Object { Write-Host $_.Name }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Momomi-${{ matrix.arch }}
+          path: |
+            Momomi-*.zip
+            Momomi-*-setup.exe
+          if-no-files-found: warn
+
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        shell: pwsh
+        run: Get-ChildItem artifacts -Recurse | Select-Object Name, Length
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false

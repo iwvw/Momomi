@@ -111,6 +111,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial string SubscriptionTimeout { get; set; } = "60";
 
+    /// <summary>下载内核/geodata 时使用的代理端口（内核未运行时）；空表示不使用。</summary>
+    [ObservableProperty]
+    public partial string DownloadProxyPort { get; set; } = "";
+
     [ObservableProperty]
     public partial int GithubProxyIndex { get; set; }
 
@@ -194,6 +198,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
             SubscriptionUserAgent = await _host.Settings.GetAsync("core.subscriptionUserAgent") ?? "";
             SubscriptionTimeout = (await _host.Settings.GetIntAsync("core.subscriptionTimeout", 60)).ToString();
+
+            var dpp = await _host.Settings.GetIntAsync("core.downloadProxyPort", 0);
+            DownloadProxyPort = dpp > 0 ? dpp.ToString() : "";
 
             var githubProxy = await _host.Settings.GetAsync("core.githubProxy") ?? "auto";
             var builtinIndex = Array.IndexOf(GithubProxyBuiltins, githubProxy);
@@ -346,6 +353,15 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (_loading) return;
         if (int.TryParse(value, out var s) && s > 0)
             _ = _host.Settings.SetIntAsync("core.subscriptionTimeout", s);
+    }
+
+    partial void OnDownloadProxyPortChanged(string value)
+    {
+        if (_loading) return;
+        var port = int.TryParse(value, out var p) && p is > 0 and < 65536 ? p : 0;
+        _ = _host.Settings.SetIntAsync("core.downloadProxyPort", port);
+        Momomi.Core.Services.DownloadProxy.SetManualPort(port);
+        StatusText = port > 0 ? $"下载代理已设为 127.0.0.1:{port}" : "下载代理已关闭（用内核端口或直连）";
     }
 
     partial void OnGithubProxyIndexChanged(int value)

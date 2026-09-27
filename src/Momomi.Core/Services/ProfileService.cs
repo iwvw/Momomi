@@ -70,7 +70,15 @@ public sealed class ProfileService : IProfileService
 
     private static HttpClient CreateClient()
     {
-        var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        var client = new HttpClient(new HttpClientHandler
+        {
+            // 内核运行时经本机混合端口下载订阅（借力自身代理）。
+            Proxy = DownloadProxy.Create(),
+            UseProxy = true,
+        })
+        {
+            Timeout = Timeout.InfiniteTimeSpan,
+        };
         client.DefaultRequestHeaders.Accept.ParseAdd("*/*");
         return client;
     }

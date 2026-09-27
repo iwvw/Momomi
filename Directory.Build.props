@@ -11,6 +11,7 @@
     <Company>DSUK</Company>
     <Copyright>Copyright © 2026 DSUK</Copyright>
     <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/iwvw/Momomi</RepositoryUrl>
   </PropertyGroup>
 
 </Project>
