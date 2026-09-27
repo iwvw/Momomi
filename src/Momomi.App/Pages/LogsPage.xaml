@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Momomi.App.Pages.LogsPage"
+    NavigationCacheMode="Required"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Momomi.App.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:Momomi.Core.Models"
+    mc:Ignorable="d">
+
+    <Grid RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <controls:PageHeader Grid.Row="0" MaxWidth="1064" Margin="36,24,36,0"
+                             Title="日志"
+                             Subtitle="内核实时日志，最多保留 1000 条">
+            <controls:PageHeader.Actions>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <ComboBox x:Name="LevelBox" Width="140" VerticalAlignment="Center"
+                              SelectionChanged="Level_SelectionChanged">
+                        <ComboBoxItem Content="debug" />
+                        <ComboBoxItem Content="info" />
+                        <ComboBoxItem Content="warning" />
+                        <ComboBoxItem Content="error" />
+                    </ComboBox>
+                    <ToggleSwitch VerticalAlignment="Center"
+                                  OffContent="实时" OnContent="暂停"
+                                  IsOn="{x:Bind ViewModel.IsPaused, Mode=TwoWay}" />
+                    <Button VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.CopyAllCommand}" Content="复制全部" />
+                    <Button VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.ClearCommand}" Content="清空" />
+                </StackPanel>
+            </controls:PageHeader.Actions>
+        </controls:PageHeader>
+
+        <Grid Grid.Row="1" Style="{StaticResource CardStyle}" Padding="8,4,8,4"
+                Margin="36,0,36,24" MaxWidth="{StaticResource PageContentMaxWidth}">
+            <ListView ItemsSource="{x:Bind ViewModel.Items}" SelectionMode="None"
+                      Padding="0,0,0,16">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="4,1" />
+                        <Setter Property="MinHeight" Value="0" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="models:LogEntry">
+                        <Grid ColumnSpacing="10" Padding="8,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid Grid.Column="0"
+                                    Style="{StaticResource TagChipStyle}"
+                                    VerticalAlignment="Top">
+                                <TextBlock FontSize="11"
+                                           Foreground="{x:Bind Type, Converter={StaticResource LogLevelToBrush}}"
+                                           Text="{x:Bind Type}" />
+                            </Grid>
+                            <TextBlock Grid.Column="1"
+                                       FontFamily="Consolas"
+                                       FontSize="12"
+                                       IsTextSelectionEnabled="True"
+                                       TextWrapping="Wrap"
+                                       Text="{x:Bind Payload}" />
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+    </Grid>
+</Page>

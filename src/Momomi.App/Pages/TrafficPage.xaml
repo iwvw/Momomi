@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Momomi.App.Pages.TrafficPage"
+    NavigationCacheMode="Required"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Momomi.App.Controls"
+    xmlns:local="using:Momomi.App.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:Momomi.App.ViewModels"
+    mc:Ignorable="d">
+
+    <Grid RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <local:PageHeader Grid.Row="0" MaxWidth="1064" Margin="36,24,36,0"
+                          Title="流量历史"
+                          Subtitle="{x:Bind ViewModel.StatusText, Mode=OneWay}">
+            <local:PageHeader.Actions>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.RefreshCommand}" Content="刷新" />
+                    <Button VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.ClearHistoryCommand}" Content="清空" />
+                </StackPanel>
+            </local:PageHeader.Actions>
+        </local:PageHeader>
+
+        <Grid Grid.Row="1" ColumnSpacing="12" Margin="36,0,36,0" MaxWidth="{StaticResource PageContentMaxWidth}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Grid Grid.Column="0" Style="{StaticResource CardStyle}" Padding="14,12">
+                <StackPanel Spacing="4">
+                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="累计上传" />
+                    <TextBlock Style="{StaticResource SubtitleTextBlockStyle}"
+                               Text="{x:Bind ViewModel.TotalUpText, Mode=OneWay}" />
+                </StackPanel>
+            </Grid>
+            <Grid Grid.Column="1" Style="{StaticResource CardStyle}" Padding="14,12">
+                <StackPanel Spacing="4">
+                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="累计下载" />
+                    <TextBlock Style="{StaticResource SubtitleTextBlockStyle}"
+                               Text="{x:Bind ViewModel.TotalDownText, Mode=OneWay}" />
+                </StackPanel>
+            </Grid>
+            <Grid Grid.Column="2" Style="{StaticResource CardStyle}" Padding="14,12">
+                <StackPanel Spacing="4">
+                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="区间峰值速率" />
+                    <TextBlock Style="{StaticResource SubtitleTextBlockStyle}"
+                               Text="{x:Bind ViewModel.PeakText, Mode=OneWay}" />
+                </StackPanel>
+            </Grid>
+
+            <SelectorBar Grid.Column="3" x:Name="RangeBar" VerticalAlignment="Center"
+                         SelectionChanged="Range_SelectionChanged">
+                <SelectorBarItem Text="6 小时" />
+                <SelectorBarItem Text="24 小时" />
+                <SelectorBarItem Text="7 天" />
+                <SelectorBarItem Text="30 天" />
+            </SelectorBar>
+        </Grid>
+
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
+                      Padding="36,0,36,0">
+            <Border>
+            <StackPanel Spacing="12" Padding="0,0,0,24" MaxWidth="{StaticResource PageContentMaxWidth}">
+                <Grid Style="{StaticResource CardStyle}" Padding="16,14">
+                    <StackPanel Spacing="8">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="速率趋势（按分钟峰值）" />
+                        <controls:SparklineChart Height="140"
+                                                 Values="{x:Bind ViewModel.DownPoints, Mode=OneWay}"
+                                                 Maximum="{x:Bind ViewModel.MaxRate, Mode=OneWay}">
+                            <controls:SparklineChart.Stroke>
+                                <SolidColorBrush Color="#22C55E" />
+                            </controls:SparklineChart.Stroke>
+                            <controls:SparklineChart.Fill>
+                                <SolidColorBrush Color="#2022C55E" />
+                            </controls:SparklineChart.Fill>
+                        </controls:SparklineChart>
+                        <controls:SparklineChart Height="90"
+                                                 Values="{x:Bind ViewModel.UpPoints, Mode=OneWay}"
+                                                 Maximum="{x:Bind ViewModel.MaxRate, Mode=OneWay}">
+                            <controls:SparklineChart.Stroke>
+                                <SolidColorBrush Color="#F59E0B" />
+                            </controls:SparklineChart.Stroke>
+                            <controls:SparklineChart.Fill>
+                                <SolidColorBrush Color="#20F59E0B" />
+                            </controls:SparklineChart.Fill>
+                        </controls:SparklineChart>
+                    </StackPanel>
+                </Grid>
+
+                <Grid Style="{StaticResource CardStyle}" Padding="16,14">
+                    <StackPanel Spacing="8">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="内核内存占用" />
+                        <controls:SparklineChart Height="90"
+                                                 Values="{x:Bind ViewModel.MemoryPoints, Mode=OneWay}"
+                                                 Maximum="{x:Bind ViewModel.MaxMemory, Mode=OneWay}">
+                            <controls:SparklineChart.Stroke>
+                                <SolidColorBrush Color="#3B82F6" />
+                            </controls:SparklineChart.Stroke>
+                            <controls:SparklineChart.Fill>
+                                <SolidColorBrush Color="#203B82F6" />
+                            </controls:SparklineChart.Fill>
+                        </controls:SparklineChart>
+                    </StackPanel>
+                </Grid>
+
+                <Grid Style="{StaticResource CardStyle}" Padding="0,4,0,4">
+                    <ListView ItemsSource="{x:Bind ViewModel.Items}" SelectionMode="None">
+                        <ListView.HeaderTemplate>
+                            <DataTemplate>
+                                <Grid ColumnSpacing="16" Padding="16,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Style="{StaticResource CaptionTextBlockStyle}" Text="时间" />
+                                    <TextBlock Grid.Column="1" Style="{StaticResource CaptionTextBlockStyle}" Text="上传累计" />
+                                    <TextBlock Grid.Column="2" Style="{StaticResource CaptionTextBlockStyle}" Text="下载累计" />
+                                    <TextBlock Grid.Column="3" Style="{StaticResource CaptionTextBlockStyle}" Text="内存" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.HeaderTemplate>
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="MinHeight" Value="0" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:TrafficBucketViewModel">
+                                <Grid ColumnSpacing="16" Padding="16,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{x:Bind Label}" />
+                                    <TextBlock Grid.Column="1" Style="{StaticResource RateUpBrush}" Text="{x:Bind Up}" />
+                                    <TextBlock Grid.Column="2" Style="{StaticResource RateDownBrush}" Text="{x:Bind Down}" />
+                                    <TextBlock Grid.Column="3"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="{x:Bind Memory}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </StackPanel>
+            </Border>
+        </ScrollViewer>
+    </Grid>
+</Page>

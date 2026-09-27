@@ -1,0 +1,48 @@
+# 构建输出
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+artifacts/
+publish/
+
+# Visual Studio / Rider
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# 诊断 / 日志
+counter.csv
+*.binlog
+*.tlog
+
+# 测试与覆盖率
+[Tt]est[Rr]esult*/
+*.coverage
+*.coveragexml
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+!packages/build/
+
+# 系统
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# 本项目运行时产物（若误落到仓库根）
+/momomi.db
+/core/
+/profiles/

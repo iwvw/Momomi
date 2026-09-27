@@ -1,0 +1,110 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>Momomi</AssemblyName>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <WindowsSdkPackageVersion>10.0.26100.80</WindowsSdkPackageVersion>
+    <LangVersion>preview</LangVersion>
+    <RootNamespace>Momomi.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\AppIcon.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\TrayDefault.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\TrayGreen.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\TrayRed.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\FlagsEmoji.ttf" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <ProjectCapability Include="Msix" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.6.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Momomi.Core\Momomi.Core.csproj" />
+    <ProjectReference Include="..\Momomi.Elevated\Momomi.Elevated.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!-- 将提权宿主可执行文件复制到主程序输出目录，供 TUN 提权时调用。 -->
+  <!-- 路径必须带 $(Platform)：构建时指定 -p:Platform=x64，输出在 bin\x64\Debug 而非 bin\Debug。 -->
+  <Target Name="CopyElevatedHost" AfterTargets="Build">
+    <PropertyGroup>
+      <ElevatedHostOutDir>$(MSBuildThisFileDirectory)..\Momomi.Elevated\bin\$(Platform)\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)</ElevatedHostOutDir>
+      <ElevatedHostOutDirFallback>$(MSBuildThisFileDirectory)..\Momomi.Elevated\bin\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)</ElevatedHostOutDirFallback>
+    </PropertyGroup>
+    <ItemGroup>
+      <ElevatedHostFile Include="$(ElevatedHostOutDir)\Momomi.Elevated.exe" Condition="Exists('$(ElevatedHostOutDir)\Momomi.Elevated.exe')" />
+      <ElevatedHostFile Include="$(ElevatedHostOutDirFallback)\Momomi.Elevated.exe" Condition="!Exists('$(ElevatedHostOutDir)\Momomi.Elevated.exe') AND Exists('$(ElevatedHostOutDirFallback)\Momomi.Elevated.exe')" />
+      <ElevatedHostFile Include="$(ElevatedHostOutDir)\Momomi.Elevated.dll" Condition="Exists('$(ElevatedHostOutDir)\Momomi.Elevated.dll')" />
+      <ElevatedHostFile Include="$(ElevatedHostOutDirFallback)\Momomi.Elevated.dll" Condition="!Exists('$(ElevatedHostOutDir)\Momomi.Elevated.dll') AND Exists('$(ElevatedHostOutDirFallback)\Momomi.Elevated.dll')" />
+      <ElevatedHostFile Include="$(ElevatedHostOutDir)\Momomi.Elevated.deps.json" Condition="Exists('$(ElevatedHostOutDir)\Momomi.Elevated.deps.json')" />
+      <ElevatedHostFile Include="$(ElevatedHostOutDirFallback)\Momomi.Elevated.deps.json" Condition="!Exists('$(ElevatedHostOutDir)\Momomi.Elevated.deps.json') AND Exists('$(ElevatedHostOutDirFallback)\Momomi.Elevated.deps.json')" />
+      <ElevatedHostFile Include="$(ElevatedHostOutDir)\Momomi.Elevated.runtimeconfig.json" Condition="Exists('$(ElevatedHostOutDir)\Momomi.Elevated.runtimeconfig.json')" />
+      <ElevatedHostFile Include="$(ElevatedHostOutDirFallback)\Momomi.Elevated.runtimeconfig.json" Condition="!Exists('$(ElevatedHostOutDir)\Momomi.Elevated.runtimeconfig.json') AND Exists('$(ElevatedHostOutDirFallback)\Momomi.Elevated.runtimeconfig.json')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ElevatedHostFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- WinUI 3 的 XAML 依赖运行时反射，PublishTrimmed=true 会裁掉绑定所需类型，
+         导致启动时 XamlParseException（ItemsRepeater.ItemsSource 绑定失败）。
+         因此必须关闭 trimming，改用下方 RemoveUnusedRuntimeDlls 精简体积。 -->
+    <!-- ReadyToRun 会把程序集预编译进本机代码，包体增加约 49 MB（216→265）。
+         本应用常驻、启动一次即可，权衡后默认关闭。 -->
+    <PublishTrimmed>False</PublishTrimmed>
+    <PublishReadyToRun>False</PublishReadyToRun>
+  </PropertyGroup>
+
+  <!-- 发布后删除本项目运行期完全不使用的运行时组件：Windows ML(onnx/DirectML)、
+       Windows AI、搜索、小组件、WebView2、WinForms 设计器等，约省 55 MB。
+       内核与 geodata 不在此列，由应用首启时按需下载。 -->
+  <Target Name="RemoveUnusedRuntimeDlls" AfterTargets="Publish">
+    <ItemGroup>
+      <UnusedRuntimeDll Include="$(PublishDir)onnxruntime.dll" />
+      <UnusedRuntimeDll Include="$(PublishDir)DirectML.dll" />
+      <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.Search.dll" />
+      <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.Widgets.dll" />
+      <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.AI.MachineLearning.dll" />
+      <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.AI.Text.dll" />
+      <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.AI.Imaging.dll" />
+      <UnusedRuntimeDll Include="$(PublishDir)PerceptiveStreaming.dll" />
+      <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Web.WebView2.Core.dll" />
+      <UnusedRuntimeDll Include="$(PublishDir)System.Windows.Forms.Design.dll" />
+    </ItemGroup>
+    <Delete Files="@(UnusedRuntimeDll)" ContinueOnError="true" />
+    <Message Importance="high" Text="已移除未使用的运行时组件（Windows ML/AI/搜索/小组件/WebView2/WinForms 设计器）。" />
+  </Target>
+</Project>

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="Momomi.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Momomi.App.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="Momomi"
+    mc:Ignorable="d">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TitleBar
+            x:Name="AppTitleBar"
+            Title=""
+            IsBackButtonVisible="False"
+            IsPaneToggleButtonVisible="False">
+            <TitleBar.LeftHeader>
+                <StackPanel Orientation="Horizontal" Spacing="8"
+                            Margin="12,0,0,0"
+                            VerticalAlignment="Center">
+                    <Image Width="18" Height="18" VerticalAlignment="Center"
+                           Source="ms-appx:///Assets/AppIcon.png" />
+                    <TextBlock VerticalAlignment="Center"
+                               FontSize="14" FontWeight="SemiBold"
+                               Text="Momomi" />
+                </StackPanel>
+            </TitleBar.LeftHeader>
+            <TitleBar.RightHeader>
+                <StackPanel Orientation="Horizontal" Spacing="16"
+                            Margin="0,0,8,0"
+                            VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon FontSize="14" VerticalAlignment="Center" Glyph="&#xE774;" />
+                        <TextBlock FontSize="14" VerticalAlignment="Center" Text="代理" />
+                        <ToggleSwitch x:Name="SystemProxySwitch"
+                                      MinWidth="0"
+                                      OnContent="" OffContent=""
+                                      IsOn="{x:Bind ModeSelector.SystemProxyOn, Mode=OneWay}"
+                                      Toggled="SystemProxy_Toggled"
+                                      ToolTipService.ToolTip="系统代理" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon FontSize="14" VerticalAlignment="Center" Glyph="&#xE701;" />
+                        <TextBlock FontSize="14" VerticalAlignment="Center" Text="TUN" />
+                        <ToggleSwitch x:Name="TunSwitch"
+                                      MinWidth="0"
+                                      OnContent="" OffContent=""
+                                      IsOn="{x:Bind ModeSelector.TunOn, Mode=OneWay}"
+                                      Toggled="Tun_Toggled"
+                                      ToolTipService.ToolTip="TUN 模式（需要管理员权限，切换会重启内核）" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <ToggleButton x:Name="ModeRuleButton"
+                                      MinWidth="0" Padding="14,5"
+                                      VerticalAlignment="Center"
+                                      Content="规则"
+                                      Tag="0"
+                                      Click="ModeButton_Click"
+                                      ToolTipService.ToolTip="规则模式：按配置规则分流" />
+                        <ToggleButton x:Name="ModeGlobalButton"
+                                      MinWidth="0" Padding="14,5"
+                                      VerticalAlignment="Center"
+                                      Content="全局"
+                                      Tag="1"
+                                      Click="ModeButton_Click"
+                                      ToolTipService.ToolTip="全局模式：所有流量走代理" />
+                        <ToggleButton x:Name="ModeDirectButton"
+                                      MinWidth="0" Padding="14,5"
+                                      VerticalAlignment="Center"
+                                      Content="直连"
+                                      Tag="2"
+                                      Click="ModeButton_Click"
+                                      ToolTipService.ToolTip="直连模式：所有流量不经过代理" />
+                    </StackPanel>
+                </StackPanel>
+            </TitleBar.RightHeader>
+        </TitleBar>
+
+        <NavigationView
+            x:Name="NavView"
+            Grid.Row="1"
+            Background="Transparent"
+            IsBackButtonVisible="Collapsed"
+            IsPaneToggleButtonVisible="True"
+            IsSettingsVisible="True"
+            OpenPaneLength="200"
+            PaneOpened="NavView_PaneChanged"
+            PaneClosed="NavView_PaneChanged"
+            SelectionChanged="NavView_SelectionChanged">
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="概览" IsSelected="True" Tag="dashboard">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE80F;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="代理" Tag="proxies">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE968;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="订阅" Tag="profiles">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8B7;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="连接" Tag="connections">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE704;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="规则" Tag="rules">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8A5;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="流量" Tag="traffic">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE9D2;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="日志" Tag="logs">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE7C3;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
+            <Frame x:Name="NavFrame">
+                <Frame.ContentTransitions>
+                    <TransitionCollection>
+                        <NavigationThemeTransition />
+                    </TransitionCollection>
+                </Frame.ContentTransitions>
+            </Frame>
+        </NavigationView>
+
+        <controls:PaneSplitter x:Name="PaneSplitter"
+                               Grid.Row="1"
+                               Width="6"
+                               Margin="200,0,0,0"
+                               HorizontalAlignment="Left"
+                               Background="Transparent"
+                               DragStarted="PaneSplitter_DragStarted"
+                               Dragged="PaneSplitter_Dragged"
+                               DragCompleted="PaneSplitter_DragCompleted" />
+    </Grid>
+</Window>

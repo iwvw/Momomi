@@ -1,0 +1,193 @@
+using Microsoft.UI.Xaml;
+using Momomi.Core.Services;
+
+namespace Momomi.App;
+
+public partial class App : Application
+{
+    private Window? _window;
+
+    public static MainWindow? Main { get; private set; }
+
+    private static readonly string LogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Momomi", "app-crash.log");
+
+    public App()
+    {
+        InitializeComponent();
+        UnhandledException += (_, e) => WriteLog($"UnhandledException: {e.Exception}");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => WriteLog($"AppDomain: {e.ExceptionObject}");
+        TaskScheduler.UnobservedTaskException += (_, e) => WriteLog($"UnobservedTask: {e.Exception}");
+    }
+
+    public static void WriteLog(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
+            File.AppendAllText(LogPath, $"[{DateTime.Now:O}] {message}{Environment.NewLine}");
+        }
+        catch
+        {
+        }
+    }
+
+    public static void ApplyTheme(string theme)
+    {
+        // Application.RequestedTheme 只能在窗口创建前设置，运行时赋值会抛异常，因此必须保护。
+        try
+        {
+            Current.RequestedTheme = theme switch
+            {
+                "dark" => ApplicationTheme.Dark,
+                "light" => ApplicationTheme.Light,
+                _ => Current.RequestedTheme,
+            };
+        }
+        catch
+        {
+        }
+
+        CurrentTheme = theme;
+
+        // 运行时切换主题靠根元素的 RequestedTheme，它会向下传播到所有子控件。
+        if (Main?.Content is FrameworkElement root)
+        {
+            root.RequestedTheme = theme switch
+            {
+                "dark" => ElementTheme.Dark,
+                "light" => ElementTheme.Light,
+                _ => ElementTheme.Default,
+            };
+        }
+
+        Main?.ApplyThemeToChrome(theme);
+        Main?.ApplyMiniPanelTheme(theme);
+    }
+
+    public static string CurrentTheme { get; private set; } = "default";
+
+    protected override async void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        try
+        {
+            await AppHost.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"MomomiHost 初始化失败：{ex}");
+        }
+
+        _window = new MainWindow();
+        Main = (MainWindow)_window;
+
+        // 静默启动（开机自启 + 该开关打开）时不显示主窗口，最小化到托盘。
+        var silent = false;
+        try
+        {
+            var launchArgs = Environment.GetCommandLineArgs();
+            var launchedByStartup = launchArgs.Any(a => string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
+            if (launchedByStartup)
+                silent = await AppHost.Host.Settings.GetBoolAsync("ui.silentStart").ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+
+        if (silent) Main.HideToTray();
+        else _window.Activate();
+
+        _ = ApplyThemeFromSettingsAsync();
+        _ = AutoStartCoreAsync();
+        _ = NavigateFromCommandLineAsync();
+    }
+
+    private static async Task NavigateFromCommandLineAsync()
+    {
+        try
+        {
+            var args = Environment.GetCommandLineArgs();
+            string? tag = null;
+            var mini = false;
+            for (var i = 0; i < args.Length - 1; i++)
+            {
+                if (string.Equals(args[i], "--page", StringComparison.OrdinalIgnoreCase))
+                {
+                    tag = args[i + 1];
+                    break;
+                }
+            }
+
+            foreach (var arg in args)
+            {
+                if (string.Equals(arg, "--mini", StringComparison.OrdinalIgnoreCase))
+                    mini = true;
+            }
+
+            if (mini)
+            {
+                await Task.Delay(1200);
+                Main?.ShowMiniPanel();
+                return;
+            }
+
+            if (string.IsNullOrEmpty(tag)) return;
+
+            // 等待窗口与 NavigationView 完成加载。
+            await Task.Delay(600);
+            Main?.NavigateToTag(tag);
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"处理 --page 参数失败：{ex}");
+        }
+    }
+
+    private static async Task ApplyThemeFromSettingsAsync()
+    {
+        try
+        {
+            var theme = await AppHost.Host.Settings.GetAsync("theme").ConfigureAwait(false) ?? "default";
+            ApplyTheme(theme);
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"应用主题失败：{ex}");
+        }
+    }
+
+    private static async Task AutoStartCoreAsync()
+    {
+        try
+        {
+            var host = AppHost.Host;
+            var autoStart = await host.Settings.GetBoolAsync("core.autoStart", true).ConfigureAwait(false);
+            if (!autoStart) return;
+            await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+
+            // 启动时若开启自动更新订阅，先刷新当前订阅再应用。
+            try
+            {
+                var autoUpdate = await host.Settings.GetBoolAsync("profile.autoUpdate", true).ConfigureAwait(false);
+                if (autoUpdate)
+                {
+                    var active = await host.Profiles.GetActiveAsync().ConfigureAwait(false);
+                    if (active is { Kind: "url" })
+                        await host.Profiles.RefreshAsync(active.Id).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+            }
+
+            // 先应用当前订阅生成运行时配置，再启动内核。
+            await host.ApplyActiveProfileAsync().ConfigureAwait(false);
+            await host.Core.StartAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"自动启动内核失败：{ex}");
+        }
+    }
+}

@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Momomi.App.Pages.ProxiesPage"
+    NavigationCacheMode="Required"
+    x:Name="PageRoot"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Momomi.App.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:Momomi.App.ViewModels"
+    mc:Ignorable="d">
+
+    <Grid RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <controls:PageHeader Grid.Row="0" MaxWidth="1064" Margin="36,24,36,0"
+                             Title="代理组与节点"
+                             Subtitle="{x:Bind ViewModel.StatusText, Mode=OneWay}">
+            <controls:PageHeader.Actions>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ComboBox Width="150"
+                              VerticalAlignment="Center"
+                              SelectedIndex="{x:Bind ViewModel.SortIndex, Mode=TwoWay}">
+                        <ComboBoxItem Content="默认顺序" />
+                        <ComboBoxItem Content="按延迟排序" />
+                        <ComboBoxItem Content="按名称排序" />
+                    </ComboBox>
+                    <Button VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.TestAllCommand}" Content="全部测速" />
+                    <Button VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.RefreshCommand}" Content="刷新" />
+                </StackPanel>
+            </controls:PageHeader.Actions>
+        </controls:PageHeader>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                      Padding="36,0,36,0">
+            <Border>
+            <ItemsControl ItemsSource="{x:Bind ViewModel.Groups}" MaxWidth="{StaticResource PageContentMaxWidth}" Margin="0,0,0,24">
+                <!-- 展开/收起时其余代理组平滑移位，而不是瞬间跳位 -->
+                <ItemsControl.ItemContainerTransitions>
+                    <TransitionCollection>
+                        <RepositionThemeTransition />
+                        <EntranceThemeTransition />
+                    </TransitionCollection>
+                </ItemsControl.ItemContainerTransitions>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ProxyGroupViewModel">
+                        <Expander HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Stretch"
+                                  Margin="0,0,0,12"
+                                  Padding="12,0,12,12"
+                                  IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}">
+                            <Expander.Header>
+                                <Grid Padding="0,8,0,8" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- 组名放大，当前节点紧随其后同行；整体在头部垂直居中，内部文字基线对齐 -->
+                                    <StackPanel Grid.Column="0"
+                                                Orientation="Horizontal"
+                                                Spacing="10"
+                                                VerticalAlignment="Center">
+                                        <TextBlock FontSize="18" FontWeight="SemiBold"
+                                                   FontFamily="{StaticResource NodeNameFontFamily}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   TextLineBounds="TrimToBaseline"
+                                                   VerticalAlignment="Bottom"
+                                                   Text="{x:Bind Name}" />
+                                        <TextBlock FontSize="13"
+                                                   VerticalAlignment="Bottom"
+                                                   FontFamily="{StaticResource NodeNameFontFamily}"
+                                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   TextLineBounds="TrimToBaseline"
+                                                   Text="{x:Bind NowText, Mode=OneWay}" />
+                                    </StackPanel>
+
+                                    <!-- 测速区固定宽度，避免切换进度环/图标时组名横向移位 -->
+                                    <Grid Grid.Column="1" Width="32" Height="32"
+                                          VerticalAlignment="Center">
+                                        <ProgressRing Width="18" Height="18"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                      IsActive="{x:Bind IsBusy, Mode=OneWay}"
+                                                      Visibility="{x:Bind IsBusy, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                        <Button Style="{StaticResource IconButtonStyle}"
+                                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                Command="{x:Bind TestCommand}" ToolTipService.ToolTip="测速"
+                                                Visibility="{x:Bind IsBusy, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
+                                            <FontIcon FontSize="14" Glyph="&#xE9D9;" />
+                                        </Button>
+                                    </Grid>
+                                </Grid>
+                            </Expander.Header>
+
+                            <ItemsRepeater Margin="0,8,0,0"
+                                           ItemsSource="{x:Bind Nodes}">
+                                <ItemsRepeater.Layout>
+                                    <UniformGridLayout MinItemWidth="240"
+                                                       MinItemHeight="40"
+                                                       MinColumnSpacing="8"
+                                                       MinRowSpacing="8"
+                                                       ItemsStretch="Fill" />
+                                </ItemsRepeater.Layout>
+                                <ItemsRepeater.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:ProxyItemViewModel">
+                                        <Grid>
+                                            <!-- 底层：默认主题描边 + 选中态填充。
+                                                 用 ControlStrokeColorDefaultBrush：暗色下是浅色描边，浅色下是深色描边 -->
+                                            <Grid CornerRadius="6"
+                                                    BorderThickness="1"
+                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                                    Background="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedToBrush}}" />
+                                            <!-- 中层：点击选节点（自身无边框，避免覆盖底层描边） -->
+                                            <Button Style="{StaticResource NodeButtonStyle}"
+                                                    AutomationProperties.Name="{x:Bind Name}"
+                                                    Click="Node_Click"
+                                                    Tag="{x:Bind}">
+                                                <Button.Resources>
+                                                    <ResourceDictionary>
+                                                        <ResourceDictionary.ThemeDictionaries>
+                                                            <ResourceDictionary x:Key="Default">
+                                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#1AFFFFFF" />
+                                                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#26FFFFFF" />
+                                                            </ResourceDictionary>
+                                                            <ResourceDictionary x:Key="Dark">
+                                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#1AFFFFFF" />
+                                                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#26FFFFFF" />
+                                                            </ResourceDictionary>
+                                                            <ResourceDictionary x:Key="Light">
+                                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0F000000" />
+                                                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#1A000000" />
+                                                            </ResourceDictionary>
+                                                        </ResourceDictionary.ThemeDictionaries>
+                                                    </ResourceDictionary>
+                                                </Button.Resources>
+                                                <Grid ColumnSpacing="8">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                        <TextBlock VerticalAlignment="Center"
+                                                                   FontSize="18"
+                                                                   FontFamily="{StaticResource NodeNameFontFamily}"
+                                                                   Text="{x:Bind IconText}" />
+                                                        <TextBlock VerticalAlignment="Center"
+                                                                   FontSize="15"
+                                                                   FontFamily="{StaticResource NodeNameFontFamily}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   Text="{x:Bind DisplayName}" />
+                                                    </StackPanel>
+                                                    <!-- 延迟即测速：测速中显示旋转环，完成后显示延迟数字并可点击重测 -->
+                                                    <Grid Grid.Column="1"
+                                                          MinWidth="56"
+                                                          VerticalAlignment="Center"
+                                                          Tag="{x:Bind}"
+                                                          ToolTipService.ToolTip="点击测速">
+                                                        <ProgressRing Width="16" Height="16"
+                                                                      HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                                      IsActive="{x:Bind IsTesting, Mode=OneWay}"
+                                                                      Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                                        <Button Style="{StaticResource DelayButtonStyle}"
+                                                                HorizontalAlignment="Right"
+                                                                Content="{x:Bind DelayText, Mode=OneWay}"
+                                                                Foreground="{x:Bind DelayKey, Mode=OneWay, Converter={StaticResource DelayToBrush}}"
+                                                                Tag="{x:Bind}"
+                                                                Click="NodeTest_Click"
+                                                                Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
+                                                    </Grid>
+                                                </Grid>
+                                            </Button>
+                                            <!-- 顶层：选中态强调色描边，置于最上；未选中透明，不参与命中测试 -->
+                                            <Grid CornerRadius="6"
+                                                    BorderThickness="1"
+                                                    IsHitTestVisible="False"
+                                                    Background="Transparent"
+                                                    BorderBrush="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedBorderBrush}}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsRepeater.ItemTemplate>
+                            </ItemsRepeater>
+                        </Expander>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            </Border>
+        </ScrollViewer>
+    </Grid>
+</Page>

@@ -1,0 +1,194 @@
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Navigation;
+using Momomi.App.ViewModels;
+
+namespace Momomi.App.Pages;
+
+public sealed partial class SettingsPage : Page
+{
+    public SettingsViewModel ViewModel { get; }
+    private bool _syncing;
+    private bool _attached;
+
+    public SettingsPage()
+    {
+        ViewModel = new SettingsViewModel(global::Momomi.App.AppHost.Host);
+        InitializeComponent();
+    }
+
+    protected override async void OnNavigatedTo(NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        Attach();
+        await ReloadAsync();
+    }
+
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        base.OnNavigatedFrom(e);
+        Detach();
+    }
+
+    private void Attach()
+    {
+        if (_attached) return;
+        _attached = true;
+        // 其它界面（标题栏、迷你面板）改动开关或内核状态时，设置页同步刷新。
+        AppSignals.SwitchesChanged += OnExternalChange;
+        AppHost.Host.Core.StateChanged += OnCoreStateChanged;
+    }
+
+    private void Detach()
+    {
+        if (!_attached) return;
+        _attached = false;
+        AppSignals.SwitchesChanged -= OnExternalChange;
+        AppHost.Host.Core.StateChanged -= OnCoreStateChanged;
+    }
+
+    private void OnExternalChange(object? sender, EventArgs e) => _ = ReloadAsync();
+
+    private void OnCoreStateChanged(object? sender, Momomi.Core.Services.CoreStateChanged e) => _ = ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        await ViewModel.LoadAsync();
+
+        _syncing = true;
+        try
+        {
+            ThemeBox.SelectedIndex = ViewModel.Theme switch
+            {
+                "light" => 1,
+                "dark" => 2,
+                _ => 0,
+            };
+            LogLevelBox.SelectedIndex = ViewModel.LogLevel switch
+            {
+                "silent" => 0,
+                "error" => 1,
+                "warning" => 2,
+                "debug" => 4,
+                _ => 3,
+            };
+            TunStackBox.SelectedIndex = ViewModel.TunStack switch
+            {
+                "gvisor" => 1,
+                "system" => 2,
+                _ => 0,
+            };
+            var proxyIndex = ViewModel.GithubProxyIndex;
+            GithubProxyBox.SelectedIndex = proxyIndex >= 0 && proxyIndex < SettingsViewModel.GithubProxyBuiltins.Length
+                ? proxyIndex
+                : SettingsViewModel.GithubProxyBuiltins.Length;
+            GithubProxyCustomBox.Visibility = GithubProxyBox.SelectedIndex == SettingsViewModel.GithubProxyBuiltins.Length
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        finally
+        {
+            _syncing = false;
+        }
+    }
+
+    private void Theme_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing) return;
+        ViewModel.Theme = ThemeBox.SelectedIndex switch
+        {
+            1 => "light",
+            2 => "dark",
+            _ => "default",
+        };
+    }
+
+    private void LogLevel_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing) return;
+        ViewModel.LogLevel = LogLevelBox.SelectedIndex switch
+        {
+            0 => "silent",
+            1 => "error",
+            2 => "warning",
+            4 => "debug",
+            _ => "info",
+        };
+    }
+
+    private void TunStack_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing) return;
+        ViewModel.TunStack = TunStackBox.SelectedIndex switch
+        {
+            1 => "gvisor",
+            2 => "system",
+            _ => "mixed",
+        };
+    }
+
+    private void GithubProxy_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing) return;
+        ViewModel.GithubProxyIndex = GithubProxyBox.SelectedIndex;
+        GithubProxyCustomBox.Visibility = GithubProxyBox.SelectedIndex == SettingsViewModel.GithubProxyBuiltins.Length
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    /// <summary>文本框失焦时提交。</summary>
+    private void TextField_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox box && box.Tag is string field) CommitTextField(field, box.Text);
+    }
+
+    /// <summary>回车提交并把焦点移出输入框（触发失焦，给出明确的保存反馈）。</summary>
+    private void TextField_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != Windows.System.VirtualKey.Enter) return;
+        if (sender is not TextBox box) return;
+        if (box.Tag is string field) CommitTextField(field, box.Text);
+        e.Handled = true;
+        // 把焦点交给根容器，结束编辑（WinUI Desktop 不能用无 SearchRoot 的 TryMoveFocus）。
+        RootGrid.Focus(FocusState.Programmatic);
+    }
+
+    /// <summary>点击页面空白处时结束输入框编辑。</summary>
+    private void Root_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (FocusManager.GetFocusedElement(XamlRoot) is not TextBox) return;
+        // 点击源若在某个输入框内，保持其焦点，不要移走。
+        if (IsWithinTextBox(e.OriginalSource as DependencyObject)) return;
+        RootGrid.Focus(FocusState.Programmatic);
+    }
+
+    private static bool IsWithinTextBox(DependencyObject? element)
+    {
+        while (element is not null)
+        {
+            if (element is TextBox) return true;
+            element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element);
+        }
+        return false;
+    }
+
+    private void CommitTextField(string field, string text)
+    {
+        switch (field)
+        {
+            case "MixedPort": ViewModel.MixedPort = text; break;
+            case "ControllerPort": ViewModel.ControllerPort = text; break;
+            case "DelayTestUrl": ViewModel.DelayTestUrl = text; break;
+            case "DelayTestTimeout": ViewModel.DelayTestTimeout = text; break;
+            case "DelayTestConcurrency": ViewModel.DelayTestConcurrency = text; break;
+            case "SubscriptionUserAgent": ViewModel.SubscriptionUserAgent = text; break;
+            case "SubscriptionTimeout": ViewModel.SubscriptionTimeout = text; break;
+            case "GithubProxyCustom": ViewModel.GithubProxyCustom = text; break;
+            case "AutoQuitWithoutCoreDelay": ViewModel.AutoQuitWithoutCoreDelay = int.TryParse(text, out var d) ? d : ViewModel.AutoQuitWithoutCoreDelay; break;
+            case "TunMtu": ViewModel.TunMtu = text; break;
+            case "TunDnsHijack": ViewModel.TunDnsHijack = text; break;
+            case "TunRouteExcludeAddress": ViewModel.TunRouteExcludeAddress = text; break;
+        }
+    }
+}
