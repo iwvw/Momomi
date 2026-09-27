@@ -22,18 +22,34 @@ env:
 
 jobs:
   build:
-    name: Build (${{ matrix.arch }})
+    name: Build (${{ matrix.arch }} / ${{ matrix.variant }})
     runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
         include:
+          # 精简版：不含内核与 geodata，首次启动联网下载（体积小）
           - arch: x64
             rid: win-x64
             platform: x64
+            variant: slim
+            karch: amd64
           - arch: arm64
             rid: win-arm64
             platform: ARM64
+            variant: slim
+            karch: arm64
+          # 完整版：内置内核与 geodata，开箱即用（体积大）
+          - arch: x64
+            rid: win-x64
+            platform: x64
+            variant: full
+            karch: amd64
+          - arch: arm64
+            rid: win-arm64
+            platform: ARM64
+            variant: full
+            karch: arm64
 
     steps:
       - name: Checkout
@@ -67,19 +83,25 @@ jobs:
             -p:Version=${{ steps.ver.outputs.version }} `
             -o publish
 
+      - name: Fetch bundled kernel & geodata
+        if: matrix.variant == 'full'
+        shell: pwsh
+        run: |
+          pwsh -File build/fetch-bundle.ps1 -DestDir "publish/bundled" -Arch ${{ matrix.karch }}
+
       - name: Package portable zip
         shell: pwsh
         run: |
           $ver = "${{ steps.ver.outputs.version }}"
-          $zip = "Momomi-$ver-${{ matrix.arch }}-portable.zip"
+          $suffix = if ("${{ matrix.variant }}" -eq "full") { "full" } else { "portable" }
+          $zip = "Momomi-$ver-${{ matrix.arch }}-$suffix.zip"
           Compress-Archive -Path "publish/*" -DestinationPath $zip -CompressionLevel Optimal
           Write-Host "Created $zip"
 
       - name: Install Inno Setup
         if: matrix.arch == 'x64'
         shell: pwsh
-        run: |
-          choco install innosetup --no-progress -y
+        run: choco install innosetup --no-progress -y
 
       - name: Fetch Simplified Chinese language file
         if: matrix.arch == 'x64'
@@ -88,7 +110,6 @@ jobs:
           $dir = "build\languages"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           $path = "Files/Languages/ChineseSimplified.isl"
-          # 依次尝试直连与常用加速源（CI runner 在海外，直连通常可用）。
           $urls = @(
             "https://raw.githubusercontent.com/jrsoftware/issrc/main/$path",
             "https://gh-proxy.org/https://raw.githubusercontent.com/jrsoftware/issrc/main/$path",
@@ -109,9 +130,11 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.ver.outputs.version }}"
+          $suffix = if ("${{ matrix.variant }}" -eq "full") { "-full" } else { "" }
           $isl = "${{ github.workspace }}\build\languages\ChineseSimplified.isl"
           $args = @(
             "/DAppVersion=$ver",
+            "/DNameSuffix=$suffix",
             "/DSourceDir=${{ github.workspace }}\publish",
             "/DOutputDir=${{ github.workspace }}",
             "build\installer.iss"
@@ -123,7 +146,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Momomi-${{ matrix.arch }}
+          name: Momomi-${{ matrix.arch }}-${{ matrix.variant }}
           path: |
             Momomi-*.zip
             Momomi-*-setup.exe

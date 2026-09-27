@@ -65,6 +65,15 @@ public sealed class MomomiHost : IDisposable
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         await Database.InitializeAsync().ConfigureAwait(false);
+        // 内置版：首次启动从安装目录的 bundled 释放内核/wintun/geodata（已存在则跳过）。
+        try
+        {
+            var bundle = Path.Combine(AppContext.BaseDirectory, "bundled");
+            if (Directory.Exists(bundle)) KernelUpdate.ProvisionFromBundle(bundle);
+        }
+        catch
+        {
+        }
         await Core.InitializeAsync(ct).ConfigureAwait(false);
         // 载入手动下载代理端口（用于内核未运行时下载内核/geodata）。
         DownloadProxy.SetManualPort(await Settings.GetIntAsync("core.downloadProxyPort", 0).ConfigureAwait(false));

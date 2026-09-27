@@ -46,3 +46,6 @@ $RECYCLE.BIN/
 /momomi.db
 /core/
 /profiles/
+
+# 内置资源（由 CI 下载，勿提交）
+bundled/

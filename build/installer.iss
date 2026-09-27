@@ -11,6 +11,9 @@
 #ifndef OutputDir
   #define OutputDir "."
 #endif
+#ifndef NameSuffix
+  #define NameSuffix ""
+#endif
 
 [Setup]
 AppId={{8F3A9C21-7B4E-4D5A-9C1F-2E6B8D4A7F31}
@@ -25,7 +28,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#OutputDir}
-OutputBaseFilename=Momomi-{#AppVersion}-x64-setup
+OutputBaseFilename=Momomi-{#AppVersion}-x64{#NameSuffix}-setup
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

@@ -28,6 +28,9 @@ public interface IKernelUpdateService
     Task<bool> DownloadAndInstallAsync(string tag, IProgress<double>? progress = null, CancellationToken ct = default);
     Task<bool> EnsureWintunAsync(CancellationToken ct = default);
     Task<bool> EnsureGeodataAsync(IProgress<double>? progress = null, CancellationToken ct = default);
+
+    /// <summary>从内置资源目录释放内核/wintun/geodata（缺失才复制）。返回释放的文件数。</summary>
+    int ProvisionFromBundle(string bundleDirectory);
 }
 
 public sealed class KernelUpdateService : IKernelUpdateService
@@ -353,6 +356,55 @@ public sealed class KernelUpdateService : IKernelUpdateService
         await using var target = File.Create(destination);
         await source.CopyToAsync(target, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// 从内置资源目录释放内核/wintun/geodata 到数据目录（目标已存在则跳过）。
+    /// 用于"内置内核与地理数据库"的发行版，避免首次启动联网下载。
+    /// </summary>
+    public int ProvisionFromBundle(string bundleDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(bundleDirectory) || !Directory.Exists(bundleDirectory)) return 0;
+
+        var copied = 0;
+        void CopyIfMissing(string sourceName, string targetPath)
+        {
+            try
+            {
+                var src = Path.Combine(bundleDirectory, sourceName);
+                if (!File.Exists(src)) return;
+                if (File.Exists(targetPath)) return;
+                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                File.Copy(src, targetPath, overwrite: false);
+                copied++;
+            }
+            catch
+            {
+            }
+        }
+
+        // 内核与 wintun
+        CopyIfMissing("mihomo.exe", BinaryPath);
+        CopyIfMissing("wintun.dll", WintunPath);
+
+        // 内核版本标记（若内置包提供）
+        var versionSrc = Path.Combine(bundleDirectory, "version.txt");
+        var versionDst = Path.Combine(_coreDirectory, "version.txt");
+        if (File.Exists(versionSrc) && !File.Exists(versionDst))
+        {
+            try { File.Copy(versionSrc, versionDst, overwrite: false); copied++; } catch { }
+        }
+
+        // 地理数据库
+        foreach (var name in GeodataFileNames)
+            CopyIfMissing(name, Path.Combine(_coreDirectory, name));
+
+        return copied;
+    }
+
+    private static readonly string[] GeodataFileNames =
+    {
+        "geoip.metadb", "geosite.dat", "geoip.dat", "ASN.mmdb", "country.mmdb",
+    };
 
     public async Task<bool> EnsureGeodataAsync(IProgress<double>? progress = null, CancellationToken ct = default)
     {
