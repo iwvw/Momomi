@@ -174,7 +174,7 @@ public sealed partial class ModeSelectorViewModel : ObservableObject
         {
             if (enabled)
             {
-                var port = await _host.Settings.GetIntAsync("core.mixedPort", 7897).ConfigureAwait(false);
+                var port = await _host.Settings.GetIntAsync("core.mixedPort", 7890).ConfigureAwait(false);
                 _host.SystemProxy.Enable($"127.0.0.1:{port}", ProxyBypass);
             }
             else

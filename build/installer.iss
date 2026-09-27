@@ -58,15 +58,16 @@ Name: "{group}\{#AppName}"; Filename: "{app}\Momomi.exe"
 Name: "{group}\卸载 {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\Momomi.exe"; Tasks: desktopicon
 
-[Registry]
-; 开机自启（写当前用户 Run 键，与本程序内置的自启逻辑一致）
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; \
-  ValueName: "Momomi"; ValueData: """{app}\Momomi.exe"" --minimized"; \
-  Flags: uninsdeletevalue; Tasks: startupicon
-
 [Run]
+; 主程序需管理员权限：自启改用计划任务（登录时以最高权限静默运行，不弹 UAC）。
+Filename: "schtasks.exe"; Parameters: "/Create /TN ""Momomi"" /TR ""\""{app}\Momomi.exe\"" --minimized"" /SC ONLOGON /RL HIGHEST /F"; \
+  Flags: runhidden; Tasks: startupicon; StatusMsg: "正在创建开机自启计划任务…"
+Filename: "schtasks.exe"; Parameters: "/Delete /TN ""Momomi"" /F"; Flags: runhidden; Tasks: not startupicon
 Filename: "{app}\Momomi.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; \
   Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+Filename: "schtasks.exe"; Parameters: "/Delete /TN ""Momomi"" /F"; Flags: runhidden; RunOnceId: "DeleteStartupTask"
 
 [UninstallDelete]
 ; 卸载时仅清理程序目录（用户数据在 %LocalAppData%\Momomi，保留以免误删订阅与配置）

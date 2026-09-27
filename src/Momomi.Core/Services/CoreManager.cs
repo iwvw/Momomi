@@ -108,7 +108,7 @@ public sealed class CoreManager : ICoreManager
         if (!File.Exists(Paths.RuntimeConfigPath))
         {
             var options = new RuntimeYamlOptions(
-                MixedPort: 7897,
+                MixedPort: 7890,
                 ControllerPort: Paths.ControllerPort,
                 Secret: Paths.Secret,
                 Mode: "rule",
@@ -150,10 +150,20 @@ public sealed class CoreManager : ICoreManager
             var started = false;
             if (_tunRequested)
             {
-                started = await StartElevatedAsync(ct).ConfigureAwait(false);
-                IsElevatedMode = started;
-                if (!started)
-                    Log($"[CoreManager] 提权启动失败，回退普通模式（TUN 不会生效）：{_lastError}");
+                if (MomomiHost.IsRunningAsAdmin())
+                {
+                    // 主程序已是管理员：内核作为子进程直接启动，继承管理员令牌，TUN 生效。
+                    started = await _process.StartAsync(options, ct).ConfigureAwait(false);
+                    IsElevatedMode = false;
+                }
+                else
+                {
+                    // 未以管理员运行：尝试经由提权宿主启动（兼容旧路径）。
+                    started = await StartElevatedAsync(ct).ConfigureAwait(false);
+                    IsElevatedMode = started;
+                    if (!started)
+                        Log($"[CoreManager] 提权启动失败，回退普通模式（TUN 不会生效）：{_lastError}");
+                }
             }
 
             if (!started)
@@ -179,15 +189,16 @@ public sealed class CoreManager : ICoreManager
             }
 
             _version = version;
-            // TUN 请求了但没走提权时，明确告警，避免用户误以为 TUN 已生效。
-            var portWarning = _tunRequested && !IsElevatedMode
-                ? $"TUN 模式启动失败，已回退普通代理：{_lastError}"
+            // 仅在“请求了 TUN 但没有管理员权限”时告警；主程序本身是管理员时 TUN 已生效，不告警。
+            var tunIneffective = _tunRequested && !IsElevatedMode && !MomomiHost.IsRunningAsAdmin();
+            var portWarning = tunIneffective
+                ? $"TUN 模式启动失败，已回退为普通代理（TUN 未生效）。原因：{_lastError}"
                 : await CheckPortConflictAsync(ct).ConfigureAwait(false);
             SetState(CoreState.Running, version, portWarning);
             RestoreOwnSystemProxy();
             StartStreams();
             // 内核已就绪，后续下载（内核/geodata/订阅）经本机混合端口，借力自身代理。
-            DownloadProxy.SetCorePort(await _settings.GetIntAsync("core.mixedPort", 7897).ConfigureAwait(false));
+            DownloadProxy.SetCorePort(await _settings.GetIntAsync("core.mixedPort", 7890).ConfigureAwait(false));
             return true;
         }
         catch (Exception ex)
@@ -213,7 +224,8 @@ public sealed class CoreManager : ICoreManager
         {
             if (!_elevated.LaunchElevatedHost())
             {
-                _lastError = "提权宿主启动失败（可能拒绝了 UAC 授权）";
+                _lastError = _elevated.LaunchError
+                    ?? "提权宿主启动失败（可能拒绝了 UAC 授权）";
                 return false;
             }
             await Task.Delay(1200, ct).ConfigureAwait(false);
@@ -401,7 +413,7 @@ public sealed class CoreManager : ICoreManager
     {
         try
         {
-            var port = _settings.GetIntAsync("core.mixedPort", 7897).GetAwaiter().GetResult();
+            var port = _settings.GetIntAsync("core.mixedPort", 7890).GetAwaiter().GetResult();
             var expected = $"127.0.0.1:{port}";
             if (_systemProxy.IsEnabled()
                 && string.Equals(_systemProxy.CurrentServer(), expected, StringComparison.OrdinalIgnoreCase))
@@ -422,7 +434,7 @@ public sealed class CoreManager : ICoreManager
         _restoreSystemProxyAfterStart = false;
         try
         {
-            var port = _settings.GetIntAsync("core.mixedPort", 7897).GetAwaiter().GetResult();
+            var port = _settings.GetIntAsync("core.mixedPort", 7890).GetAwaiter().GetResult();
             _systemProxy.Enable($"127.0.0.1:{port}", "localhost;127.*;10.*;172.16.*;192.168.*");
         }
         catch

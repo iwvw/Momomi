@@ -8,6 +8,8 @@ namespace Momomi.Core.Services;
 public interface IElevatedClient
 {
     bool IsElevatedHostRunning { get; }
+    /// <summary>最近一次提权启动失败的原因（供上层提示用户）。</summary>
+    string? LaunchError { get; }
     Task<ElevatedResponse> StartCoreAsync(string binaryPath, string workingDirectory, string configPath, string? secret, CancellationToken ct = default);
     Task<ElevatedResponse> StopCoreAsync(CancellationToken ct = default);
     Task<ElevatedResponse> GetStatusAsync(CancellationToken ct = default);
@@ -21,6 +23,9 @@ public sealed class ElevatedClient : IElevatedClient
     private readonly string _hostPath;
     private readonly object _gate = new();
     private Process? _hostProcess;
+    private string? _launchError;
+
+    public string? LaunchError => _launchError;
 
     public ElevatedClient(string hostPath)
     {
@@ -113,6 +118,11 @@ public sealed class ElevatedClient : IElevatedClient
             if (_hostProcess is { HasExited: false }) return true;
             if (!File.Exists(_hostPath)) return false;
 
+            // 优先用 PowerShell Start-Process -Verb RunAs：UAC 被系统设为“不通知”而静默拒绝时，
+            // 能拿到明确错误，且比 .NET Process.Start(runas) 的失败更易捕获。
+            if (TryLaunchViaPowerShell()) return true;
+
+            // 回退到 .NET runas。
             try
             {
                 var psi = new ProcessStartInfo
@@ -128,10 +138,59 @@ public sealed class ElevatedClient : IElevatedClient
                 _hostProcess = Process.Start(psi);
                 return _hostProcess is not null;
             }
-            catch
+            catch (Exception ex)
             {
+                _launchError = ex.Message;
                 return false;
             }
+        }
+    }
+
+    private bool TryLaunchViaPowerShell()
+    {
+        try
+        {
+            var escaped = _hostPath.Replace("'", "''");
+            // -Wait 让 PowerShell 等待提权进程创建；UAC 静默拒绝时 Start-Process 会报错。
+            var command =
+                $"try {{ $p = Start-Process -FilePath '{escaped}' " +
+                $"-ArgumentList '--owner {Environment.ProcessId}' -Verb RunAs -PassThru -WindowStyle Hidden; " +
+                $"if ($p) {{ exit 0 }} else {{ exit 2 }} }} catch {{ Write-Error $_.Exception.Message; exit 1 }}";
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -NonInteractive -Command \"{command.Replace("\"", "\\\"")}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+            };
+
+            using var proc = Process.Start(psi);
+            if (proc is null) return false;
+            if (!proc.WaitForExit(20000))
+            {
+                try { proc.Kill(); } catch { }
+                _launchError = "提权启动超时（UAC 可能未响应）";
+                return false;
+            }
+
+            if (proc.ExitCode == 0)
+            {
+                _launchError = null;
+                return true;
+            }
+
+            var err = proc.StandardError.ReadToEnd().Trim();
+            _launchError = string.IsNullOrEmpty(err)
+                ? "提权被拒绝：系统可能将 UAC 设为“不通知”，请在 Windows 设置中将 UAC 调到至少“仅当应用尝试更改时通知我”。"
+                : err;
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _launchError = ex.Message;
+            return false;
         }
     }
 
@@ -155,7 +214,7 @@ public sealed class ElevatedClient : IElevatedClient
                 ".", ElevatedProtocol.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            timeout.CancelAfter(TimeSpan.FromSeconds(8));
             await pipe.ConnectAsync(timeout.Token).ConfigureAwait(false);
 
             using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, leaveOpen: true) { AutoFlush = true };

@@ -12,15 +12,30 @@ public interface IStartupService
 
 public sealed class StartupService : IStartupService
 {
+    private const string TaskName = "Momomi";
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "Momomi";
+
+    // 主程序以管理员身份运行，注册表 Run 键无法带提权启动，因此自启改用计划任务
+    // （RunLevel=Highest，登录时以最高权限静默运行，不弹 UAC）。
 
     public bool IsEnabled()
     {
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath);
-            return key?.GetValue(ValueName) is string value && !string.IsNullOrEmpty(value);
+            var psi = new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/Query /TN \"{TaskName}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using var proc = Process.Start(psi);
+            if (proc is null) return false;
+            proc.WaitForExit(5000);
+            return proc.ExitCode == 0;
         }
         catch
         {
@@ -32,20 +47,44 @@ public sealed class StartupService : IStartupService
     {
         try
         {
-            using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath);
-            if (key is null) return false;
+            var exe = Process.GetCurrentProcess().MainModule?.FileName;
+            if (string.IsNullOrEmpty(exe))
+                exe = Path.Combine(AppContext.BaseDirectory, "Momomi.exe");
+
             if (enabled)
             {
-                var exe = Process.GetCurrentProcess().MainModule?.FileName;
-                if (string.IsNullOrEmpty(exe))
-                    exe = Path.Combine(AppContext.BaseDirectory, "Momomi.exe");
-                key.SetValue(ValueName, $"\"{exe}\" --minimized");
+                // 先删旧任务，再创建：登录时以最高权限运行（/RL HIGHEST），静默启动。
+                RunSchtasks($"/Delete /TN \"{TaskName}\" /F");
+                var create = $"/Create /TN \"{TaskName}\" /TR \"\\\"{exe}\\\" --minimized\" " +
+                             "/SC ONLOGON /RL HIGHEST /F";
+                return RunSchtasks(create);
             }
-            else
+
+            return RunSchtasks($"/Delete /TN \"{TaskName}\" /F");
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool RunSchtasks(string args)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
             {
-                key.DeleteValue(ValueName, throwOnMissingValue: false);
-            }
-            return true;
+                FileName = "schtasks.exe",
+                Arguments = args,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using var proc = Process.Start(psi);
+            if (proc is null) return false;
+            proc.WaitForExit(15000);
+            return proc.ExitCode == 0;
         }
         catch
         {

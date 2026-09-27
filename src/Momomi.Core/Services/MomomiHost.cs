@@ -124,7 +124,7 @@ public sealed class MomomiHost : IDisposable
         var exclude = await GetStringListAsync("core.tunRouteExcludeAddress").ConfigureAwait(false);
 
         return new RuntimeYamlOptions(
-            MixedPort: await Settings.GetIntAsync("core.mixedPort", 7897).ConfigureAwait(false),
+            MixedPort: await Settings.GetIntAsync("core.mixedPort", 7890).ConfigureAwait(false),
             ControllerPort: Core.Paths.ControllerPort,
             Secret: Core.Paths.Secret,
             Mode: await Settings.GetAsync("core.mode").ConfigureAwait(false) ?? "rule",
@@ -156,9 +156,23 @@ public sealed class MomomiHost : IDisposable
         return items.Count > 0 ? items : null;
     }
 
-    public void Dispose()
+    /// <summary>当前进程是否以管理员权限运行（TUN 需要）。</summary>
+    public static bool IsRunningAsAdmin()
     {
-        _profileRefreshTimer.Dispose();
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var principal = new System.Security.Principal.WindowsPrincipal(identity);
+            return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public void Dispose()
+    {        _profileRefreshTimer.Dispose();
         Core.Dispose();
         _recorder.Dispose();
     }

@@ -32,7 +32,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial int BackdropStyle { get; set; }
 
     [ObservableProperty]
-    public partial string MixedPort { get; set; } = "7897";
+    public partial string MixedPort { get; set; } = "7890";
 
     [ObservableProperty]
     public partial string ControllerPort { get; set; } = "9090";
@@ -174,7 +174,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             Theme = await _host.Settings.GetAsync("theme") ?? "default";
             NavigationStyle = await _host.Settings.GetIntAsync("ui.navigationStyle", 0);
             BackdropStyle = await _host.Settings.GetIntAsync("ui.backdropStyle", 0);
-            MixedPort = (await _host.Settings.GetIntAsync("core.mixedPort", 7897)).ToString();
+            MixedPort = (await _host.Settings.GetIntAsync("core.mixedPort", 7890)).ToString();
             ControllerPort = (await _host.Settings.GetIntAsync("core.controllerPort", 9090)).ToString();
             Mode = await _host.Settings.GetAsync("core.mode") ?? "rule";
             LogLevel = await _host.Settings.GetAsync("core.logLevel") ?? "info";
@@ -472,7 +472,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             if (enabled)
             {
-                var port = await _host.Settings.GetIntAsync("core.mixedPort", 7897);
+                var port = await _host.Settings.GetIntAsync("core.mixedPort", 7890);
                 _host.SystemProxy.Enable($"127.0.0.1:{port}", "localhost;127.*;10.*;172.16.*;192.168.*");
                 StatusText = $"系统代理已开启（127.0.0.1:{port}）";
             }

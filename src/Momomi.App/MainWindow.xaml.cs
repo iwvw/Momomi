@@ -421,7 +421,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                var port = host.Settings.GetIntAsync("core.mixedPort", 7897).GetAwaiter().GetResult();
+                var port = host.Settings.GetIntAsync("core.mixedPort", 7890).GetAwaiter().GetResult();
                 host.SystemProxy.Enable($"127.0.0.1:{port}", "localhost;127.*;10.*;172.16.*;192.168.*");
             }
         }
