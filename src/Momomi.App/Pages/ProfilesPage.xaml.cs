@@ -26,7 +26,8 @@ public sealed partial class ProfilesPage : Page
     private void Edit_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement fe || fe.Tag is not ProfileRowViewModel row) return;
-        _ = ShowEditorAsync(row);
+        EditorTabs.SelectedItem = EditorTabs.Items.Count > 0 ? EditorTabs.Items[0] : null;
+        _ = ViewModel.OpenEditorCommand.ExecuteAsync(row);
     }
 
     /// <summary>点击卡片激活对应订阅；已激活或点到按钮时不重复触发。</summary>
@@ -81,6 +82,28 @@ public sealed partial class ProfilesPage : Page
     {
         if (sender is not FrameworkElement fe || fe.Tag is not ProfileRowViewModel row) return;
         _ = ShowInfoEditorAsync(row);
+    }
+
+    private void EditorTabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        ViewModel.EditorTabIndex = sender.Items.IndexOf(sender.SelectedItem);
+    }
+
+    private void SaveEditor_Click(object sender, RoutedEventArgs e)
+    {
+        // x:Bind 的 TextBox.Text 默认失焦才回写，点按钮时不保证已同步，显式再取一次。
+        ViewModel.EditorText = RawEditor.Text;
+        _ = ViewModel.SaveEditorCommand.ExecuteAsync(null);
+    }
+
+    private bool _editorMaximized;
+
+    private void ToggleEditorMaximize_Click(object sender, RoutedEventArgs e)
+    {
+        _editorMaximized = !_editorMaximized;
+        if (EditorPanel is not null)
+            EditorPanel.Margin = _editorMaximized ? new Thickness(0) : new Thickness(40);
+        EditorMaximizeIcon.Glyph = _editorMaximized ? "\uE73F" : "\uE740";
     }
 
     /// <summary>编辑订阅信息：名称、订阅地址等。</summary>
@@ -139,61 +162,6 @@ public sealed partial class ProfilesPage : Page
             ViewModel.StatusText = "订阅信息已保存";
         }
 
-        await ViewModel.LoadAsync();
-    }
-
-    private async Task ShowEditorAsync(ProfileRowViewModel row)
-    {
-        var content = await global::Momomi.App.AppHost.Host.Profiles.ReadContentAsync(row.Id);
-        if (content is null)
-        {
-            ViewModel.StatusText = "无法读取配置内容";
-            return;
-        }
-
-        var editor = new TextBox
-        {
-            Text = content,
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.NoWrap,
-            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
-            FontSize = 12,
-            IsSpellCheckEnabled = false,
-            MinHeight = 380,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        ScrollViewer.SetHorizontalScrollBarVisibility(editor, ScrollBarVisibility.Auto);
-        ScrollViewer.SetVerticalScrollBarVisibility(editor, ScrollBarVisibility.Auto);
-
-        var dialog = new ContentDialog
-        {
-            Title = $"编辑：{row.Name}",
-            Content = editor,
-            PrimaryButtonText = "保存并应用",
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = XamlRoot,
-        };
-
-        var result = await dialog.ShowAsync();
-        if (result != ContentDialogResult.Primary) return;
-
-        var ok = await global::Momomi.App.AppHost.Host.Profiles.SaveContentAsync(row.Id, editor.Text);
-        if (!ok)
-        {
-            ViewModel.StatusText = "保存失败";
-            return;
-        }
-
-        if (row.IsActive)
-        {
-            await global::Momomi.App.AppHost.Host.ApplyActiveProfileAsync();
-            ViewModel.StatusText = "已保存并热重载";
-        }
-        else
-        {
-            ViewModel.StatusText = "已保存";
-        }
         await ViewModel.LoadAsync();
     }
 }

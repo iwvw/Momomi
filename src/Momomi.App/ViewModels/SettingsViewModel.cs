@@ -85,6 +85,34 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial string ElevatedHostStatus { get; set; } = "未运行";
 
     [ObservableProperty]
+    public partial bool AutoCheckAppUpdate { get; set; } = true;
+
+    [ObservableProperty]
+    public partial string AppVersion { get; set; } = "未知";
+
+    [ObservableProperty]
+    public partial string LatestAppVersion { get; set; } = "—";
+
+    [ObservableProperty]
+    public partial bool AppHasUpdate { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsAppBusy { get; set; }
+
+    [ObservableProperty]
+    public partial string AppStatusText { get; set; } = "尚未检查";
+
+    [ObservableProperty]
+    public partial double AppProgress { get; set; }
+
+    [ObservableProperty]
+    public partial bool AppProgressVisible { get; set; }
+
+    partial void OnAppHasUpdateChanged(bool value) => OnPropertyChanged(nameof(UpdateAppButtonText));
+
+    public string UpdateAppButtonText => AppHasUpdate ? "一键更新" : "更新";
+
+    [ObservableProperty]
     public partial bool SilentStart { get; set; }
 
     [ObservableProperty]
@@ -223,6 +251,11 @@ public sealed partial class SettingsViewModel : ObservableObject
             AutoQuitWithoutCoreDelay = await _host.Settings.GetIntAsync("ui.autoQuitWithoutCoreDelay", 30);
             AutoUpdateProfileOnStart = await _host.Settings.GetBoolAsync("profile.autoUpdate", true);
 
+            AutoCheckAppUpdate = await _host.Settings.GetBoolAsync("ui.autoCheckAppUpdate", true);
+            AppVersion = global::Momomi.Core.Services.AppUpdateService.GetCurrentVersion() + (
+                _host.AppUpdate.IsInstalled ? "" : "（便携版）");
+            ApplyCachedAppUpdate();
+
             var (dtUrl, dtTimeout, dtConc) = await DelayTestSettings.ReadAsync(_host.Settings);
             DelayTestUrl = dtUrl;
             DelayTestTimeout = dtTimeout.ToString();
@@ -285,9 +318,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         global::Momomi.App.App.Main?.ApplyBackdropStyle(value);
         StatusText = value switch
         {
-            1 => "背景已切换为亚克力",
+            0 => "背景已切换为亚克力（透出下方窗口）",
+            1 => "背景已切换为 Mica",
             2 => "背景已切换为纯色",
-            _ => "背景已切换为 Mica",
+            _ => "背景材质已更新",
         };
     }
 
@@ -750,5 +784,79 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             StatusText = $"退出提权宿主失败：{ex.Message}";
         }
+    }
+
+    partial void OnAutoCheckAppUpdateChanged(bool value)
+    {
+        if (_loading) return;
+        _ = _host.Settings.SetBoolAsync("ui.autoCheckAppUpdate", value);
+        StatusText = value ? "已开启启动时自动检查更新" : "已关闭启动时自动检查更新";
+    }
+
+    [RelayCommand]
+    private async Task CheckAppAsync()
+    {
+        IsAppBusy = true;
+        AppStatusText = "正在检查更新…";
+        try
+        {
+            var info = await _host.AppUpdate.CheckAsync();
+            ApplyCachedAppUpdate();
+            AppStatusText = info.Error is not null
+                ? $"检查失败：{info.Error}"
+                : info.HasUpdate ? "发现新版本" : "已是最新";
+        }
+        catch (Exception ex)
+        {
+            AppStatusText = $"检查失败：{ex.Message}";
+        }
+        finally
+        {
+            IsAppBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task UpdateAppAsync()
+    {
+        var main = global::Momomi.App.App.Main;
+        if (main is null) return;
+
+        IsAppBusy = true;
+        AppProgress = 0;
+        AppProgressVisible = true;
+        AppStatusText = "正在下载更新…";
+        try
+        {
+            var progress = new Progress<double>(p => AppProgress = p);
+            var info = await _host.AppUpdate.PrepareUpdateAsync(progress);
+            if (info.Error is not null)
+            {
+                AppStatusText = $"更新失败：{info.Error}";
+                return;
+            }
+
+            AppStatusText = "正在应用更新…";
+            // 退出前先停内核/TUN/系统代理，再启动更新脚本并退出；脚本完成后自动重启并拉启内核。
+            global::Momomi.App.App.Main?.ExitForUpdate();
+        }
+        catch (Exception ex)
+        {
+            AppStatusText = $"更新失败：{ex.Message}";
+        }
+        finally
+        {
+            IsAppBusy = false;
+            AppProgressVisible = false;
+        }
+    }
+
+    private void ApplyCachedAppUpdate()
+    {
+        var info = global::Momomi.Core.Services.AppUpdateService.LastResult;
+        if (info is null) return;
+        LatestAppVersion = info.LatestVersion ?? "—";
+        AppHasUpdate = info.HasUpdate;
+        if (info.Error is not null) AppStatusText = $"检查失败：{info.Error}";
     }
 }

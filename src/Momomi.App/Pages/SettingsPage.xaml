@@ -62,8 +62,8 @@
                         </controls:SettingsCard.HeaderIcon>
                         <ComboBox Width="160"
                                   SelectedIndex="{x:Bind ViewModel.BackdropStyle, Mode=TwoWay}">
-                            <ComboBoxItem Content="Mica" />
                             <ComboBoxItem Content="亚克力" />
+                            <ComboBoxItem Content="Mica" />
                             <ComboBoxItem Content="纯色" />
                         </ComboBox>
                     </controls:SettingsCard>
@@ -425,6 +425,55 @@
                             <ComboBoxItem Content="信息" />
                             <ComboBoxItem Content="调试" />
                         </ComboBox>
+                    </controls:SettingsCard>
+                </StackPanel>
+
+                <TextBlock Style="{StaticResource SettingsSectionHeaderTextBlockStyle}"
+                           Text="应用版本" />
+                <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                    <controls:SettingsCard Description="{x:Bind ViewModel.AppStatusText, Mode=OneWay}" Header="当前版本">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE77B;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Text="{x:Bind ViewModel.AppVersion, Mode=OneWay}" />
+                            <ProgressRing Width="16" Height="16"
+                                          IsActive="{x:Bind ViewModel.IsAppBusy, Mode=OneWay}"
+                                          Visibility="{x:Bind ViewModel.IsAppBusy, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                            <Button MinWidth="0" Padding="10,4"
+                                    Command="{x:Bind ViewModel.CheckAppCommand}"
+                                    Content="检查更新" />
+                            <Button MinWidth="0" Padding="10,4"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    Command="{x:Bind ViewModel.UpdateAppCommand}"
+                                    Content="{x:Bind ViewModel.UpdateAppButtonText, Mode=OneWay}" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Description="从 iwvw/Momomi 官方 Release 获取" Header="最新版本">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE895;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <StackPanel Spacing="6" MinWidth="240">
+                            <TextBlock HorizontalAlignment="Right"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Text="{x:Bind ViewModel.LatestAppVersion, Mode=OneWay}" />
+                            <ProgressBar Maximum="100"
+                                         Value="{x:Bind ViewModel.AppProgress, Mode=OneWay}"
+                                         Visibility="{x:Bind ViewModel.AppProgressVisible, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Description="启动后在后台检查 GitHub 发布，发现新版本会在上方提示"
+                                           Header="自动检查更新">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE945;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <ToggleSwitch MinWidth="0"
+                                      OnContent="" OffContent=""
+                                      IsOn="{x:Bind ViewModel.AutoCheckAppUpdate, Mode=TwoWay}" />
                     </controls:SettingsCard>
                 </StackPanel>
 

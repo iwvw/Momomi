@@ -22,8 +22,8 @@
             <!-- 页面内容最大宽度：对齐 Windows 设置的限宽居中范式 -->
             <x:Double x:Key="PageContentMaxWidth">1064</x:Double>
 
-            <!-- 缩小标题栏右侧最小拖拽区（默认 48），让顶栏控件更贴近窗口按钮 -->
-            <x:Double x:Key="TitleBarMinDragRegionWidth">16</x:Double>
+            <!-- 标题栏右侧不再预留拖拽区，顶栏控件直接贴近窗口按钮 -->
+            <x:Double x:Key="TitleBarMinDragRegionWidth">0</x:Double>
 
             <!-- 内容区透出 Mica 背景：覆盖 NavigationView 默认的半透明灰层（LayerFillColorDefaultBrush） -->
             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />

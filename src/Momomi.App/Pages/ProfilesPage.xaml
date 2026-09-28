@@ -61,7 +61,8 @@
             <GridView ItemsSource="{x:Bind ViewModel.Items}"
                       SelectionMode="None"
                       IsItemClickEnabled="False"
-                      Padding="0,0,0,24" MaxWidth="{StaticResource PageContentMaxWidth}">
+                      MaxWidth="{StaticResource PageContentMaxWidth}"
+                      Padding="0,0,0,24">
                 <GridView.ItemContainerStyle>
                     <Style TargetType="GridViewItem">
                         <Setter Property="Margin" Value="0,0,12,12" />
@@ -98,9 +99,12 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                        <FontIcon FontSize="13" Glyph="&#xE73E;"
-                                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                  Visibility="{x:Bind IsActive, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                        <Border Width="16" Height="16" CornerRadius="8"
+                                                Background="{ThemeResource SystemFillColorSuccessBrush}"
+                                                Visibility="{x:Bind IsActive, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                            <FontIcon FontSize="9" Glyph="&#xE73E;" Foreground="White"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
                                         <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}"
                                                    TextTrimming="CharacterEllipsis"
                                                    Text="{x:Bind Name}" />
@@ -178,5 +182,89 @@
             </GridView>
             </Border>
         </ScrollViewer>
+
+        <!-- 配置编辑大弹窗：盖住整页，可最大化，原始配置可编辑 / 运行时配置只读预览 -->
+        <Grid Grid.RowSpan="3"
+              Background="{ThemeResource SmokeFillColorDefaultBrush}"
+              Visibility="{x:Bind ViewModel.IsEditorOpen, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+            <Border x:Name="EditorPanel"
+                    Margin="40"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                <Grid Padding="20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" ColumnSpacing="12" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Style="{StaticResource SubtitleTextBlockStyle}"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   Text="{x:Bind ViewModel.EditorTitle, Mode=OneWay}" />
+                        <Button Grid.Column="1"
+                                Style="{StaticResource IconButtonStyle}"
+                                ToolTipService.ToolTip="最大化/还原"
+                                Click="ToggleEditorMaximize_Click">
+                            <FontIcon x:Name="EditorMaximizeIcon" FontSize="12" Glyph="&#xE740;" />
+                        </Button>
+                        <Button Grid.Column="2"
+                                Style="{StaticResource IconButtonStyle}"
+                                ToolTipService.ToolTip="关闭"
+                                Command="{x:Bind ViewModel.CloseEditorCommand}">
+                            <FontIcon FontSize="12" Glyph="&#xE711;" />
+                        </Button>
+                    </Grid>
+
+                    <SelectorBar x:Name="EditorTabs" Grid.Row="1" Margin="0,0,0,12"
+                                 SelectionChanged="EditorTabs_SelectionChanged">
+                        <SelectorBarItem Text="原始配置" IsSelected="True" />
+                        <SelectorBarItem Text="运行时配置" />
+                    </SelectorBar>
+
+                    <Grid Grid.Row="2">
+                        <TextBox x:Name="RawEditor"
+                                 AcceptsReturn="True"
+                                 TextWrapping="NoWrap"
+                                 IsSpellCheckEnabled="False"
+                                 FontFamily="Consolas"
+                                 FontSize="12"
+                                 Text="{x:Bind ViewModel.EditorText, Mode=TwoWay}"
+                                 Visibility="{x:Bind ViewModel.IsRawTab, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBox AcceptsReturn="True"
+                                 IsReadOnly="True"
+                                 TextWrapping="NoWrap"
+                                 IsSpellCheckEnabled="False"
+                                 FontFamily="Consolas"
+                                 FontSize="12"
+                                 Text="{x:Bind ViewModel.RuntimePreview, Mode=OneWay}"
+                                 Visibility="{x:Bind ViewModel.IsRuntimeTab, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        <ProgressRing Width="28" Height="28"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                                      IsActive="{x:Bind ViewModel.IsEditorBusy, Mode=OneWay}"
+                                      Visibility="{x:Bind ViewModel.IsEditorBusy, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                    </Grid>
+
+                    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+                        <Button Style="{StaticResource AccentButtonStyle}"
+                                Click="SaveEditor_Click"
+                                Content="保存并应用" />
+                        <Button Command="{x:Bind ViewModel.CloseEditorCommand}"
+                                Content="取消" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </Page>

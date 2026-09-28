@@ -96,7 +96,7 @@ public sealed partial class MiniWindow : Window
         };
     }
 
-    /// <summary>背景材质：0=Mica，1=亚克力(Mica Alt)，2=纯色。与主窗口保持一致。</summary>
+    /// <summary>背景材质：0=亚克力(透出下方窗口)，1=Mica，2=纯色。与主窗口保持一致。</summary>
     public void ApplyBackdropStyle(int style)
     {
         try
@@ -104,7 +104,7 @@ public sealed partial class MiniWindow : Window
             switch (style)
             {
                 case 1 when MicaController.IsSupported():
-                    SystemBackdrop = new MicaBackdrop { Kind = MicaKind.BaseAlt };
+                    SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
                     Panel.SetSolidBackground(false);
                     break;
                 case 2:
@@ -112,14 +112,14 @@ public sealed partial class MiniWindow : Window
                     Panel.SetSolidBackground(true);
                     break;
                 default:
-                    if (MicaController.IsSupported())
+                    if (global::Microsoft.UI.Composition.SystemBackdrops.DesktopAcrylicController.IsSupported())
                     {
-                        SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+                        SystemBackdrop = new global::Momomi.App.Controls.AlwaysActiveAcrylicBackdrop();
                         Panel.SetSolidBackground(false);
                     }
-                    else if (DesktopAcrylicController.IsSupported())
+                    else if (MicaController.IsSupported())
                     {
-                        SystemBackdrop = new DesktopAcrylicBackdrop();
+                        SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
                         Panel.SetSolidBackground(false);
                     }
                     else

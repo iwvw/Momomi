@@ -229,17 +229,17 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            if (MicaController.IsSupported())
+            if (DesktopAcrylicController.IsSupported())
+                SystemBackdrop = new Controls.AlwaysActiveAcrylicBackdrop();
+            else if (MicaController.IsSupported())
                 SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
-            else if (DesktopAcrylicController.IsSupported())
-                SystemBackdrop = new DesktopAcrylicBackdrop();
         }
         catch
         {
         }
     }
 
-    /// <summary>背景材质：0=Mica，1=亚克力(Mica Alt)，2=纯色。不支持的会回退。</summary>
+    /// <summary>背景材质：0=亚克力(透出下方窗口)，1=Mica，2=纯色。不支持的会回退。</summary>
     public void ApplyBackdropStyle(int style)
     {
         try
@@ -247,16 +247,18 @@ public sealed partial class MainWindow : Window
             switch (style)
             {
                 case 1 when MicaController.IsSupported():
-                    SystemBackdrop = new MicaBackdrop { Kind = MicaKind.BaseAlt };
+                    SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
                     break;
                 case 2:
                     SystemBackdrop = null;
                     break;
                 default:
-                    if (MicaController.IsSupported())
+                    if (DesktopAcrylicController.IsSupported())
+                        SystemBackdrop = new Controls.AlwaysActiveAcrylicBackdrop();
+                    else if (MicaController.IsSupported())
                         SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
-                    else if (DesktopAcrylicController.IsSupported())
-                        SystemBackdrop = new DesktopAcrylicBackdrop();
+                    else
+                        SystemBackdrop = null;
                     break;
             }
         }
@@ -630,6 +632,55 @@ public sealed partial class MainWindow : Window
         try
         {
             // 先关系统代理、停内核（会移除 TUN 适配器与路由），再清理遗留进程，避免退出后主机断网。
+            AppHost.Host.ShutdownNetwork();
+            AppHost.Host.Process.KillOrphansAsync(AppHost.Host.Core.Paths.BinaryPath)
+                .GetAwaiter().GetResult();
+            AppHost.Host.Elevated.KillOrphanHosts();
+        }
+        catch
+        {
+        }
+
+        AppHost.Shutdown();
+        Close();
+    }
+
+    /// <summary>
+    /// 应用自更新退出：停内核/TUN/系统代理后启动静默更新脚本（等待本进程退出后
+    /// 安装/覆盖并以 --startcore 重启），随后退出主程序。
+    /// </summary>
+    public void ExitForUpdate()
+    {
+        var script = AppHost.Host.AppUpdate.ConsumePendingScript();
+        if (string.IsNullOrEmpty(script) || !File.Exists(script))
+        {
+            ExitFromTray();
+            return;
+        }
+
+        _forceExit = true;
+
+        try
+        {
+            // 先用 cmd 以隐藏窗口方式启动更新脚本，再停内核并退出，让脚本接管后续。
+            var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c \"{script}\"")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
+                WorkingDirectory = Path.GetDirectoryName(script) ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            };
+            System.Diagnostics.Process.Start(psi);
+        }
+        catch
+        {
+            ExitFromTray();
+            return;
+        }
+
+        try
+        {
+            // 停系统代理、停内核（移除 TUN 适配器与路由），清理遗留进程后立即退出。
             AppHost.Host.ShutdownNetwork();
             AppHost.Host.Process.KillOrphansAsync(AppHost.Host.Core.Paths.BinaryPath)
                 .GetAwaiter().GetResult();

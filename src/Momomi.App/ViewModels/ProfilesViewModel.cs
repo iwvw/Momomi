@@ -110,6 +110,37 @@ public sealed partial class ProfilesViewModel : ObservableObject
     [ObservableProperty]
     public partial bool AutoUpdate { get; set; } = true;
 
+    [ObservableProperty]
+    public partial bool IsEditorOpen { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsEditorBusy { get; set; }
+
+    [ObservableProperty]
+    public partial string EditorTitle { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string EditorText { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string RuntimePreview { get; set; } = "";
+
+    [ObservableProperty]
+    public partial int EditorTabIndex { get; set; }
+
+    public bool IsRawTab => EditorTabIndex == 0;
+
+    public bool IsRuntimeTab => EditorTabIndex == 1;
+
+    private ProfileRowViewModel? _editorRow;
+
+    partial void OnEditorTabIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(IsRawTab));
+        OnPropertyChanged(nameof(IsRuntimeTab));
+        if (value == 1) _ = RefreshRuntimePreviewAsync();
+    }
+
     public ProfilesViewModel(MomomiHost host, DispatcherQueue dispatcher)
     {
         _host = host;
@@ -333,5 +364,92 @@ public sealed partial class ProfilesViewModel : ObservableObject
         await _host.Profiles.RenameAsync(row.Id, name);
         StatusText = $"已重命名为 {name}";
         await LoadAsync();
+    }
+
+    /// <summary>打开页内配置编辑器：加载原始 YAML，运行时预览在切到该标签时惰性生成。</summary>
+    [RelayCommand]
+    private async Task OpenEditorAsync(ProfileRowViewModel? row)
+    {
+        if (row is null) return;
+
+        var content = await _host.Profiles.ReadContentAsync(row.Id);
+        if (content is null)
+        {
+            StatusText = "无法读取配置内容";
+            return;
+        }
+
+        _editorRow = row;
+        EditorTitle = $"编辑：{row.Name}";
+        EditorText = ToDisplayText(content);
+        RuntimePreview = "";
+        EditorTabIndex = 0;
+        IsEditorOpen = true;
+    }
+
+    /// <summary>WinUI TextBox 只认 \r 作为换行：把订阅文件的 LF 统一成 CRLF 才能正常显示。</summary>
+    private static string ToDisplayText(string text)
+        => text.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
+
+    /// <summary>保存时还原为 LF，与订阅原始文件保持一致。</summary>
+    private static string ToStorageText(string text)
+        => text.Replace("\r\n", "\n").Replace("\r", "\n");
+
+    [RelayCommand]
+    private void CloseEditor()
+    {
+        IsEditorOpen = false;
+        _editorRow = null;
+        EditorText = "";
+        RuntimePreview = "";
+    }
+
+    [RelayCommand]
+    private async Task SaveEditorAsync()
+    {
+        if (_editorRow is null) return;
+        var row = _editorRow;
+
+        var ok = await _host.Profiles.SaveContentAsync(row.Id, ToStorageText(EditorText));
+        if (!ok)
+        {
+            StatusText = "保存失败";
+            return;
+        }
+
+        if (row.IsActive)
+        {
+            await _host.ApplyActiveProfileAsync();
+            StatusText = "已保存并热重载";
+        }
+        else
+        {
+            StatusText = "已保存";
+        }
+
+        await LoadAsync();
+
+        if (row.IsActive && EditorTabIndex == 1) await RefreshRuntimePreviewAsync();
+    }
+
+    /// <summary>生成运行时配置文本：订阅原始内容叠加全局注入项（端口/DNS/TUN 等）。</summary>
+    private async Task RefreshRuntimePreviewAsync()
+    {
+        if (_editorRow is null) return;
+
+        IsEditorBusy = true;
+        try
+        {
+            var options = await _host.BuildRuntimeOptionsAsync();
+            RuntimePreview = ToDisplayText(MihomoConfigBuilder.BuildRuntimeYaml(EditorText, options));
+        }
+        catch (Exception ex)
+        {
+            RuntimePreview = $"无法生成运行时配置：{ex.Message}";
+        }
+        finally
+        {
+            IsEditorBusy = false;
+        }
     }
 }

@@ -14,6 +14,7 @@ public sealed class MomomiHost : IDisposable
     public IKernelUpdateService KernelUpdate { get; }
     public IProfileService Profiles { get; }
     public IElevatedClient Elevated { get; }
+    public IAppUpdateService AppUpdate { get; }
 
     private readonly TrafficRecorder _recorder;
     private readonly Timer _profileRefreshTimer;
@@ -44,6 +45,7 @@ public sealed class MomomiHost : IDisposable
         KernelUpdate = new KernelUpdateService(coreDir, Settings);
         Elevated = new ElevatedClient(Path.Combine(AppContext.BaseDirectory, "Momomi.Elevated.exe"));
         Profiles = new ProfileService(Database, Settings, Path.Combine(_root, "profiles"));
+        AppUpdate = new AppUpdateService(Settings);
 
         var paths = new CorePaths(
             BinaryPath: KernelUpdate.BinaryPath,

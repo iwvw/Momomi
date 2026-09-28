@@ -101,6 +101,24 @@ public partial class App : Application
         _ = ApplyThemeFromSettingsAsync();
         _ = AutoStartCoreAsync();
         _ = NavigateFromCommandLineAsync();
+        _ = AutoCheckUpdateAsync();
+    }
+
+    /// <summary>启动时后台静默检查应用更新（不打扰，结果供设置页展示）。</summary>
+    private static async Task AutoCheckUpdateAsync()
+    {
+        try
+        {
+            var enabled = await AppHost.Host.Settings.GetBoolAsync("ui.autoCheckAppUpdate", true).ConfigureAwait(false);
+            if (!enabled) return;
+            // 延迟到内核启动后，避免与启动流量抢带宽。
+            await Task.Delay(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
+            _ = AppHost.Host.AppUpdate.CheckAsync();
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"自动检查更新失败：{ex}");
+        }
     }
 
     private static async Task NavigateFromCommandLineAsync()
@@ -162,7 +180,11 @@ public partial class App : Application
         try
         {
             var host = AppHost.Host;
-            var autoStart = await host.Settings.GetBoolAsync("core.autoStart", true).ConfigureAwait(false);
+            // 更新后重新启动并附带 --startcore：无论设置如何都强制拉起内核，恢复更新前状态。
+            var fromUpdate = Environment.GetCommandLineArgs()
+                .Any(a => string.Equals(a, "--startcore", StringComparison.OrdinalIgnoreCase));
+            var autoStart = fromUpdate
+                || await host.Settings.GetBoolAsync("core.autoStart", true).ConfigureAwait(false);
             if (!autoStart) return;
             await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
 
