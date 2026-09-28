@@ -67,7 +67,9 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <Grid Grid.Column="0" Style="{StaticResource CardStyle}" Padding="16,14">
+                    <Button Grid.Column="0" Style="{StaticResource DashboardCardButtonStyle}"
+                            ToolTipService.ToolTip="前往流量"
+                            Click="GoTraffic_Click">
                         <StackPanel Spacing="6">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon FontSize="13" Glyph="&#xE898;"
@@ -81,9 +83,11 @@
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        Text="{x:Bind ViewModel.UpTotal, Mode=OneWay}" />
                         </StackPanel>
-                    </Grid>
+                    </Button>
 
-                    <Grid Grid.Column="1" Style="{StaticResource CardStyle}" Padding="16,14">
+                    <Button Grid.Column="1" Style="{StaticResource DashboardCardButtonStyle}"
+                            ToolTipService.ToolTip="前往流量"
+                            Click="GoTraffic_Click">
                         <StackPanel Spacing="6">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon FontSize="13" Glyph="&#xE896;"
@@ -97,9 +101,11 @@
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        Text="{x:Bind ViewModel.DownTotal, Mode=OneWay}" />
                         </StackPanel>
-                    </Grid>
+                    </Button>
 
-                    <Grid Grid.Column="2" Style="{StaticResource CardStyle}" Padding="16,14">
+                    <Button Grid.Column="2" Style="{StaticResource DashboardCardButtonStyle}"
+                            ToolTipService.ToolTip="前往日志"
+                            Click="GoLogs_Click">
                         <StackPanel Spacing="6">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon FontSize="13" Glyph="&#xE950;" />
@@ -111,9 +117,11 @@
                             <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="内核占用" />
                         </StackPanel>
-                    </Grid>
+                    </Button>
 
-                    <Grid Grid.Column="3" Style="{StaticResource CardStyle}" Padding="16,14">
+                    <Button Grid.Column="3" Style="{StaticResource DashboardCardButtonStyle}"
+                            ToolTipService.ToolTip="前往连接"
+                            Click="GoConnections_Click">
                         <StackPanel Spacing="6">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon FontSize="13" Glyph="&#xE704;" />
@@ -127,7 +135,7 @@
                                        TextTrimming="CharacterEllipsis"
                                        Text="{x:Bind ViewModel.NodeCountText, Mode=OneWay}" />
                         </StackPanel>
-                    </Grid>
+                    </Button>
                 </Grid>
 
                 <Grid ColumnSpacing="12">
@@ -136,9 +144,22 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
-                    <Grid Grid.Column="0" Style="{StaticResource CardStyle}" Padding="16,14">
+                    <Button Grid.Column="0" Style="{StaticResource DashboardCardButtonStyle}"
+                            VerticalAlignment="Stretch" VerticalContentAlignment="Center"
+                            ToolTipService.ToolTip="前往流量"
+                            Click="GoTraffic_Click">
                         <StackPanel Spacing="10">
-                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="实时速率" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                                           Style="{StaticResource BodyStrongTextBlockStyle}" Text="实时速率" />
+                                <FontIcon Grid.Column="2" FontSize="12" VerticalAlignment="Center"
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE76C;" />
+                            </Grid>
                             <controls:SparklineChart Height="96"
                                                      Values="{x:Bind ViewModel.DownPoints, Mode=OneWay}"
                                                      Maximum="{x:Bind ViewModel.MaxRate, Mode=OneWay}">
@@ -168,142 +189,160 @@
                                            Text="{x:Bind ViewModel.UpRate, Mode=OneWay}" />
                             </StackPanel>
                         </StackPanel>
+                    </Button>
+
+                    <Grid Grid.Column="1" RowSpacing="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Button Grid.Row="0" Style="{StaticResource DashboardCardButtonStyle}"
+                                VerticalAlignment="Stretch" VerticalContentAlignment="Center"
+                                ToolTipService.ToolTip="前往订阅"
+                                Click="GoProfiles_Click">
+                            <StackPanel Spacing="10">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Grid.Column="0" FontSize="13" VerticalAlignment="Center" Glyph="&#xE8B7;" />
+                                    <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                               Style="{StaticResource BodyStrongTextBlockStyle}" Text="当前订阅" />
+                                    <FontIcon Grid.Column="2" FontSize="12" VerticalAlignment="Center"
+                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE76C;" />
+                                </Grid>
+                                <TextBlock TextTrimming="CharacterEllipsis"
+                                           Text="{x:Bind ViewModel.ActiveProfileName, Mode=OneWay}" />
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Text="{x:Bind ViewModel.ProfileUsageText, Mode=OneWay}" />
+                                <ProgressBar Maximum="100"
+                                             Value="{x:Bind ViewModel.ProfileUsagePercent, Mode=OneWay}"
+                                             Height="4"
+                                             Visibility="{x:Bind ViewModel.HasProfileUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Text="{x:Bind ViewModel.ProfileExpireText, Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button Grid.Row="1" Style="{StaticResource DashboardCardButtonStyle}"
+                                VerticalAlignment="Stretch" VerticalContentAlignment="Center"
+                                ToolTipService.ToolTip="前往设置"
+                                Click="GoSettings_Click">
+                            <StackPanel Spacing="8">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Grid.Column="0" FontSize="13" VerticalAlignment="Center" Glyph="&#xE713;" />
+                                    <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                               Style="{StaticResource BodyStrongTextBlockStyle}" Text="运行状态" />
+                                    <FontIcon Grid.Column="2" FontSize="12" VerticalAlignment="Center"
+                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE76C;" />
+                                </Grid>
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}">
+                                    <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="运行模式  " />
+                                    <Run Text="{x:Bind ViewModel.Mode, Mode=OneWay}" />
+                                </TextBlock>
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}">
+                                    <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="混合端口  " />
+                                    <Run Text="{x:Bind ViewModel.MixedPort, Mode=OneWay}" />
+                                </TextBlock>
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}">
+                                    <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="系统代理  " />
+                                    <Run Text="{x:Bind ViewModel.SystemProxyText, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </Button>
                     </Grid>
-
-                    <StackPanel Grid.Column="1" Spacing="12">
-                        <Grid Style="{StaticResource CardStyle}">
-                            <StackPanel>
-                                <Button Style="{StaticResource CardHeaderButtonStyle}"
-                                        ToolTipService.ToolTip="前往订阅"
-                                        Click="GoProfiles_Click">
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <FontIcon Grid.Column="0" FontSize="13" VerticalAlignment="Center" Glyph="&#xE8B7;" />
-                                        <TextBlock Grid.Column="1" VerticalAlignment="Center"
-                                                   Style="{StaticResource BodyStrongTextBlockStyle}" Text="当前订阅" />
-                                        <FontIcon Grid.Column="3" FontSize="12" VerticalAlignment="Center"
-                                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE76C;" />
-                                    </Grid>
-                                </Button>
-                                <StackPanel Spacing="8" Padding="16,0,16,14">
-                                    <TextBlock TextTrimming="CharacterEllipsis"
-                                               Text="{x:Bind ViewModel.ActiveProfileName, Mode=OneWay}" />
-                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                               Text="{x:Bind ViewModel.ProfileUsageText, Mode=OneWay}" />
-                                    <ProgressBar Maximum="100"
-                                                 Value="{x:Bind ViewModel.ProfileUsagePercent, Mode=OneWay}"
-                                                 Height="4"
-                                                 Visibility="{x:Bind ViewModel.HasProfileUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                               Text="{x:Bind ViewModel.ProfileExpireText, Mode=OneWay}" />
-                                </StackPanel>
-                            </StackPanel>
-                        </Grid>
-
-                        <Grid Style="{StaticResource CardStyle}">
-                            <StackPanel>
-                                <Button Style="{StaticResource CardHeaderButtonStyle}"
-                                        ToolTipService.ToolTip="前往设置"
-                                        Click="GoSettings_Click">
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <FontIcon Grid.Column="0" FontSize="13" VerticalAlignment="Center" Glyph="&#xE713;" />
-                                        <TextBlock Grid.Column="1" VerticalAlignment="Center"
-                                                   Style="{StaticResource BodyStrongTextBlockStyle}" Text="运行状态" />
-                                        <FontIcon Grid.Column="3" FontSize="12" VerticalAlignment="Center"
-                                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE76C;" />
-                                    </Grid>
-                                </Button>
-                                <StackPanel Spacing="8" Padding="16,0,16,14">
-                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}">
-                                        <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="运行模式  " />
-                                        <Run Text="{x:Bind ViewModel.Mode, Mode=OneWay}" />
-                                    </TextBlock>
-                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}">
-                                        <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="混合端口  " />
-                                        <Run Text="{x:Bind ViewModel.MixedPort, Mode=OneWay}" />
-                                    </TextBlock>
-                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}">
-                                        <Run Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="系统代理  " />
-                                        <Run Text="{x:Bind ViewModel.SystemProxyText, Mode=OneWay}" />
-                                    </TextBlock>
-                                </StackPanel>
-                            </StackPanel>
-                        </Grid>
-                    </StackPanel>
                 </Grid>
 
-                <Grid Style="{StaticResource CardStyle}">
-                    <StackPanel>
-                        <Button Style="{StaticResource CardHeaderButtonStyle}"
-                                ToolTipService.ToolTip="前往代理"
-                                Click="GoProxies_Click">
+                <Button Style="{StaticResource DashboardCardButtonStyle}"
+                        ToolTipService.ToolTip="前往网络"
+                        Click="GoNetwork_Click">
+                    <Grid ColumnSpacing="24">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 左：出口 IP -->
+                        <StackPanel Grid.Column="0" Spacing="6">
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Grid.Column="0" FontSize="13" VerticalAlignment="Center" Glyph="&#xE7C8;" />
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                           Style="{StaticResource BodyStrongTextBlockStyle}" Text="出口 IP" />
+                            </Grid>
+                            <TextBlock Style="{StaticResource SubtitleTextBlockStyle}"
+                                       TextTrimming="CharacterEllipsis"
+                                       Text="{x:Bind ViewModel.ExitIp, Mode=OneWay}" />
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Image Width="20" Height="15" VerticalAlignment="Center"
+                                       Source="{x:Bind ViewModel.ExitFlag, Mode=OneWay, Converter={StaticResource SvgImageSource}}" />
+                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           VerticalAlignment="Center"
+                                           Text="{x:Bind ViewModel.ExitCountry, Mode=OneWay}" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Border Grid.Column="1" Width="1" Margin="0,4" VerticalAlignment="Stretch"
+                                Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+
+                        <!-- 右：网络延迟 -->
+                        <StackPanel Grid.Column="2" Spacing="6">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <FontIcon Grid.Column="0" FontSize="13" VerticalAlignment="Center" Glyph="&#xE968;" />
+                                <FontIcon Grid.Column="0" FontSize="13" VerticalAlignment="Center" Glyph="&#xE9D9;" />
                                 <TextBlock Grid.Column="1" VerticalAlignment="Center"
-                                           Style="{StaticResource BodyStrongTextBlockStyle}" Text="代理组" />
-                                <TextBlock Grid.Column="2" VerticalAlignment="Center"
-                                           Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           Text="{x:Bind ViewModel.GroupSummary, Mode=OneWay}" />
-                                <FontIcon Grid.Column="3" FontSize="12" VerticalAlignment="Center"
-                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE76C;" />
+                                           Style="{StaticResource BodyStrongTextBlockStyle}" Text="网络延迟" />
+                                <ProgressRing Grid.Column="2" Width="14" Height="14"
+                                              IsActive="{x:Bind ViewModel.IsTestingAll, Mode=OneWay}"
+                                              Visibility="{x:Bind ViewModel.IsTestingAll, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                             </Grid>
-                        </Button>
-                        <ItemsRepeater ItemsSource="{x:Bind ViewModel.Groups}"
-                                       Margin="16,0,16,14">
-                            <ItemsRepeater.Layout>
-                                <UniformGridLayout MinItemWidth="320"
-                                                   MinItemHeight="56"
-                                                   MinColumnSpacing="24"
-                                                   MinRowSpacing="2"
-                                                   ItemsStretch="Fill" />
-                            </ItemsRepeater.Layout>
-                            <ItemsRepeater.ItemTemplate>
-                                <DataTemplate x:DataType="vm:DashboardGroupViewModel">
-                                    <Grid Padding="0,6" ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0" Spacing="2">
-                                            <TextBlock FontFamily="{StaticResource NodeNameFontFamily}"
-                                                       TextTrimming="CharacterEllipsis" Text="{x:Bind Name}" />
-                                            <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                                       FontFamily="{StaticResource NodeNameFontFamily}"
-                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.Targets}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <ItemsWrapGrid Orientation="Horizontal"
+                                                       MaximumRowsOrColumns="2" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:LatencyTargetViewModel">
+                                        <Grid ColumnSpacing="10" MinWidth="170" Padding="4,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                                                       FontSize="13"
                                                        TextTrimming="CharacterEllipsis"
-                                                       Text="{x:Bind SelectedNode}" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="1"
-                                                   VerticalAlignment="Center"
-                                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                   Text="{x:Bind CountText}" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsRepeater.ItemTemplate>
-                        </ItemsRepeater>
-                    </StackPanel>
-                </Grid>
+                                                       Text="{x:Bind Name}" />
+                                            <TextBlock Grid.Column="1" VerticalAlignment="Center"
+                                                       FontSize="13" FontWeight="SemiBold"
+                                                       Text="{x:Bind LatencyText, Mode=OneWay}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Grid>
+                </Button>
             </StackPanel>
             </Border>
         </ScrollViewer>

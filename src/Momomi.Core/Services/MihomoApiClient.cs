@@ -19,7 +19,6 @@ public interface IMihomoApiClient : IDisposable
     Task<int> ProxyDelayAsync(string name, string url, int timeoutMs, CancellationToken ct = default);
     Task<IReadOnlyList<RuleItem>> GetRulesAsync(CancellationToken ct = default);
     Task DeleteRuleAsync(int index, CancellationToken ct = default);
-    Task<IReadOnlyList<RuleItem>> OverrideRulesAsync(IReadOnlyList<RuleItem> rules, CancellationToken ct = default);
     Task<ConnectionsSnapshot?> GetConnectionsAsync(CancellationToken ct = default);
     Task CloseConnectionAsync(string id, CancellationToken ct = default);
     Task CloseAllConnectionsAsync(CancellationToken ct = default);
@@ -193,15 +192,6 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
     {
         using var response = await _http.DeleteAsync($"rules/{index}", ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-    }
-
-    /// <summary>批量替换运行态规则（POST /rules，仅当前会话生效）。返回替换后的规则列表。</summary>
-    public async Task<IReadOnlyList<RuleItem>> OverrideRulesAsync(IReadOnlyList<RuleItem> rules, CancellationToken ct = default)
-    {
-        var payload = new { rules = rules.Select(r => new { index = r.Index, type = r.Type, payload = r.Payload, proxy = r.Proxy }) };
-        using var response = await _http.PostAsJsonAsync("rules", payload, JsonOptions, ct).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        return await GetRulesAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<ConnectionsSnapshot?> GetConnectionsAsync(CancellationToken ct = default)

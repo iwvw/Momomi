@@ -18,6 +18,7 @@
             <converters:LogLevelToBrushConverter x:Key="LogLevelToBrush" />
             <converters:SelectedToBrushConverter x:Key="SelectedToBrush" />
             <converters:SelectedBorderBrushConverter x:Key="SelectedBorderBrush" />
+            <converters:SvgImageSourceConverter x:Key="SvgImageSource" />
 
             <!-- 页面内容最大宽度：对齐 Windows 设置的限宽居中范式 -->
             <x:Double x:Key="PageContentMaxWidth">1064</x:Double>
@@ -120,6 +121,20 @@
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            </Style>
+
+            <!-- 首页导航卡片：整卡可点击跳转，卡片外观 + hover/pressed 轻反馈 -->
+            <Style x:Key="DashboardCardButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Padding" Value="16,14" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
             </Style>
         </ResourceDictionary>

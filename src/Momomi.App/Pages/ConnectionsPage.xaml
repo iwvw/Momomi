@@ -14,6 +14,7 @@
     <Grid RowSpacing="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -31,85 +32,95 @@
                                Text="{x:Bind ViewModel.MemoryText, Mode=OneWay}" />
                 </StackPanel>
             </controls:PageHeader.SubtitleContent>
-            <controls:PageHeader.Actions>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBox Width="200" VerticalAlignment="Center"
-                             PlaceholderText="过滤域名 / 进程 / IP"
-                             Text="{x:Bind ViewModel.Filter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-
-                    <ComboBox x:Name="SortBox" VerticalAlignment="Center" Width="120" Height="32"
-                              SelectionChanged="Sort_SelectionChanged"
-                              ToolTipService.ToolTip="排序字段">
-                        <ComboBoxItem Content="按时长" />
-                        <ComboBoxItem Content="按上传" />
-                        <ComboBoxItem Content="按下载" />
-                        <ComboBoxItem Content="按进程" />
-                        <ComboBoxItem Content="按域名" />
-                    </ComboBox>
-
-                    <Button VerticalAlignment="Center" Width="32" Height="32" Padding="0"
-                            Click="SortDirection_Click"
-                            ToolTipService.ToolTip="升序 / 降序">
-                        <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.SortGlyph, Mode=OneWay}" />
-                    </Button>
-
-                    <ToggleButton x:Name="RealtimeButton" VerticalAlignment="Center"
-                                  Height="32" MinWidth="0" Padding="12,0"
-                                  Click="Realtime_Click"
-                                  ToolTipService.ToolTip="实时刷新，暂停后冻结列表">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.RealtimeGlyph, Mode=OneWay}" />
-                            <TextBlock Text="{x:Bind ViewModel.RealtimeText, Mode=OneWay}" />
-                        </StackPanel>
-                    </ToggleButton>
-
-                    <Button VerticalAlignment="Center" Height="32" MinWidth="0" Padding="12,0"
-                            Click="ToggleView_Click"
-                            ToolTipService.ToolTip="切换卡片 / 表格视图">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.ViewGlyph, Mode=OneWay}" />
-                            <TextBlock Text="{x:Bind ViewModel.ViewText, Mode=OneWay}" />
-                        </StackPanel>
-                    </Button>
-
-                    <ToggleButton x:Name="RankingButton" VerticalAlignment="Center"
-                                  Height="32" MinWidth="0" Padding="12,0"
-                                  IsChecked="{x:Bind ViewModel.IsRankingView, Mode=TwoWay}"
-                                  ToolTipService.ToolTip="流量排行：按主机/进程/来源聚合，点选下钻">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="12" Glyph="&#xE9D9;" />
-                            <TextBlock Text="排行" />
-                        </StackPanel>
-                    </ToggleButton>
-
-                    <Button VerticalAlignment="Center" Width="32" Height="32" Padding="0"
-                            ToolTipService.ToolTip="表格列选择"
-                            Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay}"
-                            Click="Columns_Click">
-                        <FontIcon FontSize="12" Glyph="&#xE8FC;" />
-                        <Button.Flyout>
-                            <MenuFlyout x:Name="ColumnsFlyout" Placement="BottomEdgeAlignedRight">
-                                <MenuFlyoutSubItem Text="显示列">
-                                    <ToggleMenuFlyoutItem x:Name="ColProcess" Text="进程" Tag="process" Click="Column_Toggle" />
-                                    <ToggleMenuFlyoutItem x:Name="ColHost" Text="主机" Tag="host" Click="Column_Toggle" />
-                                    <ToggleMenuFlyoutItem x:Name="ColNetwork" Text="网络" Tag="network" Click="Column_Toggle" />
-                                    <ToggleMenuFlyoutItem x:Name="ColRule" Text="规则" Tag="rule" Click="Column_Toggle" />
-                                    <ToggleMenuFlyoutItem x:Name="ColUpload" Text="上传" Tag="upload" Click="Column_Toggle" />
-                                    <ToggleMenuFlyoutItem x:Name="ColDownload" Text="下载" Tag="download" Click="Column_Toggle" />
-                                    <ToggleMenuFlyoutItem x:Name="ColDuration" Text="时长" Tag="duration" Click="Column_Toggle" />
-                                </MenuFlyoutSubItem>
-                            </MenuFlyout>
-                        </Button.Flyout>
-                    </Button>
-
-                    <Button VerticalAlignment="Center" Height="32" MinWidth="0" Padding="12,0"
-                            Command="{x:Bind ViewModel.CloseAllCommand}"
-                            Content="全部关闭" />
-                </StackPanel>
-            </controls:PageHeader.Actions>
         </controls:PageHeader>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+        <!-- 工具栏单独一行，避免过多控件挤压副标题 -->
+        <Grid Grid.Row="1" MaxWidth="1064" Margin="36,0,36,0" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox Grid.Column="0" VerticalAlignment="Center"
+                     PlaceholderText="过滤域名 / 进程 / IP"
+                     Text="{x:Bind ViewModel.Filter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+            <ComboBox x:Name="SortBox" Grid.Column="1" VerticalAlignment="Center" Width="120" Height="32"
+                      SelectionChanged="Sort_SelectionChanged"
+                      ToolTipService.ToolTip="排序字段">
+                <ComboBoxItem Content="按时长" />
+                <ComboBoxItem Content="按上传" />
+                <ComboBoxItem Content="按下载" />
+                <ComboBoxItem Content="按进程" />
+                <ComboBoxItem Content="按域名" />
+            </ComboBox>
+
+            <Button Grid.Column="2" VerticalAlignment="Center" Width="32" Height="32" Padding="0"
+                    Click="SortDirection_Click"
+                    ToolTipService.ToolTip="升序 / 降序">
+                <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.SortGlyph, Mode=OneWay}" />
+            </Button>
+
+            <ToggleButton x:Name="RealtimeButton" Grid.Column="3" VerticalAlignment="Center"
+                          Height="32" MinWidth="0" Padding="12,0"
+                          Click="Realtime_Click"
+                          ToolTipService.ToolTip="实时刷新，暂停后冻结列表">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.RealtimeGlyph, Mode=OneWay}" />
+                    <TextBlock Text="{x:Bind ViewModel.RealtimeText, Mode=OneWay}" />
+                </StackPanel>
+            </ToggleButton>
+
+            <Button Grid.Column="4" VerticalAlignment="Center" Height="32" MinWidth="0" Padding="12,0"
+                    Click="ToggleView_Click"
+                    ToolTipService.ToolTip="切换卡片 / 表格视图">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.ViewGlyph, Mode=OneWay}" />
+                    <TextBlock Text="{x:Bind ViewModel.ViewText, Mode=OneWay}" />
+                </StackPanel>
+            </Button>
+
+            <ToggleButton x:Name="RankingButton" Grid.Column="5" VerticalAlignment="Center"
+                          Height="32" MinWidth="0" Padding="12,0"
+                          IsChecked="{x:Bind ViewModel.IsRankingView, Mode=TwoWay}"
+                          ToolTipService.ToolTip="流量排行：按主机/进程/来源聚合，点选下钻">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="12" Glyph="&#xE9D9;" />
+                    <TextBlock Text="排行" />
+                </StackPanel>
+            </ToggleButton>
+
+            <Button Grid.Column="6" VerticalAlignment="Center" Width="32" Height="32" Padding="0"
+                    ToolTipService.ToolTip="表格列选择"
+                    Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay}"
+                    Click="Columns_Click">
+                <FontIcon FontSize="12" Glyph="&#xE8FC;" />
+                <Button.Flyout>
+                    <MenuFlyout x:Name="ColumnsFlyout" Placement="BottomEdgeAlignedRight">
+                        <MenuFlyoutSubItem Text="显示列">
+                            <ToggleMenuFlyoutItem x:Name="ColProcess" Text="进程" Tag="process" Click="Column_Toggle" />
+                            <ToggleMenuFlyoutItem x:Name="ColHost" Text="主机" Tag="host" Click="Column_Toggle" />
+                            <ToggleMenuFlyoutItem x:Name="ColNetwork" Text="网络" Tag="network" Click="Column_Toggle" />
+                            <ToggleMenuFlyoutItem x:Name="ColRule" Text="规则" Tag="rule" Click="Column_Toggle" />
+                            <ToggleMenuFlyoutItem x:Name="ColUpload" Text="上传" Tag="upload" Click="Column_Toggle" />
+                            <ToggleMenuFlyoutItem x:Name="ColDownload" Text="下载" Tag="download" Click="Column_Toggle" />
+                            <ToggleMenuFlyoutItem x:Name="ColDuration" Text="时长" Tag="duration" Click="Column_Toggle" />
+                        </MenuFlyoutSubItem>
+                    </MenuFlyout>
+                </Button.Flyout>
+            </Button>
+
+            <Button Grid.Column="7" VerticalAlignment="Center" Height="32" MinWidth="0" Padding="12,0"
+                    Command="{x:Bind ViewModel.CloseAllCommand}"
+                    Content="全部关闭" />
+        </Grid>
+
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
                       Padding="36,0,36,0">
             <Border>
             <StackPanel Spacing="8" Margin="0,0,0,24" MaxWidth="{StaticResource PageContentMaxWidth}">
@@ -369,30 +380,30 @@
                                            Text="{x:Bind Duration}" />
                             </StackPanel>
 
-                            <Button Grid.Column="5" Style="{StaticResource IconButtonStyle}"
-                                    Width="28" Height="28" Margin="8,0,0,0"
-                                    VerticalAlignment="Center"
-                                    ToolTipService.ToolTip="详情"
-                                    Tag="{x:Bind}"
-                                    Click="Details_Click">
-                                <FontIcon FontSize="12" Glyph="&#xE8A7;" />
-                            </Button>
-                            <Button Grid.Column="5" Style="{StaticResource IconButtonStyle}"
-                                    Width="28" Height="28" Margin="8,0,0,0"
-                                    VerticalAlignment="Center"
-                                    ToolTipService.ToolTip="复制为规则"
-                                    Tag="{x:Bind}"
-                                    Click="CopyRule_Click">
-                                <FontIcon FontSize="12" Glyph="&#xE8C8;" />
-                            </Button>
-                            <Button Grid.Column="5" Style="{StaticResource IconButtonStyle}"
-                                    Width="28" Height="28" Margin="8,0,0,0"
-                                    VerticalAlignment="Center"
-                                    ToolTipService.ToolTip="关闭此连接"
-                                    Command="{Binding DataContext.CloseConnectionCommand, ElementName=PageRoot}"
-                                    CommandParameter="{x:Bind}">
-                                <FontIcon FontSize="12" Glyph="&#xE711;" />
-                            </Button>
+                            <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="4"
+                                        VerticalAlignment="Center" Margin="8,0,0,0">
+                                <Button Style="{StaticResource IconButtonStyle}"
+                                        Width="28" Height="28"
+                                        ToolTipService.ToolTip="详情"
+                                        Tag="{x:Bind}"
+                                        Click="Details_Click">
+                                    <FontIcon FontSize="12" Glyph="&#xE8A7;" />
+                                </Button>
+                                <Button Style="{StaticResource IconButtonStyle}"
+                                        Width="28" Height="28"
+                                        ToolTipService.ToolTip="复制为规则"
+                                        Tag="{x:Bind}"
+                                        Click="CopyRule_Click">
+                                    <FontIcon FontSize="12" Glyph="&#xE8C8;" />
+                                </Button>
+                                <Button Style="{StaticResource IconButtonStyle}"
+                                        Width="28" Height="28"
+                                        ToolTipService.ToolTip="关闭此连接"
+                                        Command="{Binding DataContext.CloseConnectionCommand, ElementName=PageRoot}"
+                                        CommandParameter="{x:Bind}">
+                                    <FontIcon FontSize="12" Glyph="&#xE711;" />
+                                </Button>
+                            </StackPanel>
                         </Grid>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>

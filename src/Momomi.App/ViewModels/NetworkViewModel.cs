@@ -52,6 +52,10 @@ public sealed partial class NetworkViewModel : ObservableObject
     [ObservableProperty]
     public partial string ExitCountry { get; set; } = "";
 
+    /// <summary>出口 IP 归属地的国旗 emoji（空表示无）。</summary>
+    [ObservableProperty]
+    public partial string ExitFlag { get; set; } = "";
+
     [ObservableProperty]
     public partial bool HasExitIp { get; set; }
 
@@ -79,20 +83,23 @@ public sealed partial class NetworkViewModel : ObservableObject
         await TestAllAsync();
     }
 
-    /// <summary>经当前代理获取出口 IP 与归属地（多源回退）。</summary>
+    /// <summary>经当前代理获取出口 IP 与归属地（多源回退）。仅内核运行时检测，保证是代理出口。</summary>
     [RelayCommand]
     public async Task CheckExitIpAsync()
     {
-        if (IsCheckingExit) return;
+        var core = global::Momomi.App.AppHost.Host.Core;
+        if (IsCheckingExit || core.Api is null || core.State != Momomi.Core.Services.CoreState.Running) return;
         IsCheckingExit = true;
         try
         {
             var ip = await QueryExitIpAsync();
-            var (country, region) = await QueryGeoAsync(ip);
+            var code = await QueryCountryCodeAsync(ip);
             _dispatcher.TryEnqueue(() =>
             {
                 ExitIp = ip;
-                ExitCountry = string.IsNullOrEmpty(country) ? "" : $"{country} · {region}";
+                var country = CountryNames.GetName(code);
+                ExitCountry = country.Length == 0 ? "" : country;
+                ExitFlag = CountryNames.GetFlag(code);
                 HasExitIp = true;
                 StatusText = "检测完成";
             });
@@ -103,8 +110,16 @@ public sealed partial class NetworkViewModel : ObservableObject
         }
         finally
         {
-            IsCheckingExit = false;
+            // 可能在后台线程，必须调度回 UI 线程修改绑定属性。
+            _dispatcher.TryEnqueue(() => IsCheckingExit = false);
         }
+    }
+
+    /// <summary>查国家码：直接走外部 geo 服务（内核 geoip 接口不可用，避免白等 404）。</summary>
+    private async Task<string> QueryCountryCodeAsync(string ip)
+    {
+        var (_, _, externalCode) = await QueryGeoAsync(ip).ConfigureAwait(false);
+        return externalCode;
     }
 
     private async Task<string> QueryExitIpAsync()
@@ -124,21 +139,23 @@ public sealed partial class NetworkViewModel : ObservableObject
         throw new InvalidOperationException("所有 IP 源均不可达");
     }
 
-    private async Task<(string Country, string Region)> QueryGeoAsync(string ip)
+    private async Task<(string Country, string Region, string CountryCode)> QueryGeoAsync(string ip)
     {
         try
         {
             using var client = MakeClient();
-            var json = await client.GetStringAsync($"http://ip-api.com/json/{ip}").ConfigureAwait(false);
+            var json = await client.GetStringAsync($"https://ipwho.is/{ip}").ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
+            if (root.TryGetProperty("success", out var ok) && ok.GetBoolean() == false) return ("", "", "");
             var country = root.TryGetProperty("country", out var c) ? c.GetString() : null;
-            var region = root.TryGetProperty("regionName", out var r) ? r.GetString() : null;
-            return (country ?? "", region ?? "");
+            var region = root.TryGetProperty("region", out var r) ? r.GetString() : null;
+            var code = root.TryGetProperty("country_code", out var cc) ? cc.GetString() : null;
+            return (country ?? "", region ?? "", code ?? "");
         }
         catch
         {
-            return ("", "");
+            return ("", "", "");
         }
     }
 
@@ -156,16 +173,17 @@ public sealed partial class NetworkViewModel : ObservableObject
         }
         finally
         {
-            IsTestingAll = false;
+            // 可能在后台线程（ConfigureAwait(false) 后），必须调度回 UI 线程修改绑定属性。
+            _dispatcher.TryEnqueue(() => IsTestingAll = false);
         }
     }
 
     private async Task TestOneAsync(LatencyTargetViewModel target)
     {
-        target.IsTesting = true;
+        _dispatcher.TryEnqueue(() => target.IsTesting = true);
         try
         {
-            using var client = MakeClient();
+            using var client = MakeLatencyClient();
             var sw = Stopwatch.StartNew();
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
             using var response = await client.GetAsync(target.Url, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
@@ -180,7 +198,7 @@ public sealed partial class NetworkViewModel : ObservableObject
         }
         finally
         {
-            target.IsTesting = false;
+            _dispatcher.TryEnqueue(() => target.IsTesting = false);
         }
     }
 
@@ -189,4 +207,8 @@ public sealed partial class NetworkViewModel : ObservableObject
         var handler = new HttpClientHandler { Proxy = DownloadProxy.Create() };
         return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
     }
+
+    /// <summary>延迟测量客户端：直连（不经内核代理），反映当前网络的真实延迟。</summary>
+    private static HttpClient MakeLatencyClient()
+        => new() { Timeout = TimeSpan.FromSeconds(8) };
 }

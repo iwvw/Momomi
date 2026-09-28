@@ -29,6 +29,7 @@
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
                       Padding="36,0,36,24">
+            <Border>
             <StackPanel Spacing="12" MaxWidth="{StaticResource PageContentMaxWidth}">
 
                 <!-- 出口 IP 卡片 -->
@@ -42,9 +43,6 @@
                             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                 <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="当前出口 IP" />
-                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           Text="{x:Bind ViewModel.ExitCountry, Mode=OneWay}" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                 <ProgressRing Width="16" Height="16"
@@ -59,6 +57,14 @@
                             </StackPanel>
                         </Grid>
                         <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="{x:Bind ViewModel.ExitIp, Mode=OneWay}" />
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Image Width="20" Height="15" VerticalAlignment="Center"
+                                   Source="{x:Bind ViewModel.ExitFlag, Mode=OneWay, Converter={StaticResource SvgImageSource}}" />
+                            <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       VerticalAlignment="Center"
+                                       Text="{x:Bind ViewModel.ExitCountry, Mode=OneWay}" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
 
@@ -77,20 +83,29 @@
                                           Visibility="{x:Bind ViewModel.IsTestingAll, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                         </Grid>
                         <ItemsControl ItemsSource="{x:Bind ViewModel.Targets}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <ItemsWrapGrid Orientation="Horizontal"
+                                                   MaximumRowsOrColumns="2" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:LatencyTargetViewModel">
-                                    <Grid ColumnSpacing="12" Padding="0,6">
+                                    <Grid ColumnSpacing="10" MinWidth="230" Padding="4,8">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="{x:Bind Name}" />
-                                        <ProgressRing Grid.Column="1" Width="14" Height="14"
+                                        <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                                                   FontSize="13"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Text="{x:Bind Name}" />
+                                        <ProgressRing Grid.Column="1" Width="12" Height="12"
                                                       IsActive="{x:Bind IsTesting, Mode=OneWay}"
                                                       Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                                         <TextBlock Grid.Column="2" VerticalAlignment="Center"
-                                                   Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                   FontSize="13" FontWeight="SemiBold"
                                                    Text="{x:Bind LatencyText, Mode=OneWay}" />
                                     </Grid>
                                 </DataTemplate>
@@ -99,6 +114,7 @@
                     </StackPanel>
                 </Grid>
             </StackPanel>
+            </Border>
         </ScrollViewer>
     </Grid>
 </Page>

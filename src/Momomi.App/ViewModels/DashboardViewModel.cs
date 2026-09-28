@@ -84,6 +84,25 @@ public sealed partial class DashboardViewModel : ObservableObject
     public partial string TunText { get; set; } = "已关闭";
 
     [ObservableProperty]
+    public partial string ExitIp { get; set; } = "—";
+
+    [ObservableProperty]
+    public partial string ExitCountry { get; set; } = "";
+
+    /// <summary>出口 IP 归属地的国旗 emoji（空表示无）。</summary>
+    [ObservableProperty]
+    public partial string ExitFlag { get; set; } = "";
+
+    [ObservableProperty]
+    public partial bool HasExitIp { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsCheckingExit { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsTestingAll { get; set; }
+
+    [ObservableProperty]
     public partial IReadOnlyList<double> UpPoints { get; set; } = Array.Empty<double>();
 
     [ObservableProperty]
@@ -93,6 +112,9 @@ public sealed partial class DashboardViewModel : ObservableObject
     public partial double MaxRate { get; set; } = 1;
 
     public ObservableCollection<DashboardGroupViewModel> Groups { get; } = new();
+    public ObservableCollection<LatencyTargetViewModel> Targets { get; } = new();
+
+    public string GroupSummaryFallback => "—";
 
     private readonly EventHandler<CoreStateChanged> _onState;
     private readonly EventHandler<TrafficSnapshot> _onTraffic;
@@ -116,6 +138,11 @@ public sealed partial class DashboardViewModel : ObservableObject
         _core = host.Core;
         _dispatcher = dispatcher;
 
+        Targets.Add(new LatencyTargetViewModel("Google", "https://www.gstatic.com/generate_204"));
+        Targets.Add(new LatencyTargetViewModel("Cloudflare", "https://cloudflare.com/cdn-cgi/trace"));
+        Targets.Add(new LatencyTargetViewModel("GitHub", "https://github.com"));
+        Targets.Add(new LatencyTargetViewModel("YouTube", "https://www.youtube.com"));
+
         _onState = (_, e) => _dispatcher.TryEnqueue(() => OnStateChanged(e));
         _onTraffic = (_, t) => _dispatcher.TryEnqueue(() => OnTraffic(t));
         _onMemory = (_, m) => _dispatcher.TryEnqueue(() => Memory = Format.Bytes(m.InUse));
@@ -136,13 +163,27 @@ public sealed partial class DashboardViewModel : ObservableObject
         _core.ConnectionsUpdated += _onConnections;
         AppSignals.ProxiesChanged += _onProxiesReloaded;
 
+        // 兜底：内核刚启动代理未就绪导致检测失败时，周期重试直到出口 IP 出现。
+        _refreshTimer = new Microsoft.UI.Xaml.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(5),
+        };
+        _refreshTimer.Tick += (_, _) => _ = RefreshNetworkAsync();
+        _refreshTimer.Start();
+
         OnStateChanged(new CoreStateChanged(_core.State, _core.Version, _core.LastError));
+        _ = RefreshNetworkAsync();
     }
+
+    private Microsoft.UI.Xaml.DispatcherTimer? _refreshTimer;
 
     public void Detach()
     {
         if (!_attached) return;
         _attached = false;
+
+        _refreshTimer?.Stop();
+        _refreshTimer = null;
 
         _core.StateChanged -= _onState;
         _core.TrafficUpdated -= _onTraffic;
@@ -175,7 +216,12 @@ public sealed partial class DashboardViewModel : ObservableObject
         OnPropertyChanged(nameof(HasError));
         OnPropertyChanged(nameof(ToggleText));
         OnPropertyChanged(nameof(ToggleGlyph));
-        if (IsRunning) _ = LoadAllAsync();
+        if (IsRunning)
+        {
+            _ = LoadAllAsync();
+            // 内核运行后补一次出口 IP / 延迟检测（带 30 秒去重，无需担心重复请求）。
+            _ = RefreshNetworkAsync();
+        }
         else ClearLiveData();
     }
 
@@ -189,6 +235,143 @@ public sealed partial class DashboardViewModel : ObservableObject
         UpPoints = Array.Empty<double>();
         DownPoints = Array.Empty<double>();
     }
+
+    private DateTimeOffset _lastExitCheck = DateTimeOffset.MinValue;
+
+    /// <summary>刷新出口 IP 与目标延迟概览。每次进入首页都刷新出口 IP，避免陈旧。</summary>
+    public async Task RefreshNetworkAsync()
+    {
+        await CheckExitIpOnceAsync().ConfigureAwait(false);
+        await TestTargetsOnceAsync().ConfigureAwait(false);
+    }
+
+    private async Task CheckExitIpOnceAsync()
+    {
+        // 仅在内核运行时检测：此时才走代理，出口 IP 才是真实代理出口。
+        // 失败不更新时间戳，DispatcherTimer（5 秒）会持续重试直到成功。
+        var now = DateTimeOffset.Now;
+        if (IsCheckingExit || _core.Api is null || _core.State != CoreState.Running
+            || now - _lastExitCheck < TimeSpan.FromSeconds(3)) return;
+        IsCheckingExit = true;
+        try
+        {
+            var ip = await QueryExitIpAsync().ConfigureAwait(false);
+            var code = await QueryCountryCodeAsync(ip).ConfigureAwait(false);
+            var country = CountryNames.GetName(code);
+            if (!string.IsNullOrEmpty(ip))
+            {
+                _lastExitCheck = now;
+                _dispatcher.TryEnqueue(() =>
+                {
+                    ExitIp = ip;
+                    ExitCountry = country;
+                    ExitFlag = CountryNames.GetFlag(code);
+                    HasExitIp = true;
+                });
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _dispatcher.TryEnqueue(() => IsCheckingExit = false);
+        }
+    }
+
+    /// <summary>查国家码：直接走外部 geo 服务（内核 geoip 接口不可用，避免白等 404）。</summary>
+    private async Task<string> QueryCountryCodeAsync(string ip)
+    {
+        var (_, _, externalCode) = await QueryGeoAsync(ip).ConfigureAwait(false);
+        return externalCode;
+    }
+
+    private bool _targetsChecked;
+    private async Task TestTargetsOnceAsync()
+    {
+        if (_targetsChecked || IsTestingAll) return;
+        _targetsChecked = true;
+        IsTestingAll = true;
+        try
+        {
+            foreach (var target in Targets)
+                await TestOneTargetAsync(target).ConfigureAwait(false);
+        }
+        finally
+        {
+            _dispatcher.TryEnqueue(() => IsTestingAll = false);
+        }
+    }
+
+    private async Task TestOneTargetAsync(LatencyTargetViewModel target)
+    {
+        _dispatcher.TryEnqueue(() => target.IsTesting = true);
+        try
+        {
+            using var client = MakeLatencyClient();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+            using var response = await client.GetAsync(target.Url, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            sw.Stop();
+            _dispatcher.TryEnqueue(() => target.SetResult(sw.ElapsedMilliseconds));
+        }
+        catch
+        {
+            _dispatcher.TryEnqueue(() => target.SetResult(null));
+        }
+        finally
+        {
+            _dispatcher.TryEnqueue(() => target.IsTesting = false);
+        }
+    }
+
+    private async Task<string> QueryExitIpAsync()
+    {
+        using var client = MakeNetworkClient();
+        foreach (var url in new[] { "https://api.ipify.org", "https://ipv4.icanhazip.com", "https://ifconfig.me/ip" })
+        {
+            try
+            {
+                var text = (await client.GetStringAsync(url).ConfigureAwait(false)).Trim();
+                if (!string.IsNullOrEmpty(text)) return text;
+            }
+            catch
+            {
+            }
+        }
+        throw new InvalidOperationException("所有 IP 源均不可达");
+    }
+
+    private async Task<(string Country, string Region, string CountryCode)> QueryGeoAsync(string ip)
+    {
+        try
+        {
+            using var client = MakeNetworkClient();
+            var json = await client.GetStringAsync($"https://ipwho.is/{ip}").ConfigureAwait(false);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("success", out var ok) && ok.GetBoolean() == false) return ("", "", "");
+            var country = root.TryGetProperty("country", out var c) ? c.GetString() : null;
+            var region = root.TryGetProperty("region", out var r) ? r.GetString() : null;
+            var code = root.TryGetProperty("country_code", out var cc) ? cc.GetString() : null;
+            return (country ?? "", region ?? "", code ?? "");
+        }
+        catch
+        {
+            return ("", "", "");
+        }
+    }
+
+    private System.Net.Http.HttpClient MakeNetworkClient()
+    {
+        var handler = new System.Net.Http.HttpClientHandler { Proxy = DownloadProxy.Create() };
+        return new System.Net.Http.HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
+    }
+
+    /// <summary>延迟测量客户端：直连（不经内核代理），反映当前网络的真实延迟。</summary>
+    private static System.Net.Http.HttpClient MakeLatencyClient()
+        => new() { Timeout = TimeSpan.FromSeconds(8) };
 
     private async Task LoadAllAsync()
     {
@@ -361,7 +544,11 @@ public sealed partial class DashboardViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task RefreshAsync() => await LoadAllAsync();
+    private async Task RefreshAsync()
+    {
+        await LoadAllAsync();
+        await RefreshNetworkAsync();
+    }
 }
 
 public sealed class DashboardGroupViewModel

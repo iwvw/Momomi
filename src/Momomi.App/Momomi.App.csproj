@@ -27,6 +27,7 @@
     <Content Include="Assets\TrayGreen.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\TrayRed.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\FlagsEmoji.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\flags\*.svg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

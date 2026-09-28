@@ -38,4 +38,16 @@ public sealed partial class DashboardPage : Page
 
     private void GoProxies_Click(object sender, RoutedEventArgs e) =>
         global::Momomi.App.App.Main?.NavigateToTag("proxies");
+
+    private void GoNetwork_Click(object sender, RoutedEventArgs e) =>
+        global::Momomi.App.App.Main?.NavigateToTag("network");
+
+    private void GoTraffic_Click(object sender, RoutedEventArgs e) =>
+        global::Momomi.App.App.Main?.NavigateToTag("traffic");
+
+    private void GoLogs_Click(object sender, RoutedEventArgs e) =>
+        global::Momomi.App.App.Main?.NavigateToTag("logs");
+
+    private void GoConnections_Click(object sender, RoutedEventArgs e) =>
+        global::Momomi.App.App.Main?.NavigateToTag("connections");
 }
