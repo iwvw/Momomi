@@ -21,6 +21,19 @@ public sealed partial class ProfileRowViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsRefreshing { get; set; }
 
+    /// <summary>时间行显示模式：false=更新时间（默认），true=到期时间。点击卡片时间行切换。</summary>
+    [ObservableProperty]
+    public partial bool ShowExpire { get; set; }
+
+    /// <summary>卡片时间行：到期时间或更新时间，点击切换。</summary>
+    public string ToggleTimeText => ShowExpire
+        ? (string.IsNullOrEmpty(ExpireText) ? "长期有效" : ExpireText)
+        : $"更新于 {UpdatedText}";
+
+    public void ToggleTime() => ShowExpire = !ShowExpire;
+
+    partial void OnShowExpireChanged(bool value) => OnPropertyChanged(nameof(ToggleTimeText));
+
     public string SourceText => string.IsNullOrEmpty(Source) ? "本地" : Source!;
 
     public string TrafficText => FormatSubscriptionInfo(SubscriptionUserInfo);

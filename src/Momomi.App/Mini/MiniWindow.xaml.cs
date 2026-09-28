@@ -153,6 +153,8 @@ public sealed partial class MiniWindow : Window
         Close();
     }
 
+    public bool IsVisible => _state is VisState.Showing or VisState.Shown;
+
     public void ToggleVisible()
     {
         if (_state is VisState.Showing or VisState.Shown) Hide();
@@ -208,6 +210,9 @@ public sealed partial class MiniWindow : Window
 
         var current = DpiLayout.GetCurrentRect(_hwnd);
         if (current.Width <= 0 || current.Height <= 0) current = _targetRect;
+
+        // 收起前把窗口插回任务栏下方：向下滑时被任务栏遮住，产生"从任务栏后藏入"的观感（与拖拽收起一致）。
+        WindowChrome.PlaceBelowTaskbar(_hwnd);
 
         // 收起：反向曲线，开始缓缓起步，对齐 Fluent 退出动画。
         _slider.Animate(current, hiddenRect, 255, 255, HideDurationMs, SlideEasing.EaseIn, OnHideCompleted);

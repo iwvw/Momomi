@@ -37,6 +37,11 @@ public sealed partial class TrafficViewModel : ObservableObject
     private readonly MomomiHost _host;
     private readonly DispatcherQueue _dispatcher;
 
+    /// <summary>历史列表每页条数。</summary>
+    private const int PageSize = 120;
+
+    private readonly List<TrafficMinute> _allRecords = new();
+
     public ObservableCollection<TrafficBucketViewModel> Items { get; } = new();
     public ObservableCollection<double> UpSeries { get; } = new();
     public ObservableCollection<double> DownSeries { get; } = new();
@@ -75,6 +80,16 @@ public sealed partial class TrafficViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsBusy { get; set; }
 
+    [ObservableProperty]
+    public partial int CurrentPage { get; set; } = 1;
+
+    [ObservableProperty]
+    public partial int PageCount { get; set; } = 1;
+
+    public bool CanGoPrev => CurrentPage > 1;
+    public bool CanGoNext => CurrentPage < PageCount;
+    public string PageText => $"第 {CurrentPage} / {PageCount} 页";
+
     public TrafficViewModel(MomomiHost host, DispatcherQueue dispatcher)
     {
         _host = host;
@@ -104,11 +119,12 @@ public sealed partial class TrafficViewModel : ObservableObject
                 _ => 360,
             };
 
-            var records = (await _host.Traffic.QueryAsync(from, limit)).Reverse().ToList();
+            _allRecords.Clear();
+            _allRecords.AddRange(await _host.Traffic.QueryAsync(from, limit));
 
             _dispatcher.TryEnqueue(() =>
             {
-                Items.Clear();
+                // 图表与汇总基于全量数据（时间正序：旧→新）。
                 UpSeries.Clear();
                 DownSeries.Clear();
                 MemorySeries.Clear();
@@ -117,10 +133,8 @@ public sealed partial class TrafficViewModel : ObservableObject
                 var first = true;
                 long sumUp = 0, sumDown = 0;
 
-                foreach (var r in records)
+                foreach (var r in _allRecords.AsEnumerable().Reverse())
                 {
-                    Items.Add(new TrafficBucketViewModel(r));
-
                     var upDelta = first ? 0 : Math.Max(0, r.Up - prevUp);
                     var downDelta = first ? 0 : Math.Max(0, r.Down - prevDown);
                     prevUp = r.Up;
@@ -146,10 +160,14 @@ public sealed partial class TrafficViewModel : ObservableObject
                 TotalDownText = Format.Bytes(sumDown);
                 PeakText = $"{Format.Rate((long)MaxRate)}";
 
-                StatusText = records.Count == 0
-                    ? "暂无历史数据（内核运行后每分钟记录一次）"
-                    : $"共 {records.Count} 条分钟记录";
+                PageCount = Math.Max(1, (int)Math.Ceiling(_allRecords.Count / (double)PageSize));
+                CurrentPage = 1;
 
+                StatusText = _allRecords.Count == 0
+                    ? "暂无历史数据（内核运行后每分钟记录一次）"
+                    : $"共 {_allRecords.Count} 条分钟记录";
+
+                ApplyPage();
                 _loaded = true;
             });
         }
@@ -161,6 +179,33 @@ public sealed partial class TrafficViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    partial void OnCurrentPageChanged(int value) => ApplyPage();
+
+    /// <summary>把当前页的数据填充进 Items（新→旧，第 1 页为最近数据）。</summary>
+    private void ApplyPage()
+    {
+        Items.Clear();
+        var start = (CurrentPage - 1) * PageSize;
+        foreach (var r in _allRecords.Skip(start).Take(PageSize))
+            Items.Add(new TrafficBucketViewModel(r));
+
+        OnPropertyChanged(nameof(CanGoPrev));
+        OnPropertyChanged(nameof(CanGoNext));
+        OnPropertyChanged(nameof(PageText));
+    }
+
+    [RelayCommand]
+    private void NextPage()
+    {
+        if (CurrentPage < PageCount) CurrentPage++;
+    }
+
+    [RelayCommand]
+    private void PrevPage()
+    {
+        if (CurrentPage > 1) CurrentPage--;
     }
 
     private static IReadOnlyList<double> Downsample(IReadOnlyList<double> source, int target)

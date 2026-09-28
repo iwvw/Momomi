@@ -7,7 +7,9 @@ public interface ISystemProxyService
 {
     bool IsEnabled();
     string? CurrentServer();
+    string? CurrentAutoConfigUrl();
     bool Enable(string server, string bypass);
+    bool EnablePac(string pacUrl);
     bool Disable();
 }
 
@@ -43,6 +45,19 @@ public sealed class SystemProxyService : ISystemProxyService
         }
     }
 
+    public string? CurrentAutoConfigUrl()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RegPath);
+            return key?.GetValue("AutoConfigURL") as string;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public bool Enable(string server, string bypass)
     {
         try
@@ -53,6 +68,27 @@ public sealed class SystemProxyService : ISystemProxyService
             key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
             key.SetValue("ProxyServer", server, RegistryValueKind.String);
             key.SetValue("ProxyOverride", bypass, RegistryValueKind.String);
+            key.DeleteValue("AutoConfigURL", throwOnMissingValue: false);
+            Notify();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>启用 PAC 模式：写 AutoConfigURL（本地 PAC 脚本），清理手动代理设置。</summary>
+    public bool EnablePac(string pacUrl)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RegPath, writable: true)
+                            ?? Registry.CurrentUser.CreateSubKey(RegPath);
+            if (key is null) return false;
+            key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
+            key.SetValue("AutoConfigURL", pacUrl, RegistryValueKind.String);
+            key.DeleteValue("ProxyServer", throwOnMissingValue: false);
             Notify();
             return true;
         }
@@ -69,6 +105,7 @@ public sealed class SystemProxyService : ISystemProxyService
             using var key = Registry.CurrentUser.OpenSubKey(RegPath, writable: true);
             if (key is null) return false;
             key.SetValue("ProxyEnable", 0, RegistryValueKind.DWord);
+            key.DeleteValue("AutoConfigURL", throwOnMissingValue: false);
             Notify();
             return true;
         }

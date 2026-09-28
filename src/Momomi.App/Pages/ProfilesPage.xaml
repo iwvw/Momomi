@@ -156,9 +156,17 @@
                                         <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                    Text="{x:Bind KindText}" />
+                                        <Button Style="{StaticResource IconButtonStyle}"
+                                                Width="20" Height="20" Padding="2"
+                                                VerticalAlignment="Center"
+                                                Tag="{x:Bind}"
+                                                Click="ToggleTime_Click"
+                                                ToolTipService.ToolTip="点击切换显示到期时间 / 更新时间">
+                                            <FontIcon FontSize="8" Glyph="&#xE823;" />
+                                        </Button>
                                         <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                   Text="{x:Bind UpdatedText}" />
+                                                   Text="{x:Bind ToggleTimeText, Mode=OneWay}" />
                                     </StackPanel>
                                 </StackPanel>
 

@@ -236,6 +236,16 @@
                         <ToggleSwitch IsOn="{x:Bind ViewModel.SystemProxyEnabled, Mode=TwoWay}" />
                     </controls:SettingsCard>
 
+                    <controls:SettingsCard Description="PAC：本地返回代理脚本，分流更精细；手动：直接写代理服务器" Header="代理模式">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE7C8;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <ComboBox x:Name="SystemProxyModeBox" Width="160" SelectionChanged="SystemProxyMode_SelectionChanged">
+                            <ComboBoxItem Content="手动" />
+                            <ComboBoxItem Content="PAC" />
+                        </ComboBox>
+                    </controls:SettingsCard>
+
                     <controls:SettingsCard Description="需要管理员权限，切换后自动重启内核" Header="TUN 模式">
                         <controls:SettingsCard.HeaderIcon>
                             <FontIcon Glyph="&#xE701;" />
@@ -396,6 +406,32 @@
                 </StackPanel>
 
                 <TextBlock Style="{StaticResource SettingsSectionHeaderTextBlockStyle}"
+                           Text="SSID 感知" />
+                <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
+                    <controls:SettingsCard Description="命中列表内 WiFi 时自动关闭系统代理，离开后恢复；每行一个 SSID">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE904;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <TextBox Width="240" Height="72" AcceptsReturn="True" TextWrapping="Wrap"
+                                 PlaceholderText="例如&#x0a;CoffeeShop&#x0a;Home-WiFi"
+                                 Tag="PauseSsids"
+                                 Text="{x:Bind ViewModel.PauseSsids, Mode=TwoWay}"
+                                 LostFocus="TextField_LostFocus" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Description="命中列表内 WiFi 时自动切换为该订阅；每行格式：SSID，Tab，订阅名称">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE8B7;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <TextBox Width="240" Height="72" AcceptsReturn="True" TextWrapping="Wrap"
+                                 PlaceholderText="例如&#x0a;Office-WiFi&#x9;工作订阅&#x0a;Home-WiFi&#x9;家庭订阅"
+                                 Tag="SsidProfileMap"
+                                 Text="{x:Bind ViewModel.SsidProfileMap, Mode=TwoWay}"
+                                 LostFocus="TextField_LostFocus" />
+                    </controls:SettingsCard>
+                </StackPanel>
+
+                <TextBlock Style="{StaticResource SettingsSectionHeaderTextBlockStyle}"
                            Text="内核参数" />
                 <StackPanel Spacing="{StaticResource SettingsCardSpacing}">
                     <controls:SettingsCard Description="本机代理监听端口，回车或失焦后保存" Header="混合端口">
@@ -523,6 +559,21 @@
                             <ProgressBar Maximum="100"
                                          Value="{x:Bind ViewModel.KernelProgress, Mode=OneWay}"
                                          Visibility="{x:Bind ViewModel.KernelProgressVisible, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Description="选择任一版本升级内核（含历史版本，升级完成后自动重启内核）" Header="选择版本升级">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE895;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <ComboBox x:Name="KernelVersionBox" Width="180" Height="32" VerticalAlignment="Center"
+                                      PlaceholderText="选择版本"
+                                      ItemsSource="{x:Bind ViewModel.KernelVersions, Mode=OneWay}"
+                                      SelectedItem="{x:Bind ViewModel.SelectedKernelVersion, Mode=TwoWay}" />
+                            <Button MinWidth="0" Padding="10,4" VerticalAlignment="Center"
+                                    Command="{x:Bind ViewModel.UpgradeToSelectedCommand}"
+                                    Content="升级到此版本" />
                         </StackPanel>
                     </controls:SettingsCard>
                 </StackPanel>

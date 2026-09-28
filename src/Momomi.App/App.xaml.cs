@@ -188,7 +188,7 @@ public partial class App : Application
             if (!autoStart) return;
             await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
 
-            // 启动时若开启自动更新订阅，先刷新当前订阅再应用。
+            // 启动时若开启自动更新订阅，先刷新当前订阅再应用（当前订阅需立即可用）。
             try
             {
                 var autoUpdate = await host.Settings.GetBoolAsync("profile.autoUpdate", true).ConfigureAwait(false);
@@ -197,6 +197,24 @@ public partial class App : Application
                     var active = await host.Profiles.GetActiveAsync().ConfigureAwait(false);
                     if (active is { Kind: "url" })
                         await host.Profiles.RefreshAsync(active.Id).ConfigureAwait(false);
+
+                    // 其余订阅后台错峰刷新（每个间隔数秒），避免启动时挤占网络。
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var items = await host.Profiles.ListAsync().ConfigureAwait(false);
+                            var others = items.Where(i => i.Kind == "url" && i.Id != active?.Id).ToList();
+                            for (var i = 0; i < others.Count; i++)
+                            {
+                                await host.Profiles.RefreshAsync(others[i].Id).ConfigureAwait(false);
+                                await Task.Delay(TimeSpan.FromSeconds(4)).ConfigureAwait(false);
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    });
                 }
             }
             catch

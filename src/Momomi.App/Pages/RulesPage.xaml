@@ -24,6 +24,10 @@
                     <TextBox Width="260" VerticalAlignment="Center"
                              PlaceholderText="按类型 / 内容 / 策略过滤"
                              Text="{x:Bind ViewModel.Filter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <Button VerticalAlignment="Center" MinWidth="0" Padding="12,4"
+                            Command="{x:Bind ViewModel.RestoreAllCommand}"
+                            Visibility="{x:Bind ViewModel.HasDisabled, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
+                            Content="恢复全部" />
                     <Button VerticalAlignment="Center"
                             Command="{x:Bind ViewModel.RefreshCommand}" Content="刷新" />
                 </StackPanel>
@@ -41,7 +45,9 @@
                                 <ColumnDefinition Width="48" />
                                 <ColumnDefinition Width="150" />
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="90" />
+                                <ColumnDefinition Width="64" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="#" />
@@ -51,6 +57,10 @@
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="内容" />
                             <TextBlock Grid.Column="3" Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="策略" />
+                            <TextBlock Grid.Column="4" Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="命中" />
+                            <TextBlock Grid.Column="5" Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="禁用" />
                         </Grid>
                     </DataTemplate>
                 </ListView.HeaderTemplate>
@@ -68,7 +78,9 @@
                                 <ColumnDefinition Width="48" />
                                 <ColumnDefinition Width="150" />
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="220" />
+                                <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="90" />
+                                <ColumnDefinition Width="64" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0"
                                        Style="{StaticResource CaptionTextBlockStyle}"
@@ -87,6 +99,19 @@
                                        TextTrimming="CharacterEllipsis"
                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                        Text="{x:Bind Proxy}" />
+                            <TextBlock Grid.Column="4"
+                                       VerticalAlignment="Center"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Visibility="{x:Bind HasHit, Mode=OneTime, Converter={StaticResource BoolToVisibility}}"
+                                       Text="{x:Bind Size}" />
+                            <ToggleButton Grid.Column="5"
+                                          MinWidth="0" Padding="0"
+                                          VerticalAlignment="Center"
+                                          Tag="{x:Bind}"
+                                          Click="Disable_Click"
+                                          ToolTipService.ToolTip="临时禁用（仅当前会话，重载配置后恢复）">
+                                <FontIcon FontSize="10" Glyph="&#xE74A;" />
+                            </ToggleButton>
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>

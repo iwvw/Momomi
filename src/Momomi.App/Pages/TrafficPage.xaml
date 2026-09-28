@@ -164,6 +164,22 @@
                         </ListView.ItemTemplate>
                     </ListView>
                 </Grid>
+
+                <Grid Style="{StaticResource CardStyle}" Padding="16,8">
+                    <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                        <Button VerticalAlignment="Center" MinWidth="0" Padding="12,4"
+                                Command="{x:Bind ViewModel.PrevPageCommand}"
+                                IsEnabled="{x:Bind ViewModel.CanGoPrev, Mode=OneWay}"
+                                Content="上一页" />
+                        <TextBlock VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Text="{x:Bind ViewModel.PageText, Mode=OneWay}" />
+                        <Button VerticalAlignment="Center" MinWidth="0" Padding="12,4"
+                                Command="{x:Bind ViewModel.NextPageCommand}"
+                                IsEnabled="{x:Bind ViewModel.CanGoNext, Mode=OneWay}"
+                                Content="下一页" />
+                    </StackPanel>
+                </Grid>
             </StackPanel>
             </Border>
         </ScrollViewer>

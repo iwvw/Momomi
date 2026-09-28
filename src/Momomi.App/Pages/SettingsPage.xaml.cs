@@ -55,6 +55,7 @@ public sealed partial class SettingsPage : Page
     private async Task ReloadAsync()
     {
         await ViewModel.LoadAsync();
+        await ViewModel.LoadKernelVersionsCommand.ExecuteAsync(null);
 
         _syncing = true;
         try
@@ -72,6 +73,11 @@ public sealed partial class SettingsPage : Page
                 "warning" => 2,
                 "debug" => 4,
                 _ => 3,
+            };
+            SystemProxyModeBox.SelectedIndex = ViewModel.SystemProxyMode switch
+            {
+                "pac" => 1,
+                _ => 0,
             };
             TunStackBox.SelectedIndex = ViewModel.TunStack switch
             {
@@ -114,6 +120,16 @@ public sealed partial class SettingsPage : Page
             2 => "warning",
             4 => "debug",
             _ => "info",
+        };
+    }
+
+    private void SystemProxyMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing) return;
+        ViewModel.SystemProxyMode = SystemProxyModeBox.SelectedIndex switch
+        {
+            1 => "pac",
+            _ => "manual",
         };
     }
 
@@ -262,6 +278,8 @@ public sealed partial class SettingsPage : Page
             case "TunMtu": ViewModel.TunMtu = text; break;
             case "TunDnsHijack": ViewModel.TunDnsHijack = text; break;
             case "TunRouteExcludeAddress": ViewModel.TunRouteExcludeAddress = text; break;
+            case "PauseSsids": ViewModel.PauseSsids = text; break;
+            case "SsidProfileMap": ViewModel.SsidProfileMap = text; break;
         }
     }
 }

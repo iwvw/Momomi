@@ -29,4 +29,10 @@ public sealed partial class RulesPage : Page
         base.OnNavigatedFrom(e);
         ViewModel.Detach();
     }
+
+    private void Disable_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.Tag is not RuleRowViewModel row) return;
+        _ = ViewModel.ToggleRuleCommand.ExecuteAsync(row);
+    }
 }

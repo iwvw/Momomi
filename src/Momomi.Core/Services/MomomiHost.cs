@@ -15,6 +15,8 @@ public sealed class MomomiHost : IDisposable
     public IProfileService Profiles { get; }
     public IElevatedClient Elevated { get; }
     public IAppUpdateService AppUpdate { get; }
+    public SsidService Ssid { get; }
+    public PacServer Pac { get; } = new();
 
     private readonly TrafficRecorder _recorder;
     private readonly Timer _profileRefreshTimer;
@@ -46,6 +48,7 @@ public sealed class MomomiHost : IDisposable
         Elevated = new ElevatedClient(Path.Combine(AppContext.BaseDirectory, "Momomi.Elevated.exe"));
         Profiles = new ProfileService(Database, Settings, Path.Combine(_root, "profiles"));
         AppUpdate = new AppUpdateService(Settings);
+        Ssid = new SsidService(this);
 
         var paths = new CorePaths(
             BinaryPath: KernelUpdate.BinaryPath,
@@ -79,6 +82,8 @@ public sealed class MomomiHost : IDisposable
         await Core.InitializeAsync(ct).ConfigureAwait(false);
         // 载入手动下载代理端口（用于内核未运行时下载内核/geodata）。
         DownloadProxy.SetManualPort(await Settings.GetIntAsync("core.downloadProxyPort", 0).ConfigureAwait(false));
+        // SSID 感知：按 WiFi 自动切换订阅 / 暂停代理。
+        Ssid.Start();
     }
 
     private void OnProfileRefresh(object? state)
@@ -188,6 +193,8 @@ public sealed class MomomiHost : IDisposable
 
     public void Dispose()
     {        _profileRefreshTimer.Dispose();
+        Ssid.Dispose();
+        Pac.Dispose();
         Core.Dispose();
         _recorder.Dispose();
     }
@@ -201,6 +208,13 @@ public sealed class MomomiHost : IDisposable
         try
         {
             Core.StopAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
+        try
+        {
+            Pac.Stop();
         }
         catch
         {

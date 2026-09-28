@@ -60,6 +60,12 @@ public sealed partial class ProfilesPage : Page
         _ = ViewModel.RefreshCommand.ExecuteAsync(row);
     }
 
+    private void ToggleTime_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.Tag is not ProfileRowViewModel row) return;
+        row.ToggleTime();
+    }
+
     private void Activate_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement fe || fe.Tag is not ProfileRowViewModel row) return;

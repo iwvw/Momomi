@@ -64,6 +64,45 @@
                     </ToggleButton>
 
                     <Button VerticalAlignment="Center" Height="32" MinWidth="0" Padding="12,0"
+                            Click="ToggleView_Click"
+                            ToolTipService.ToolTip="切换卡片 / 表格视图">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.ViewGlyph, Mode=OneWay}" />
+                            <TextBlock Text="{x:Bind ViewModel.ViewText, Mode=OneWay}" />
+                        </StackPanel>
+                    </Button>
+
+                    <ToggleButton x:Name="RankingButton" VerticalAlignment="Center"
+                                  Height="32" MinWidth="0" Padding="12,0"
+                                  IsChecked="{x:Bind ViewModel.IsRankingView, Mode=TwoWay}"
+                                  ToolTipService.ToolTip="流量排行：按主机/进程/来源聚合，点选下钻">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="12" Glyph="&#xE9D9;" />
+                            <TextBlock Text="排行" />
+                        </StackPanel>
+                    </ToggleButton>
+
+                    <Button VerticalAlignment="Center" Width="32" Height="32" Padding="0"
+                            ToolTipService.ToolTip="表格列选择"
+                            Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay}"
+                            Click="Columns_Click">
+                        <FontIcon FontSize="12" Glyph="&#xE8FC;" />
+                        <Button.Flyout>
+                            <MenuFlyout x:Name="ColumnsFlyout" Placement="BottomEdgeAlignedRight">
+                                <MenuFlyoutSubItem Text="显示列">
+                                    <ToggleMenuFlyoutItem x:Name="ColProcess" Text="进程" Tag="process" Click="Column_Toggle" />
+                                    <ToggleMenuFlyoutItem x:Name="ColHost" Text="主机" Tag="host" Click="Column_Toggle" />
+                                    <ToggleMenuFlyoutItem x:Name="ColNetwork" Text="网络" Tag="network" Click="Column_Toggle" />
+                                    <ToggleMenuFlyoutItem x:Name="ColRule" Text="规则" Tag="rule" Click="Column_Toggle" />
+                                    <ToggleMenuFlyoutItem x:Name="ColUpload" Text="上传" Tag="upload" Click="Column_Toggle" />
+                                    <ToggleMenuFlyoutItem x:Name="ColDownload" Text="下载" Tag="download" Click="Column_Toggle" />
+                                    <ToggleMenuFlyoutItem x:Name="ColDuration" Text="时长" Tag="duration" Click="Column_Toggle" />
+                                </MenuFlyoutSubItem>
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
+
+                    <Button VerticalAlignment="Center" Height="32" MinWidth="0" Padding="12,0"
                             Command="{x:Bind ViewModel.CloseAllCommand}"
                             Content="全部关闭" />
                 </StackPanel>
@@ -73,7 +112,187 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
                       Padding="36,0,36,0">
             <Border>
-            <ItemsControl ItemsSource="{x:Bind ViewModel.Items}" Margin="0,0,0,24" MaxWidth="{StaticResource PageContentMaxWidth}">
+            <StackPanel Spacing="8" Margin="0,0,0,24" MaxWidth="{StaticResource PageContentMaxWidth}">
+
+            <!-- 流量排行视图：维度切换 + 排行列表，点选下钻 -->
+            <Grid Style="{StaticResource CardStyle}" Padding="16,12"
+                  Visibility="{x:Bind ViewModel.IsRankingView, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel Spacing="10">
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                                   Style="{StaticResource BodyStrongTextBlockStyle}" Text="流量排行" />
+                        <ComboBox Grid.Column="1" VerticalAlignment="Center" Height="32" MinWidth="0"
+                                  SelectedIndex="{x:Bind ViewModel.RankingDimensionIndex, Mode=TwoWay}">
+                            <ComboBoxItem Content="按主机" />
+                            <ComboBoxItem Content="按进程" />
+                            <ComboBoxItem Content="按来源" />
+                        </ComboBox>
+                        <TextBlock Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   Text="{x:Bind ViewModel.RankingHint, Mode=OneWay}" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{x:Bind ViewModel.Rankings}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:RankingRowViewModel">
+                                <Button HorizontalContentAlignment="Stretch" Padding="8,5"
+                                        Background="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedToBrush}}"
+                                        Command="{Binding DataContext.SelectRankingCommand, ElementName=PageRoot}"
+                                        CommandParameter="{x:Bind}">
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" TextTrimming="CharacterEllipsis" Text="{x:Bind Name}" />
+                                        <TextBlock Grid.Column="1" Style="{StaticResource CaptionTextBlockStyle}"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Count}" />
+                                        <TextBlock Grid.Column="2" Style="{StaticResource RateUpBrush}" Text="{x:Bind Up}" />
+                                        <TextBlock Grid.Column="3" Style="{StaticResource RateDownBrush}" Text="{x:Bind Down}" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Grid>
+
+            <!-- 表格视图：表头 + 行，列可排序可开关 -->
+            <Grid Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.ColumnSpan="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8"
+                        Padding="12,8">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="96" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="70" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="100" />
+                            <ColumnDefinition Width="100" />
+                            <ColumnDefinition Width="70" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" Style="{StaticResource IconButtonStyle}"
+                                HorizontalContentAlignment="Left" Click="HeaderSort_Click" Tag="process">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <TextBlock Text="进程" />
+                                <FontIcon FontSize="8" Glyph="{x:Bind ViewModel.SortArrow('process'), Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="1" Style="{StaticResource IconButtonStyle}"
+                                HorizontalContentAlignment="Left" Click="HeaderSort_Click" Tag="host">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <TextBlock Text="主机" />
+                                <FontIcon FontSize="8" Glyph="{x:Bind ViewModel.SortArrow('host'), Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="2" Style="{StaticResource IconButtonStyle}"
+                                HorizontalContentAlignment="Left" Click="HeaderSort_Click" Tag="network"
+                                Visibility="{Binding Columns[2].IsVisible, ElementName=PageRoot}">
+                            <TextBlock Text="网络" />
+                        </Button>
+                        <Button Grid.Column="3" Style="{StaticResource IconButtonStyle}"
+                                HorizontalContentAlignment="Left" Click="HeaderSort_Click" Tag="rule"
+                                Visibility="{Binding Columns[3].IsVisible, ElementName=PageRoot}">
+                            <TextBlock Text="规则" />
+                        </Button>
+                        <Button Grid.Column="4" Style="{StaticResource IconButtonStyle}"
+                                HorizontalContentAlignment="Left" Click="HeaderSort_Click" Tag="upload"
+                                Visibility="{Binding Columns[4].IsVisible, ElementName=PageRoot}">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <TextBlock Text="上传" />
+                                <FontIcon FontSize="8" Glyph="{x:Bind ViewModel.SortArrow('upload'), Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="5" Style="{StaticResource IconButtonStyle}"
+                                HorizontalContentAlignment="Left" Click="HeaderSort_Click" Tag="download"
+                                Visibility="{Binding Columns[5].IsVisible, ElementName=PageRoot}">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <TextBlock Text="下载" />
+                                <FontIcon FontSize="8" Glyph="{x:Bind ViewModel.SortArrow('download'), Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="6" Style="{StaticResource IconButtonStyle}"
+                                HorizontalContentAlignment="Left" Click="HeaderSort_Click" Tag="duration"
+                                Visibility="{Binding Columns[6].IsVisible, ElementName=PageRoot}">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <TextBlock Text="时长" />
+                                <FontIcon FontSize="8" Glyph="{x:Bind ViewModel.SortArrow('duration'), Mode=OneWay}" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <ItemsControl ItemsSource="{x:Bind ViewModel.Items}"
+                          Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ConnectionRowViewModel">
+                        <Grid ColumnSpacing="12" Padding="12,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="96" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="70" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="100" />
+                                <ColumnDefinition Width="100" />
+                                <ColumnDefinition Width="70" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="{x:Bind Process}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="1" Text="{x:Bind Host}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="2" Text="{x:Bind Network}"
+                                       Visibility="{Binding Columns[2].IsVisible, ElementName=PageRoot}" />
+                            <TextBlock Grid.Column="3" Text="{x:Bind Rule}" TextTrimming="CharacterEllipsis"
+                                       Visibility="{Binding Columns[3].IsVisible, ElementName=PageRoot}" />
+                            <TextBlock Grid.Column="4" Style="{StaticResource RateUpBrush}" Text="{x:Bind Upload}"
+                                       Visibility="{Binding Columns[4].IsVisible, ElementName=PageRoot}" />
+                            <TextBlock Grid.Column="5" Style="{StaticResource RateDownBrush}" Text="{x:Bind Download}"
+                                       Visibility="{Binding Columns[5].IsVisible, ElementName=PageRoot}" />
+                            <TextBlock Grid.Column="6" Text="{x:Bind Duration}"
+                                       Visibility="{Binding Columns[6].IsVisible, ElementName=PageRoot}" />
+                            <StackPanel Grid.Column="7" Orientation="Horizontal" Spacing="4">
+                                <Button Style="{StaticResource IconButtonStyle}" Width="24" Height="24"
+                                        ToolTipService.ToolTip="详情" Tag="{x:Bind}" Click="Details_Click">
+                                    <FontIcon FontSize="10" Glyph="&#xE8A7;" />
+                                </Button>
+                                <Button Style="{StaticResource IconButtonStyle}" Width="24" Height="24"
+                                        ToolTipService.ToolTip="复制为规则" Tag="{x:Bind}" Click="CopyRule_Click">
+                                    <FontIcon FontSize="10" Glyph="&#xE8C8;" />
+                                </Button>
+                                <Button Style="{StaticResource IconButtonStyle}" Width="24" Height="24"
+                                        ToolTipService.ToolTip="关闭此连接"
+                                        Command="{Binding DataContext.CloseConnectionCommand, ElementName=PageRoot}"
+                                        CommandParameter="{x:Bind}">
+                                    <FontIcon FontSize="10" Glyph="&#xE711;" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- 卡片视图 -->
+            <ItemsControl ItemsSource="{x:Bind ViewModel.Items}"
+                          Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:ConnectionRowViewModel">
                         <Grid Style="{StaticResource CardStyle}" Margin="0,0,0,8" Padding="14,12">
@@ -107,7 +326,8 @@
                                     </Grid>
                                     <Grid Style="{StaticResource TagChipStyle}"
                                             Visibility="{x:Bind HasChain, Mode=OneTime, Converter={StaticResource BoolToVisibility}}">
-                                        <TextBlock Text="{x:Bind Chain}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind Chain}" TextTrimming="CharacterEllipsis"
+                                                   FontFamily="{StaticResource NodeNameFontFamily}" />
                                     </Grid>
                                     <Grid Style="{StaticResource TagChipStyle}"
                                             Visibility="{x:Bind HasRule, Mode=OneTime, Converter={StaticResource BoolToVisibility}}">
@@ -152,6 +372,22 @@
                             <Button Grid.Column="5" Style="{StaticResource IconButtonStyle}"
                                     Width="28" Height="28" Margin="8,0,0,0"
                                     VerticalAlignment="Center"
+                                    ToolTipService.ToolTip="详情"
+                                    Tag="{x:Bind}"
+                                    Click="Details_Click">
+                                <FontIcon FontSize="12" Glyph="&#xE8A7;" />
+                            </Button>
+                            <Button Grid.Column="5" Style="{StaticResource IconButtonStyle}"
+                                    Width="28" Height="28" Margin="8,0,0,0"
+                                    VerticalAlignment="Center"
+                                    ToolTipService.ToolTip="复制为规则"
+                                    Tag="{x:Bind}"
+                                    Click="CopyRule_Click">
+                                <FontIcon FontSize="12" Glyph="&#xE8C8;" />
+                            </Button>
+                            <Button Grid.Column="5" Style="{StaticResource IconButtonStyle}"
+                                    Width="28" Height="28" Margin="8,0,0,0"
+                                    VerticalAlignment="Center"
                                     ToolTipService.ToolTip="关闭此连接"
                                     Command="{Binding DataContext.CloseConnectionCommand, ElementName=PageRoot}"
                                     CommandParameter="{x:Bind}">
@@ -161,6 +397,7 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+            </StackPanel>
             </Border>
         </ScrollViewer>
     </Grid>

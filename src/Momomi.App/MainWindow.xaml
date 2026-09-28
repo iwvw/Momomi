@@ -24,7 +24,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="8"
                             Margin="12,0,0,0"
                             VerticalAlignment="Center">
-                    <Image Width="18" Height="18" VerticalAlignment="Center"
+                    <Image Width="24" Height="24" VerticalAlignment="Center"
                            Source="ms-appx:///Assets/AppIcon.png" />
                     <TextBlock VerticalAlignment="Center"
                                FontSize="14" FontWeight="SemiBold"
@@ -121,6 +121,11 @@
                 <NavigationViewItem Content="流量" Tag="traffic">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE9D2;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="网络" Tag="network">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE7C8;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="日志" Tag="logs">

@@ -25,6 +25,7 @@ public interface IKernelUpdateService
     string WintunPath { get; }
     string? GetInstalledVersion();
     Task<KernelUpdateInfo> CheckAsync(string? channel = null, CancellationToken ct = default);
+    Task<IReadOnlyList<string>> ListVersionsAsync(CancellationToken ct = default);
     Task<bool> DownloadAndInstallAsync(string tag, IProgress<double>? progress = null, CancellationToken ct = default);
     Task<bool> EnsureWintunAsync(CancellationToken ct = default);
     Task<bool> EnsureGeodataAsync(IProgress<double>? progress = null, CancellationToken ct = default);
@@ -145,6 +146,20 @@ public sealed class KernelUpdateService : IKernelUpdateService
     }
 
     private static string Normalize(string version) => version.TrimStart('v', 'V').Split(' ')[0];
+
+    /// <summary>列出可选版本（稳定 tag 倒序）。</summary>
+    public async Task<IReadOnlyList<string>> ListVersionsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var releases = await FetchReleasesAsync(ct).ConfigureAwait(false);
+            return releases.Select(r => r.Tag).Where(IsStableTag).ToList();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
 
     private static bool IsStableTag(string? tag)
     {

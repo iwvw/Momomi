@@ -42,8 +42,8 @@ public static class ProcessIconProvider
 
     private static ImageSource? ExtractIcon(string path)
     {
-        if (!System.IO.File.Exists(path)) return null;
-
+        // 注意：不检查 File.Exists —— 连接记录里的进程路径常指向已退出进程/虚拟路径，
+        // SHGFI_USEFILEATTRIBUTES 允许在这种情况下仍按扩展名返回关联图标。
         var info = new SHFILEINFO();
         var flags = SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES;
         var result = SHGetFileInfo(path, 0, ref info, (uint)Marshal.SizeOf<SHFILEINFO>(), flags);

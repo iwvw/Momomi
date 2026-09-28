@@ -183,10 +183,18 @@ public sealed partial class ModeSelectorViewModel : ObservableObject
         _pendingProxy = null;
         try
         {
+            var port = await _host.Settings.GetIntAsync("core.mixedPort", 7890).ConfigureAwait(false);
+            var mode = await _host.Settings.GetAsync("ui.systemProxyMode").ConfigureAwait(false) ?? "manual";
+
             if (enabled)
             {
-                var port = await _host.Settings.GetIntAsync("core.mixedPort", 7890).ConfigureAwait(false);
-                _host.SystemProxy.Enable($"127.0.0.1:{port}", ProxyBypass);
+                var ok = ApplySystemProxy(mode, port);
+                // 断网等瞬时失败：5 秒后重试一次。
+                if (!ok)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                    ApplySystemProxy(mode, port);
+                }
             }
             else
             {
@@ -208,6 +216,24 @@ public sealed partial class ModeSelectorViewModel : ObservableObject
                 _pendingProxy = null;
                 await SetSystemProxyAsync(next).ConfigureAwait(false);
             }
+        }
+    }
+
+    private bool ApplySystemProxy(string mode, int port)
+    {
+        try
+        {
+            if (mode == "pac")
+            {
+                if (_host.Pac.Start(port))
+                    return _host.SystemProxy.EnablePac(_host.Pac.PacUrl ?? $"http://127.0.0.1:{port}/proxy.pac");
+                return _host.SystemProxy.Enable($"127.0.0.1:{port}", ProxyBypass);
+            }
+            return _host.SystemProxy.Enable($"127.0.0.1:{port}", ProxyBypass);
+        }
+        catch
+        {
+            return false;
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Momomi.Core.Services;
@@ -18,6 +19,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     public partial bool SystemProxyEnabled { get; set; }
+
+    [ObservableProperty]
+    public partial string SystemProxyMode { get; set; } = "manual";
 
     [ObservableProperty]
     public partial bool TunEnabled { get; set; }
@@ -79,6 +83,12 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     public partial bool KernelProgressVisible { get; set; }
+
+    [ObservableProperty]
+    public partial ObservableCollection<string> KernelVersions { get; set; } = new();
+
+    [ObservableProperty]
+    public partial string? SelectedKernelVersion { get; set; }
 
     partial void OnKernelHasUpdateChanged(bool value) => OnPropertyChanged(nameof(UpdateButtonText));
 
@@ -212,6 +222,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial string TunRouteExcludeAddress { get; set; } = "";
 
+    [ObservableProperty]
+    public partial string PauseSsids { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string SsidProfileMap { get; set; } = "";
+
     /// <summary>GitHub 代理内置选项，与 ComboBox 顺序一致。</summary>
     public static readonly string[] GithubProxyBuiltins =
     {
@@ -247,6 +263,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             TunEnabled = await _host.Settings.GetBoolAsync("core.tun");
             StartupWithWindows = _host.Startup.IsEnabled();
             SystemProxyEnabled = _host.SystemProxy.IsEnabled();
+            SystemProxyMode = await _host.Settings.GetAsync("ui.systemProxyMode") ?? "manual";
             KernelVersion = _host.KernelUpdate.GetInstalledVersion() ?? "未安装";
             ElevatedHostStatus = _host.Elevated.IsElevatedHostRunning ? "运行中" : "未运行";
 
@@ -294,6 +311,8 @@ public sealed partial class SettingsViewModel : ObservableObject
             TunMtu = await _host.Settings.GetAsync("core.tunMtuText") ?? "";
             TunDnsHijack = await _host.Settings.GetAsync("core.tunDnsHijack") ?? "";
             TunRouteExcludeAddress = await _host.Settings.GetAsync("core.tunRouteExcludeAddress") ?? "";
+            PauseSsids = await _host.Settings.GetAsync("ui.pauseSsids") ?? "";
+            SsidProfileMap = await _host.Settings.GetAsync("ui.ssidProfileMap") ?? "";
         }
         finally
         {
@@ -347,6 +366,14 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         if (_loading || _applyingSwitch) return;
         _ = ApplySystemProxyAsync(value);
+    }
+
+    partial void OnSystemProxyModeChanged(string value)
+    {
+        if (_loading) return;
+        var mode = string.Equals(value, "pac", StringComparison.OrdinalIgnoreCase) ? "pac" : "manual";
+        _ = _host.Settings.SetAsync("ui.systemProxyMode", mode);
+        StatusText = mode == "pac" ? "已切换为 PAC 模式，重新开关系统代理后生效" : "已切换为手动代理模式";
     }
 
     partial void OnTunEnabledChanged(bool value)
@@ -509,6 +536,20 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (_loading) return;
         _ = _host.Settings.SetAsync("core.tunRouteExcludeAddress", value ?? "");
         StatusText = "已保存，重启内核后生效";
+    }
+
+    partial void OnPauseSsidsChanged(string value)
+    {
+        if (_loading) return;
+        _ = _host.Settings.SetAsync("ui.pauseSsids", value ?? "");
+        StatusText = "SSID 暂停规则已保存";
+    }
+
+    partial void OnSsidProfileMapChanged(string value)
+    {
+        if (_loading) return;
+        _ = _host.Settings.SetAsync("ui.ssidProfileMap", value ?? "");
+        StatusText = "SSID 订阅切换规则已保存";
     }
 
     partial void OnMixedPortChanged(string value)
@@ -767,6 +808,81 @@ public sealed partial class SettingsViewModel : ObservableObject
             if (ok)
             {
                 KernelVersion = _host.KernelUpdate.GetInstalledVersion() ?? target;
+                KernelHasUpdate = false;
+                KernelStatusText = $"内核已更新到 {target}，正在准备地理数据…";
+
+                var geodataProgress = new Progress<double>(p =>
+                    KernelStatusText = $"正在下载地理数据… {p * 100:0}%");
+                await _host.KernelUpdate.EnsureGeodataAsync(geodataProgress);
+
+                if (await _host.Settings.GetBoolAsync("core.tun"))
+                    await _host.KernelUpdate.EnsureWintunAsync();
+
+                KernelStatusText = $"内核已更新到 {target}";
+            }
+            else
+            {
+                KernelStatusText = "内核更新失败";
+            }
+        }
+        catch (Exception ex)
+        {
+            KernelStatusText = $"更新失败：{ex.Message}";
+        }
+        finally
+        {
+            KernelProgressVisible = false;
+            IsKernelBusy = false;
+            if (wasRunning) await _host.Core.StartAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task LoadKernelVersionsAsync()
+    {
+        if (KernelVersions.Count > 0) return;
+        try
+        {
+            var versions = await _host.KernelUpdate.ListVersionsAsync();
+            KernelVersions.Clear();
+            foreach (var v in versions) KernelVersions.Add(v);
+            if (KernelVersions.Count > 0)
+                SelectedKernelVersion = string.Equals(KernelVersions[0], LatestKernelVersion, StringComparison.OrdinalIgnoreCase)
+                    ? KernelVersions[0]
+                    : KernelVersions[0];
+        }
+        catch
+        {
+        }
+    }
+
+    [RelayCommand]
+    private async Task UpgradeToSelectedAsync()
+    {
+        var target = SelectedKernelVersion;
+        if (string.IsNullOrEmpty(target)) return;
+
+        IsKernelBusy = true;
+        KernelProgressVisible = true;
+        KernelProgress = 0;
+        KernelStatusText = $"正在下载内核 {target}…";
+
+        var wasRunning = _host.Core.State == CoreState.Running;
+        if (wasRunning) await _host.Core.StopAsync();
+
+        try
+        {
+            var progress = new Progress<double>(p =>
+            {
+                KernelProgress = p * 100;
+                KernelStatusText = $"正在下载内核… {p * 100:0}%";
+            });
+
+            var ok = await _host.KernelUpdate.DownloadAndInstallAsync(target, progress);
+            if (ok)
+            {
+                KernelVersion = _host.KernelUpdate.GetInstalledVersion() ?? target;
+                LatestKernelVersion = target;
                 KernelHasUpdate = false;
                 KernelStatusText = $"内核已更新到 {target}，正在准备地理数据…";
 

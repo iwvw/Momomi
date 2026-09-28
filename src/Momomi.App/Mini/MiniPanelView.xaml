@@ -11,17 +11,6 @@
 
     <UserControl.Resources>
         <ResourceDictionary>
-            <ResourceDictionary.ThemeDictionaries>
-                <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#1F000000" />
-                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#33000000" />
-                </ResourceDictionary>
-                <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#26FFFFFF" />
-                    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#3DFFFFFF" />
-                </ResourceDictionary>
-            </ResourceDictionary.ThemeDictionaries>
-
             <Style x:Key="MiniModeButtonStyle" TargetType="ToggleButton"
                    BasedOn="{StaticResource DefaultToggleButtonStyle}">
                 <Setter Property="MinWidth" Value="0" />
@@ -138,7 +127,10 @@
                     ToolTipService.ToolTip="打开主界面"
                     Click="OpenFull_Click"
                     Content="主界面" />
-            <Button Grid.Column="6" Style="{StaticResource MiniIconButtonStyle}"
+            <Button Grid.Column="6" MinWidth="0"
+                    Width="28" Height="28" Padding="0"
+                    VerticalAlignment="Center"
+                    HorizontalContentAlignment="Center"
                     ToolTipService.ToolTip="收起"
                     Click="Collapse_Click">
                 <FontIcon FontSize="12" Glyph="&#xE70D;" />

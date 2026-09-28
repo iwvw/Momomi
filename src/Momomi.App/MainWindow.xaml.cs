@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
@@ -18,6 +19,12 @@ public sealed partial class MainWindow : Window
 {
     private Forms.NotifyIcon? _notifyIcon;
     private Forms.ToolStripMenuItem? _coreStatusItem;
+    private Forms.ToolStripMenuItem? _startCoreItem;
+    private Forms.ToolStripMenuItem? _stopCoreItem;
+    private Forms.ToolStripMenuItem? _restartCoreItem;
+    private Forms.ToolStripMenuItem? _modeRuleItem;
+    private Forms.ToolStripMenuItem? _modeGlobalItem;
+    private Forms.ToolStripMenuItem? _modeDirectItem;
     private Forms.ToolStripMenuItem? _systemProxyItem;
     private Forms.ToolStripMenuItem? _tunItem;
     private Forms.ToolStripMenuItem? _miniPanelItem;
@@ -31,6 +38,9 @@ public sealed partial class MainWindow : Window
 
     private const double MinPaneWidth = 160;
     private const double MaxPaneWidth = 420;
+
+    /// <summary>状态点标记：_coreStatusItem 用它标识，渲染器据此避免禁用灰化绘制。</summary>
+    private const int StatusDotTag = -1;
 
     public ModeSelectorViewModel ModeSelector { get; }
 
@@ -330,43 +340,60 @@ public sealed partial class MainWindow : Window
                     Dispatch(() => OnTrayLeftClick());
             };
 
-            var menu = new Forms.ContextMenuStrip();
+            var menu = new Forms.ContextMenuStrip
+            {
+                ImageScalingSize = new Size(16, 16),
+                ShowImageMargin = true,
+            };
             menu.Opening += (_, _) =>
             {
                 _trayMenuWasOpened = true;
                 ApplyMenuTheme(menu);
                 UpdateTrayState();
             };
+            menu.Opened += (_, _) => TryRoundMenuWindow(menu);
 
-            _coreStatusItem = new Forms.ToolStripMenuItem("内核：未知") { Enabled = false };
+            var (darkIcon, lightIcon) = GlyphColors();
+
+            _coreStatusItem = new Forms.ToolStripMenuItem("内核：未知") { Enabled = false, Tag = StatusDotTag };
             menu.Items.Add(_coreStatusItem);
 
-            menu.Items.Add(new Forms.ToolStripMenuItem("打开主界面", null, (_, _) => Dispatch(ShowAndActivate)));
-            _miniPanelItem = new Forms.ToolStripMenuItem("显示迷你面板", null, (_, _) => Dispatch(ToggleMiniWindow));
+            menu.Items.Add(new Forms.ToolStripSeparator());
+
+            menu.Items.Add(MakeIconItem("打开主界面", 0xE80F, darkIcon, () => Dispatch(ShowAndActivate)));
+            _miniPanelItem = MakeIconItem("显示迷你面板", 0xE90B, darkIcon, () => Dispatch(ToggleMiniWindow));
             menu.Items.Add(_miniPanelItem);
 
             menu.Items.Add(new Forms.ToolStripSeparator());
 
-            menu.Items.Add(new Forms.ToolStripMenuItem("启动内核", null, (_, _) => Dispatch(async () => await AppHost.Host.Core.StartAsync())));
-            menu.Items.Add(new Forms.ToolStripMenuItem("停止内核", null, (_, _) => Dispatch(async () => await AppHost.Host.Core.StopAsync())));
-            menu.Items.Add(new Forms.ToolStripMenuItem("重启内核", null, (_, _) => Dispatch(async () => await AppHost.Host.Core.RestartAsync())));
+            var coreMenu = MakeIconItem("内核", 0xE768, darkIcon, null);
+            _startCoreItem = MakeIconItem("启动内核", 0xE768, darkIcon, () => Dispatch(async () => await AppHost.Host.Core.StartAsync()));
+            _stopCoreItem = MakeIconItem("停止内核", 0xE71A, darkIcon, () => Dispatch(async () => await AppHost.Host.Core.StopAsync()));
+            _restartCoreItem = MakeIconItem("重启内核", 0xE72C, darkIcon, () => Dispatch(async () => await AppHost.Host.Core.RestartAsync()));
+            coreMenu.DropDownItems.AddRange([_startCoreItem, _stopCoreItem, _restartCoreItem]);
+            menu.Items.Add(coreMenu);
+
+            var modeMenu = MakeIconItem("代理模式", 0xE7C8, darkIcon, null);
+            _modeRuleItem = MakeIconItem("规则模式", 0xE8A5, darkIcon, () => Dispatch(async () => await HotkeySelectModeAsync(0)));
+            _modeGlobalItem = MakeIconItem("全局模式", 0xE774, darkIcon, () => Dispatch(async () => await HotkeySelectModeAsync(1)));
+            _modeDirectItem = MakeIconItem("直连模式", 0xE711, darkIcon, () => Dispatch(async () => await HotkeySelectModeAsync(2)));
+            foreach (var item in new[] { _modeRuleItem, _modeGlobalItem, _modeDirectItem })
+                item.CheckOnClick = false;
+            modeMenu.DropDownItems.AddRange([_modeRuleItem, _modeGlobalItem, _modeDirectItem]);
+            menu.Items.Add(modeMenu);
 
             menu.Items.Add(new Forms.ToolStripSeparator());
 
-            _systemProxyItem = new Forms.ToolStripMenuItem("系统代理", null, (_, _) => Dispatch(ToggleSystemProxy))
-            {
-                CheckOnClick = false,
-            };
+            _systemProxyItem = MakeIconItem("系统代理", 0xE774, darkIcon, () => Dispatch(ToggleSystemProxy));
+            _systemProxyItem.CheckOnClick = false;
             menu.Items.Add(_systemProxyItem);
 
-            _tunItem = new Forms.ToolStripMenuItem("TUN 模式", null, (_, _) => Dispatch(ToggleTun))
-            {
-                CheckOnClick = false,
-            };
+            _tunItem = MakeIconItem("TUN 模式", 0xE968, darkIcon, () => Dispatch(ToggleTun));
+            _tunItem.CheckOnClick = false;
             menu.Items.Add(_tunItem);
 
             menu.Items.Add(new Forms.ToolStripSeparator());
-            menu.Items.Add(new Forms.ToolStripMenuItem("退出", null, (_, _) => Dispatch(ExitFromTray)));
+            menu.Items.Add(MakeIconItem("退出", 0xE7E8, darkIcon, () => Dispatch(ExitFromTray)));
 
             _notifyIcon.ContextMenuStrip = menu;
             UpdateTrayState();
@@ -374,6 +401,65 @@ public sealed partial class MainWindow : Window
         catch
         {
             _notifyIcon = null;
+        }
+    }
+
+    /// <summary>创建带图标（按 glyph code 记录到 Tag，供主题切换时重建）的菜单项。</summary>
+    private static Forms.ToolStripMenuItem MakeIconItem(string text, int code, Color color, Action? onClick)
+        => new(text, IconGlyph(code, color), onClick is null ? null : (_, _) => onClick()) { Tag = code };
+
+    /// <summary>按当前主题返回深色/浅色图标颜色。</summary>
+    private static (Color Dark, Color Light) GlyphColors()
+        => (Color.FromArgb(0xEC, 0xEC, 0xEC), Color.FromArgb(0x2B, 0x2B, 0x2B));
+
+    /// <summary>用 Segoe Fluent Icons（回退 Segoe MDL2 Assets）把 glyph 渲染成 20x20 位图。</summary>
+    private static Bitmap? IconGlyph(int code, Color color)
+    {
+        try
+        {
+            var glyph = Convert.ToChar(code);
+            var family = "Segoe Fluent Icons";
+            using var installed = new System.Drawing.Text.InstalledFontCollection();
+            if (!installed.Families.Any(f => f.Name == "Segoe Fluent Icons"))
+                family = "Segoe MDL2 Assets";
+
+            var bmp = new Bitmap(16, 16);
+            using var g = Graphics.FromImage(bmp);
+            g.Clear(Color.Transparent);
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+            using var font = new Font(family, 14f, GraphicsUnit.Pixel);
+            using var brush = new SolidBrush(color);
+            using var sf = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+            };
+            var rect = new RectangleF(0, 0, 16, 16);
+            g.DrawString(glyph.ToString(), font, brush, rect, sf);
+            return bmp;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>渲染一个 16x16 的纯色圆点，用于表示内核运行状态。</summary>
+    private static Bitmap? StatusDot(Color color)
+    {
+        try
+        {
+            var bmp = new Bitmap(16, 16);
+            using var g = Graphics.FromImage(bmp);
+            g.Clear(Color.Transparent);
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using var brush = new SolidBrush(color);
+            g.FillEllipse(brush, 4, 4, 8, 8);
+            return bmp;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -393,9 +479,11 @@ public sealed partial class MainWindow : Window
         try
         {
             var core = AppHost.Host.Core;
+            var dark = IsAppDark();
+            var running = core.State == CoreState.Running;
             if (_coreStatusItem is not null)
             {
-                _coreStatusItem.Text = core.State switch
+                var statusText = core.State switch
                 {
                     CoreState.Running => $"内核：运行中 {core.Version}",
                     CoreState.Starting => "内核：启动中",
@@ -403,7 +491,36 @@ public sealed partial class MainWindow : Window
                     CoreState.Error => "内核：异常",
                     _ => "内核：已停止",
                 };
+                _coreStatusItem.Text = statusText;
+                var dotColor = core.State switch
+                {
+                    CoreState.Running => Color.FromArgb(0x3C, 0xB0, 0x4A),       // 绿：运行中
+                    CoreState.Starting => Color.FromArgb(0xEA, 0xA5, 0x3B),      // 黄：启动中
+                    CoreState.Stopping => Color.FromArgb(0xF0, 0x7C, 0x00),      // 橙：停止中
+                    CoreState.Error => Color.FromArgb(0xE5, 0x48, 0x4D),         // 红：异常
+                    _ => Color.FromArgb(0x9E, 0x9E, 0x9E),                        // 灰：已停止
+                };
+                var prev = _coreStatusItem.Image;
+                _coreStatusItem.Image = StatusDot(dotColor);
+                prev?.Dispose();
             }
+
+            if (_startCoreItem is not null)
+                _startCoreItem.Enabled = !running && core.State is not (CoreState.Starting or CoreState.Stopping);
+            if (_stopCoreItem is not null)
+                _stopCoreItem.Enabled = running || core.State is CoreState.Starting or CoreState.Stopping;
+            if (_restartCoreItem is not null)
+                _restartCoreItem.Enabled = running || core.State is CoreState.Starting or CoreState.Stopping;
+
+            if (_modeRuleItem is not null)
+                _modeRuleItem.Checked = ModeSelector.Mode == "rule";
+            if (_modeGlobalItem is not null)
+                _modeGlobalItem.Checked = ModeSelector.Mode == "global";
+            if (_modeDirectItem is not null)
+                _modeDirectItem.Checked = ModeSelector.Mode == "direct";
+
+            if (_miniPanelItem is not null)
+                _miniPanelItem.Text = _miniWindow?.IsVisible == true ? "隐藏迷你面板" : "显示迷你面板";
 
             var proxyOn = AppHost.Host.SystemProxy.IsEnabled();
             if (_systemProxyItem is not null)
@@ -501,12 +618,30 @@ public sealed partial class MainWindow : Window
     {
         var dark = IsAppDark();
         menu.Renderer = dark
-            ? new Forms.ToolStripProfessionalRenderer(new DarkColorTable())
-            : new Forms.ToolStripProfessionalRenderer();
+            ? new FluentMenuRenderer(true, new DarkColorTable())
+            : new FluentMenuRenderer(false, new Forms.ProfessionalColorTable());
         var textColor = dark ? Color.White : Color.Black;
-        menu.ForeColor = textColor;
-        foreach (Forms.ToolStripItem item in menu.Items)
+        var iconColor = dark ? Color.FromArgb(0xEC, 0xEC, 0xEC) : Color.FromArgb(0x2B, 0x2B, 0x2B);
+        ApplyItemsTheme(menu.Items, textColor, iconColor);
+    }
+
+    /// <summary>递归设置菜单项前景色、垂直间距并重建图标颜色；Tag 为 int 时按 glyph code 重绘。</summary>
+    private static void ApplyItemsTheme(Forms.ToolStripItemCollection items, Color textColor, Color iconColor)
+    {
+        foreach (Forms.ToolStripItem item in items)
+        {
             item.ForeColor = textColor;
+            if (item is not Forms.ToolStripMenuItem mi) continue;
+            mi.Margin = new Forms.Padding(0, 2, 0, 2);
+            if (mi.Tag is int code && code > 0)
+            {
+                var old = mi.Image;
+                mi.Image = IconGlyph(code, iconColor);
+                old?.Dispose();
+            }
+            if (mi.HasDropDownItems)
+                ApplyItemsTheme(mi.DropDownItems, textColor, iconColor);
+        }
     }
 
     /// <summary>
@@ -570,6 +705,109 @@ public sealed partial class MainWindow : Window
         public override Color ButtonSelectedHighlightBorder => HoverBorder;
         public override Color ButtonSelectedBorder => HoverBorder;
         public override Color ToolStripBorder => HoverBorder;
+    }
+
+    /// <summary>
+    /// 自定义菜单渲染器：展开箭头颜色跟随深浅主题，菜单项 hover 背景改为圆角。
+    /// 系统 ToolStripProfessionalRenderer 的箭头使用固定系统色，深色主题下不清晰。
+    /// </summary>
+    private sealed class FluentMenuRenderer : Forms.ToolStripProfessionalRenderer
+    {
+        private readonly bool _dark;
+        private readonly Color _hoverBg;
+        private readonly Color _pressedBg;
+        private readonly Color _arrowColor;
+
+        public FluentMenuRenderer(bool dark, Forms.ProfessionalColorTable table)
+            : base(table)
+        {
+            _dark = dark;
+            _hoverBg = dark ? Color.FromArgb(0x41, 0x41, 0x41) : Color.FromArgb(0xE5, 0xE5, 0xE5);
+            _pressedBg = dark ? Color.FromArgb(0x35, 0x35, 0x35) : Color.FromArgb(0xCC, 0xCC, 0xCC);
+            _arrowColor = dark ? Color.FromArgb(0xEC, 0xEC, 0xEC) : Color.FromArgb(0x2B, 0x2B, 0x2B);
+        }
+
+        protected override void OnRenderArrow(Forms.ToolStripArrowRenderEventArgs e)
+        {
+            e.ArrowColor = e.Item?.Enabled == true ? _arrowColor : Color.FromArgb(0x80, _arrowColor);
+            base.OnRenderArrow(e);
+        }
+
+        protected override void OnRenderItemImage(Forms.ToolStripItemImageRenderEventArgs e)
+        {
+            if (e.Item?.Tag is int tag && tag == StatusDotTag && e.Image is not null)
+            {
+                e.Graphics.DrawImage(e.Image, e.ImageRectangle);
+                return;
+            }
+            base.OnRenderItemImage(e);
+        }
+
+        protected override void OnRenderMenuItemBackground(Forms.ToolStripItemRenderEventArgs e)
+        {
+            if (!e.Item.Selected && !e.Item.Pressed) return;
+
+            var bg = e.Item.Pressed ? _pressedBg : _hoverBg;
+            e.Graphics.FillRectangle(new SolidBrush(bg), new Rectangle(Point.Empty, e.Item.Size));
+        }
+
+        private static GraphicsPath RoundedRect(Rectangle r, int radius)
+        {
+            var d = radius * 2;
+            var path = new GraphicsPath();
+            path.AddArc(r.X, r.Y, d, d, 180, 90);
+            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+    }
+
+    /// <summary>给原生菜单窗口设置 DWM 圆角（Win11 生效，Win10 忽略）。</summary>
+    [DllImport("dwmapi.dll", EntryPoint = "DwmSetWindowAttribute")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
+
+    /// <summary>主菜单打开后设置圆角，并为子菜单递归设置。仅执行一次防重复。</summary>
+    private void TryRoundMenuWindow(Forms.ContextMenuStrip menu)
+    {
+        try
+        {
+            RoundWindow(menu.Handle);
+            HookDropDownRounding(menu.Items);
+        }
+        catch
+        {
+        }
+    }
+
+    private static void HookDropDownRounding(Forms.ToolStripItemCollection items)
+    {
+        foreach (Forms.ToolStripItem item in items)
+        {
+            if (item is not Forms.ToolStripMenuItem mi || !mi.HasDropDownItems) continue;
+            mi.DropDownOpening += (_, _) =>
+            {
+                try
+                {
+                    if (mi.DropDown is not null) RoundWindow(mi.DropDown.Handle);
+                    HookDropDownRounding(mi.DropDown?.Items ?? mi.DropDownItems);
+                }
+                catch
+                {
+                }
+            };
+        }
+    }
+
+    private static void RoundWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        var preference = DWMWCP_ROUND;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
     }
 
     private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
@@ -891,6 +1129,7 @@ public sealed partial class MainWindow : Window
             case "rules": NavFrame.Navigate(typeof(RulesPage)); break;
             case "profiles": NavFrame.Navigate(typeof(ProfilesPage)); break;
             case "traffic": NavFrame.Navigate(typeof(TrafficPage)); break;
+            case "network": NavFrame.Navigate(typeof(NetworkPage)); break;
             case "logs": NavFrame.Navigate(typeof(LogsPage)); break;
         }
     }
