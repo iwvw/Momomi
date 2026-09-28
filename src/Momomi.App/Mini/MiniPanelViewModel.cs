@@ -242,6 +242,16 @@ public sealed partial class MiniPanelViewModel : ObservableObject
             {
                 group.ApplyDelays(delays);
                 group.IsTesting = false;
+                // 广播让主面板等其他视图同步延迟；自己已就地更新，跳过重载。
+                _suppressSelfReload = true;
+                try
+                {
+                    AppSignals.RaiseProxiesChanged();
+                }
+                finally
+                {
+                    _suppressSelfReload = false;
+                }
             });
         }
         catch

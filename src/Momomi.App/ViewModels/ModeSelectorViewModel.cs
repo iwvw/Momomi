@@ -15,6 +15,9 @@ public sealed partial class ModeSelectorViewModel : ObservableObject
     private bool _loading;
     private bool _suppressSwitch;
     private bool _switchBusy;
+    private bool? _pendingTun;
+    private bool _proxyBusy;
+    private bool? _pendingProxy;
 
     [ObservableProperty]
     public partial int SelectedIndex { get; set; }
@@ -170,6 +173,14 @@ public sealed partial class ModeSelectorViewModel : ObservableObject
     public async Task SetSystemProxyAsync(bool enabled)
     {
         if (_suppressSwitch) return;
+
+        if (_proxyBusy)
+        {
+            _pendingProxy = enabled;
+            return;
+        }
+        _proxyBusy = true;
+        _pendingProxy = null;
         try
         {
             if (enabled)
@@ -185,19 +196,35 @@ public sealed partial class ModeSelectorViewModel : ObservableObject
         catch
         {
         }
+        finally
+        {
+            _proxyBusy = false;
+            await SyncSwitchesAsync().ConfigureAwait(false);
+            AppSignals.RaiseSwitchesChanged();
 
-        await SyncSwitchesAsync().ConfigureAwait(false);
-        AppSignals.RaiseSwitchesChanged();
+            if (_pendingProxy is not null)
+            {
+                var next = _pendingProxy.Value;
+                _pendingProxy = null;
+                await SetSystemProxyAsync(next).ConfigureAwait(false);
+            }
+        }
     }
 
     public async Task SetTunAsync(bool enabled)
     {
-        if (_suppressSwitch || _switchBusy) return;
+        if (_suppressSwitch) return;
+
+        // 快速连续切换收敛：切换中时记录最新请求，完成后按最后一次继续，避免连点丢状态。
+        if (_switchBusy)
+        {
+            _pendingTun = enabled;
+            return;
+        }
         _switchBusy = true;
+        _pendingTun = null;
         try
         {
-            // TUN 切换会重启内核，期间可能同步等待 UAC 提权与内核就绪；
-            // 必须整段放到后台线程，否则会占死 UI 线程导致界面卡死。
             await Task.Run(async () =>
             {
                 await _host.Settings.SetBoolAsync("core.tun", enabled).ConfigureAwait(false);
@@ -213,11 +240,31 @@ public sealed partial class ModeSelectorViewModel : ObservableObject
                     }
                 }
 
-                // 必须先按新设置重新生成 runtime.yaml，否则 tun 段不会出现，重启也无济于事。
-                await _host.ApplyActiveProfileAsync().ConfigureAwait(false);
+                // 先把设置落盘到 runtime.yaml（TUN 段依据 core.tun 重新生成），供下次全量重载/重启使用。
+                await _host.RewriteRuntimeConfigAsync().ConfigureAwait(false);
 
-                if (_host.Core.State is CoreState.Running or CoreState.Error)
-                    await _host.Core.RestartAsync().ConfigureAwait(false);
+                if (_host.Core.Api is not null && _host.Core.State == CoreState.Running)
+                {
+                    // 热切换：只 PATCH tun.enable，内核即时应用，不重启进程、不动系统代理。
+                    try
+                    {
+                        await _host.Core.Api.PatchConfigsAsync(new Dictionary<string, object>
+                        {
+                            ["tun"] = new Dictionary<string, object>
+                            {
+                                ["enable"] = enabled,
+                            },
+                        }).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // PATCH 失败（旧内核不支持热切换）时兜底：整配置重载让 tun 段生效；
+                        // 仍失败才重启内核。
+                        var reloaded = await _host.ApplyActiveProfileAsync().ConfigureAwait(false);
+                        if (!reloaded)
+                            await _host.Core.RestartAsync().ConfigureAwait(false);
+                    }
+                }
             }).ConfigureAwait(false);
         }
         catch
@@ -228,6 +275,14 @@ public sealed partial class ModeSelectorViewModel : ObservableObject
             _switchBusy = false;
             await SyncSwitchesAsync().ConfigureAwait(false);
             AppSignals.RaiseSwitchesChanged();
+
+            // 切换期间若有新的请求进来，紧接着执行它，保证最终状态等于用户最后一次操作。
+            if (_pendingTun is not null)
+            {
+                var next = _pendingTun.Value;
+                _pendingTun = null;
+                await SetTunAsync(next).ConfigureAwait(false);
+            }
         }
     }
 }

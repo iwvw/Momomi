@@ -8,6 +8,7 @@ public enum HotkeyAction
     ShowWindow,
     ToggleSystemProxy,
     ToggleTun,
+    ToggleMiniPanel,
     ModeRule,
     ModeGlobal,
     ModeDirect,

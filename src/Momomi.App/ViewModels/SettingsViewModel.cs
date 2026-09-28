@@ -8,6 +8,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly MomomiHost _host;
     private bool _loading;
+    private bool _applyingSwitch;
 
     [ObservableProperty]
     public partial bool AutoStartCore { get; set; }
@@ -153,6 +154,9 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial string HotkeyToggleTun { get; set; } = "";
 
     [ObservableProperty]
+    public partial string HotkeyToggleMiniPanel { get; set; } = "";
+
+    [ObservableProperty]
     public partial string HotkeyModeRule { get; set; } = "";
 
     [ObservableProperty]
@@ -270,6 +274,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             HotkeyShowWindow = await _host.Settings.GetAsync("hotkey.ShowWindow") ?? "";
             HotkeyToggleSystemProxy = await _host.Settings.GetAsync("hotkey.ToggleSystemProxy") ?? "";
             HotkeyToggleTun = await _host.Settings.GetAsync("hotkey.ToggleTun") ?? "";
+            HotkeyToggleMiniPanel = await _host.Settings.GetAsync("hotkey.ToggleMiniPanel") ?? "";
             HotkeyModeRule = await _host.Settings.GetAsync("hotkey.ModeRule") ?? "";
             HotkeyModeGlobal = await _host.Settings.GetAsync("hotkey.ModeGlobal") ?? "";
             HotkeyModeDirect = await _host.Settings.GetAsync("hotkey.ModeDirect") ?? "";
@@ -340,13 +345,13 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     partial void OnSystemProxyEnabledChanged(bool value)
     {
-        if (_loading) return;
+        if (_loading || _applyingSwitch) return;
         _ = ApplySystemProxyAsync(value);
     }
 
     partial void OnTunEnabledChanged(bool value)
     {
-        if (_loading) return;
+        if (_loading || _applyingSwitch) return;
         _ = ApplyTunAsync(value);
     }
 
@@ -541,6 +546,24 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     private async Task ApplySystemProxyAsync(bool enabled)
     {
+        // 统一走 ModeSelector：广播同步到主/迷你面板，并支持快速连续操作收敛。
+        var selector = global::Momomi.App.App.Main?.ModeSelector;
+        if (selector is not null)
+        {
+            await selector.SetSystemProxyAsync(enabled);
+            _applyingSwitch = true;
+            try
+            {
+                SystemProxyEnabled = selector.SystemProxyOn;
+                StatusText = selector.SystemProxyOn ? "系统代理已开启" : "系统代理已关闭";
+            }
+            finally
+            {
+                _applyingSwitch = false;
+            }
+            return;
+        }
+
         try
         {
             if (enabled)
@@ -565,6 +588,24 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     private async Task ApplyTunAsync(bool enabled)
     {
+        // 统一走 ModeSelector：热切换 TUN 不重启内核、不动系统代理，并广播同步到各面板。
+        var selector = global::Momomi.App.App.Main?.ModeSelector;
+        if (selector is not null)
+        {
+            await selector.SetTunAsync(enabled);
+            _applyingSwitch = true;
+            try
+            {
+                TunEnabled = selector.TunOn;
+                StatusText = selector.TunOn ? "TUN 已开启" : "TUN 已关闭";
+            }
+            finally
+            {
+                _applyingSwitch = false;
+            }
+            return;
+        }
+
         try
         {
             await _host.Settings.SetBoolAsync("core.tun", enabled);
@@ -579,7 +620,7 @@ public sealed partial class SettingsViewModel : ObservableObject
                 }
             }
 
-            // 必须先重新生成 runtime.yaml，否则 tun 段不会写入，重启也不会生效。
+            // 必须先重新生成 runtime.yaml，否则 tun 段不会写入。
             await _host.ApplyActiveProfileAsync();
 
             if (_host.Core.State is CoreState.Running or CoreState.Error)

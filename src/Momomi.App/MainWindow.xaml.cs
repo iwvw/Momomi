@@ -27,6 +27,7 @@ public sealed partial class MainWindow : Window
     private bool _modeBarLoading;
     private double _paneWidth = 200;
     private double _dragStartWidth;
+    private Microsoft.UI.Xaml.DispatcherTimer? _sizeSaveTimer;
 
     private const double MinPaneWidth = 160;
     private const double MaxPaneWidth = 420;
@@ -52,6 +53,24 @@ public sealed partial class MainWindow : Window
             presenter.PreferredMinimumWidth = 900;
             presenter.PreferredMinimumHeight = 600;
         }
+
+        // 默认窗口尺寸（用户调整后持久化，重启恢复；无记录时用较小的默认值）。
+        RestoreWindowSize();
+        _sizeSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+        _sizeSaveTimer.Tick += async (_, _) =>
+        {
+            _sizeSaveTimer.Stop();
+            await SaveWindowSizeAsync();
+        };
+        SizeChanged += (_, _) =>
+        {
+            // 最大化/最小化时不要覆盖已保存的常规尺寸。
+            if (AppWindow.Presenter is OverlappedPresenter p
+                && p.State == OverlappedPresenterState.Maximized)
+                return;
+            _sizeSaveTimer?.Stop();
+            _sizeSaveTimer?.Start();
+        };
 
         ApplyBackdrop();
         NavFrame.Navigate(typeof(DashboardPage));
@@ -93,7 +112,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var current = AppHost.Host.Settings.GetBoolAsync("core.tun").GetAwaiter().GetResult();
-            _ = AppHost.Host.Settings.SetBoolAsync("core.tun", !current).GetAwaiter();
+            // 交给 ModeSelector 统一处理（写设置、热切换、广播同步），避免重复写设置。
             _ = ModeSelector.SetTunAsync(!current);
         }
         catch
@@ -449,20 +468,14 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ToggleSystemProxy()
+    private async void ToggleSystemProxy()
     {
+        // 交给 ModeSelector 统一处理：写代理、广播同步到主/迷你面板、支持快速连续操作收敛。
         var host = AppHost.Host;
         try
         {
-            if (host.SystemProxy.IsEnabled())
-            {
-                host.SystemProxy.Disable();
-            }
-            else
-            {
-                var port = host.Settings.GetIntAsync("core.mixedPort", 7890).GetAwaiter().GetResult();
-                host.SystemProxy.Enable($"127.0.0.1:{port}", "localhost;127.*;10.*;172.16.*;192.168.*");
-            }
+            var enabled = !host.SystemProxy.IsEnabled();
+            await ModeSelector.SetSystemProxyAsync(enabled);
         }
         catch
         {
@@ -601,16 +614,25 @@ public sealed partial class MainWindow : Window
         ToggleMiniWindow();
     }
 
-    private void ToggleMiniWindow()
+    public void ToggleMiniWindow()
     {
-        _miniWindow ??= new MiniWindow();
-        _miniWindow.ToggleVisible();
+        EnsureMiniWindow();
+        _miniWindow!.ToggleVisible();
     }
 
     public void ShowMiniPanel()
     {
-        _miniWindow ??= new MiniWindow();
-        _miniWindow.Show();
+        EnsureMiniWindow();
+        _miniWindow!.Show();
+    }
+
+    /// <summary>惰性创建迷你窗口并订阅关闭通知；拖拽收起关闭后会置空引用，下次调用重建。</summary>
+    private void EnsureMiniWindow()
+    {
+        if (_miniWindow is not null) return;
+        var mini = new MiniWindow();
+        mini.Dismissed += (_, _) => _miniWindow = null;
+        _miniWindow = mini;
     }
 
     public void ApplyMiniPanelTheme(string theme) => _miniWindow?.ApplyTheme(theme);
@@ -707,6 +729,44 @@ public sealed partial class MainWindow : Window
         finally
         {
             _modeBarLoading = false;
+        }
+    }
+
+    private const double DefaultWindowWidth = 1080;
+    private const double DefaultWindowHeight = 700;
+
+    /// <summary>恢复上次窗口尺寸；无记录时用较小的默认尺寸。</summary>
+    private void RestoreWindowSize()
+    {
+        try
+        {
+            var w = AppHost.Host.Settings.GetIntAsync("ui.windowWidth", 0).GetAwaiter().GetResult();
+            var h = AppHost.Host.Settings.GetIntAsync("ui.windowHeight", 0).GetAwaiter().GetResult();
+            if (w <= 0 || h <= 0)
+            {
+                w = (int)DefaultWindowWidth;
+                h = (int)DefaultWindowHeight;
+            }
+            w = Math.Max(w, 900);
+            h = Math.Max(h, 600);
+            AppWindow.Resize(new Windows.Graphics.SizeInt32(w, h));
+        }
+        catch
+        {
+        }
+    }
+
+    /// <summary>持久化窗口尺寸（防抖后写设置）。</summary>
+    private async Task SaveWindowSizeAsync()
+    {
+        try
+        {
+            var size = AppWindow.Size;
+            await AppHost.Host.Settings.SetIntAsync("ui.windowWidth", size.Width);
+            await AppHost.Host.Settings.SetIntAsync("ui.windowHeight", size.Height);
+        }
+        catch
+        {
         }
     }
 

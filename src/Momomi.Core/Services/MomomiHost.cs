@@ -99,6 +99,19 @@ public sealed class MomomiHost : IDisposable
         });
     }
 
+    /// <summary>
+    /// 仅基于设置重写 runtime.yaml（不触发内核 reload）。用于 TUN 等设置热切换时
+    /// 先把文件落盘，之后由 PATCH 让内核即时生效，避免全量重载。
+    /// </summary>
+    public async Task RewriteRuntimeConfigAsync(CancellationToken ct = default)
+    {
+        var active = await Profiles.GetActiveAsync(ct).ConfigureAwait(false);
+        if (active is null) return;
+        var options = await BuildRuntimeOptionsAsync(ct).ConfigureAwait(false);
+        var yaml = await Profiles.GenerateRuntimeConfigAsync(active.Id, options, ct).ConfigureAwait(false);
+        await File.WriteAllTextAsync(Core.Paths.RuntimeConfigPath, yaml, ct).ConfigureAwait(false);
+    }
+
     public async Task<bool> ApplyActiveProfileAsync(CancellationToken ct = default)
     {
         var active = await Profiles.GetActiveAsync(ct).ConfigureAwait(false);

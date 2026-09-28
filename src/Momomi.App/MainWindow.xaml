@@ -110,7 +110,7 @@
                 </NavigationViewItem>
                 <NavigationViewItem Content="连接" Tag="connections">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE704;" />
+                        <FontIcon Glyph="&#xE7C4;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="规则" Tag="rules">
@@ -125,7 +125,7 @@
                 </NavigationViewItem>
                 <NavigationViewItem Content="日志" Tag="logs">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE7C3;" />
+                        <FontIcon Glyph="&#xE8FD;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.MenuItems>

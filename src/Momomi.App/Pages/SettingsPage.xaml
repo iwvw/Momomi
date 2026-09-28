@@ -181,9 +181,20 @@
                                  KeyDown="Hotkey_KeyDown" />
                     </controls:SettingsCard>
 
+                    <controls:SettingsCard Description="展开和收起共用此键，重复点击即收起" Header="切换迷你面板">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE73F;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <TextBox x:Name="HotkeyMiniPanelBox" Width="220" Tag="ToggleMiniPanel"
+                                 PlaceholderText="例如 Ctrl+Alt+B"
+                                 IsReadOnly="True"
+                                 Text="{x:Bind ViewModel.HotkeyToggleMiniPanel, Mode=TwoWay}"
+                                 KeyDown="Hotkey_KeyDown" />
+                    </controls:SettingsCard>
+
                     <controls:SettingsCard Header="规则模式">
                         <controls:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE8B7;" />
+                            <FontIcon Glyph="&#xE8A5;" />
                         </controls:SettingsCard.HeaderIcon>
                         <TextBox x:Name="HotkeyRuleBox" Width="220" Tag="ModeRule"
                                  PlaceholderText="例如 Ctrl+Alt+1"
@@ -194,7 +205,7 @@
 
                     <controls:SettingsCard Header="全局模式">
                         <controls:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE8B7;" />
+                            <FontIcon Glyph="&#xE774;" />
                         </controls:SettingsCard.HeaderIcon>
                         <TextBox x:Name="HotkeyGlobalBox" Width="220" Tag="ModeGlobal"
                                  PlaceholderText="例如 Ctrl+Alt+2"
@@ -205,7 +216,7 @@
 
                     <controls:SettingsCard Header="直连模式">
                         <controls:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE8B7;" />
+                            <FontIcon Glyph="&#xE7E8;" />
                         </controls:SettingsCard.HeaderIcon>
                         <TextBox x:Name="HotkeyDirectBox" Width="220" Tag="ModeDirect"
                                  PlaceholderText="例如 Ctrl+Alt+3"

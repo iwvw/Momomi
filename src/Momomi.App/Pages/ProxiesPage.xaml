@@ -52,6 +52,7 @@
                     <DataTemplate x:DataType="vm:ProxyGroupViewModel">
                         <Expander HorizontalAlignment="Stretch"
                                   HorizontalContentAlignment="Stretch"
+                                  CornerRadius="8"
                                   Margin="0,0,0,12"
                                   Padding="12,0,12,12"
                                   IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}">

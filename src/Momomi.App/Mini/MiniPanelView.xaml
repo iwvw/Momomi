@@ -65,7 +65,7 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <Grid Padding="16,12,16,12" RowSpacing="10">
+    <Grid x:Name="RootGrid" Padding="16,12,16,12" RowSpacing="10" Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -95,7 +95,19 @@
                        VerticalAlignment="Center"
                        Style="{StaticResource BodyStrongTextBlockStyle}"
                        Text="Momomi" />
-            <Button Grid.Column="3" Style="{StaticResource MiniStopButtonStyle}"
+            <Grid Grid.Column="3" Width="28" Height="28" VerticalAlignment="Center">
+                <ProgressRing Width="16" Height="16"
+                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                              IsActive="{x:Bind ViewModel.IsUpdatingSubscription, Mode=OneWay}"
+                              Visibility="{x:Bind ViewModel.IsUpdatingSubscription, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                <Button Style="{StaticResource MiniIconButtonStyle}"
+                        Visibility="{x:Bind ViewModel.IsUpdatingSubscription, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
+                        ToolTipService.ToolTip="更新订阅"
+                        Command="{x:Bind ViewModel.UpdateSubscriptionCommand}">
+                    <FontIcon FontSize="12" Glyph="&#xE895;" />
+                </Button>
+            </Grid>
+            <Button Grid.Column="4" Style="{StaticResource MiniStopButtonStyle}"
                     Visibility="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
                     ToolTipService.ToolTip="停止内核"
                     Command="{x:Bind ViewModel.ToggleCoreCommand}">
@@ -115,24 +127,12 @@
                 </Button.Resources>
                 <FontIcon FontSize="12" Foreground="White" Glyph="&#xE71A;" />
             </Button>
-            <Button Grid.Column="3" Style="{StaticResource MiniIconButtonStyle}"
+            <Button Grid.Column="4" Style="{StaticResource MiniIconButtonStyle}"
                     Visibility="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
                     ToolTipService.ToolTip="启动内核"
                     Command="{x:Bind ViewModel.ToggleCoreCommand}">
                 <FontIcon FontSize="12" Glyph="&#xE768;" />
             </Button>
-            <Grid Grid.Column="4" Width="28" Height="28" VerticalAlignment="Center">
-                <ProgressRing Width="16" Height="16"
-                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                              IsActive="{x:Bind ViewModel.IsUpdatingSubscription, Mode=OneWay}"
-                              Visibility="{x:Bind ViewModel.IsUpdatingSubscription, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                <Button Style="{StaticResource MiniIconButtonStyle}"
-                        Visibility="{x:Bind ViewModel.IsUpdatingSubscription, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
-                        ToolTipService.ToolTip="更新订阅"
-                        Command="{x:Bind ViewModel.UpdateSubscriptionCommand}">
-                    <FontIcon FontSize="12" Glyph="&#xE895;" />
-                </Button>
-            </Grid>
             <Button Grid.Column="5" MinWidth="0" Padding="10,4"
                     VerticalAlignment="Center"
                     ToolTipService.ToolTip="打开主界面"

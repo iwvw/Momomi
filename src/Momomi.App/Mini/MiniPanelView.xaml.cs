@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Momomi.App.ViewModels;
 
 namespace Momomi.App.Mini;
@@ -29,6 +30,102 @@ public sealed partial class MiniPanelView : UserControl
                 SyncModeBar();
             }
         };
+
+        // 拖拽收起手势：整面板可拖，但落在交互控件上时让控件优先处理点击。
+        RootGrid.AddHandler(
+            PointerPressedEvent,
+            new PointerEventHandler(OnRootPointerPressed),
+            handledEventsToo: true);
+        RootGrid.AddHandler(
+            PointerMovedEvent,
+            new PointerEventHandler(OnRootPointerMoved),
+            handledEventsToo: true);
+        RootGrid.AddHandler(
+            PointerReleasedEvent,
+            new PointerEventHandler(OnRootPointerReleased),
+            handledEventsToo: true);
+        RootGrid.AddHandler(
+            PointerCanceledEvent,
+            new PointerEventHandler(OnRootPointerCanceled),
+            handledEventsToo: true);
+    }
+
+    /// <summary>拖拽手势开始（位移已超过阈值，进入拖拽）。</summary>
+    public event EventHandler? DragGestureStarted;
+
+    /// <summary>拖拽手势移动（鼠标位置变化即触发）。</summary>
+    public event EventHandler? DragGestureMoved;
+
+    /// <summary>拖拽手势结束（松开/取消），由宿主决定收起或回弹。</summary>
+    public event EventHandler? DragGestureEnded;
+
+    /// <summary>按下后位移超过该阈值才视为拖拽；阈值内的轻点交由控件正常处理（点击）。</summary>
+    private const double DragThresholdDip = 8;
+
+    private bool _dragArmed;
+    private bool _dragActive;
+    private uint? _dragPointerId;
+    private Windows.Foundation.Point _pressPoint;
+
+    private void OnRootPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_dragArmed || _dragActive) return;
+        if (!e.GetCurrentPoint(RootGrid).Properties.IsLeftButtonPressed) return;
+        _dragArmed = true;
+        _dragPointerId = e.Pointer.PointerId;
+        _pressPoint = e.GetCurrentPoint(RootGrid).Position;
+    }
+
+    private void OnRootPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerId != _dragPointerId) return;
+        if (_dragActive)
+        {
+            DragGestureMoved?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+        if (!_dragArmed) return;
+
+        var pos = e.GetCurrentPoint(RootGrid).Position;
+        double dx = pos.X - _pressPoint.X;
+        double dy = pos.Y - _pressPoint.Y;
+        if (Math.Abs(dx) <= DragThresholdDip && Math.Abs(dy) <= DragThresholdDip) return;
+
+        // 位移超阈值：从"轻点"转为"拖拽"，接管指针，后续事件只发给本控件。
+        _dragArmed = false;
+        _dragActive = true;
+        RootGrid.CapturePointer(e.Pointer);
+        DragGestureStarted?.Invoke(this, EventArgs.Empty);
+        DragGestureMoved?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnRootPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerId != _dragPointerId) return;
+        if (_dragActive)
+        {
+            _dragActive = false;
+            _dragArmed = false;
+            _dragPointerId = null;
+            RootGrid.ReleasePointerCapture(e.Pointer);
+            DragGestureEnded?.Invoke(this, EventArgs.Empty);
+        }
+        else
+        {
+            // 未进入拖拽即视为轻点：不接管，让控件（按钮等）正常收到 Click。
+            _dragArmed = false;
+            _dragPointerId = null;
+        }
+    }
+
+    private void OnRootPointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerId != _dragPointerId) return;
+        bool wasActive = _dragActive;
+        _dragActive = false;
+        _dragArmed = false;
+        _dragPointerId = null;
+        if (wasActive) DragGestureEnded?.Invoke(this, EventArgs.Empty);
     }
 
     public void SetSolidBackground(bool solid)

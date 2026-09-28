@@ -11,6 +11,15 @@ internal enum SlideDirection
     RightToLeft,
 }
 
+internal enum SlideEasing
+{
+    /// <summary>展开：fast-out / slow-in，末尾缓缓减速（对应 Fluent cubic-bezier(0,0,0,1)）。</summary>
+    EaseOut,
+
+    /// <summary>收起：反向曲线，开始缓缓起步、末尾完成。</summary>
+    EaseIn,
+}
+
 internal static class SlideMath
 {
     private const int Overshoot = 24;
@@ -26,6 +35,12 @@ internal static class SlideMath
             _ => target,
         };
     }
+
+    public static double Ease(double t, SlideEasing easing) => easing switch
+    {
+        SlideEasing.EaseIn => EaseInCubic(t),
+        _ => EaseOutCubic(t),
+    };
 
     public static double EaseOutCubic(double t) => 1 - Math.Pow(1 - t, 3);
     public static double EaseInCubic(double t) => t * t * t;
@@ -48,7 +63,7 @@ internal sealed class WindowSlider : IDisposable
     private int _fromAlpha;
     private int _toAlpha;
     private int _durationMs;
-    private bool _easeOut;
+    private SlideEasing _easing;
     private Action? _onCompleted;
     private int _generation;
     private volatile bool _hasRequest;
@@ -68,7 +83,7 @@ internal sealed class WindowSlider : IDisposable
     }
 
     public void Animate(RectInt32 from, RectInt32 to, int fromAlpha, int toAlpha,
-        int durationMs, bool easeOut, Action? onCompleted)
+        int durationMs, SlideEasing easing, Action? onCompleted)
     {
         lock (_gate)
         {
@@ -78,7 +93,7 @@ internal sealed class WindowSlider : IDisposable
             _fromAlpha = fromAlpha;
             _toAlpha = toAlpha;
             _durationMs = durationMs;
-            _easeOut = easeOut;
+            _easing = easing;
             _onCompleted = onCompleted;
             _hasRequest = true;
         }
@@ -91,6 +106,18 @@ internal sealed class WindowSlider : IDisposable
         _signal.Set();
         _worker.Join(500);
         _signal.Dispose();
+    }
+
+    /// <summary>中断当前动画并清除完成回调（拖动手势接管时调用）。</summary>
+    public void Cancel()
+    {
+        lock (_gate)
+        {
+            _generation++;
+            _hasRequest = false;
+            _onCompleted = null;
+        }
+        _signal.Set();
     }
 
     private void WorkerLoop()
@@ -108,7 +135,7 @@ internal sealed class WindowSlider : IDisposable
 
                 RectInt32 from, to;
                 int fromAlpha, toAlpha, durationMs, generation;
-                bool easeOut;
+                SlideEasing easing;
                 Action? onCompleted;
                 lock (_gate)
                 {
@@ -118,12 +145,12 @@ internal sealed class WindowSlider : IDisposable
                     fromAlpha = _fromAlpha;
                     toAlpha = _toAlpha;
                     durationMs = _durationMs;
-                    easeOut = _easeOut;
+                    easing = _easing;
                     generation = _generation;
                     onCompleted = _onCompleted;
                 }
 
-                bool finished = RunAnimation(generation, from, to, fromAlpha, toAlpha, durationMs, easeOut);
+                bool finished = RunAnimation(generation, from, to, fromAlpha, toAlpha, durationMs, easing);
 
                 if (!finished)
                 {
@@ -149,7 +176,7 @@ internal sealed class WindowSlider : IDisposable
     }
 
     private bool RunAnimation(int generation, RectInt32 from, RectInt32 to,
-        int fromAlpha, int toAlpha, int durationMs, bool easeOut)
+        int fromAlpha, int toAlpha, int durationMs, SlideEasing easing)
     {
         bool positionMoves = from.X != to.X || from.Y != to.Y;
         bool alphaMoves = fromAlpha != toAlpha;
@@ -171,7 +198,7 @@ internal sealed class WindowSlider : IDisposable
             }
 
             double progress = Math.Min(1.0, sw.Elapsed.TotalMilliseconds / durationMs);
-            double eased = easeOut ? SlideMath.EaseOutCubic(progress) : SlideMath.EaseInCubic(progress);
+            double eased = SlideMath.Ease(progress, easing);
 
             int x = (int)Math.Round(from.X + (to.X - from.X) * eased);
             int y = (int)Math.Round(from.Y + (to.Y - from.Y) * eased);

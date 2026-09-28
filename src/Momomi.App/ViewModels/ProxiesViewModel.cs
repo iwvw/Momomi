@@ -59,8 +59,8 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
         foreach (var n in _all)
         {
             n.SelectRequested = SelectNode;
-            // 每个节点独立测速，而不是整组重测。
-            n.TestRequested = node => _ = TestNodeAsync(node);
+            // 每个节点独立测速，而不是整组重测。单点测速完成后广播，让迷你面板同步延迟。
+            n.TestRequested = node => _ = TestNodeAsync(node, broadcast: true);
         }
         ApplySort();
     }
@@ -139,6 +139,8 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
                 if (SortIndex == 1) ApplySort();
                 _owner.ReportStatus($"{Name} 测速完成");
                 IsBusy = false;
+                // 整组测速结束后统一广播一次，让迷你面板同步延迟。
+                _owner.RaiseProxiesChangedExceptSelf();
             });
         }
         catch (Exception ex)
@@ -162,8 +164,8 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
 
     public void SetBusy(bool value) => IsBusy = value;
 
-    /// <summary>测单个节点，只更新该节点的延迟。</summary>
-    public async Task TestNodeAsync(ProxyItemViewModel node)
+    /// <summary>测单个节点，并把延迟同步到所有分组的同名节点。</summary>
+    public async Task TestNodeAsync(ProxyItemViewModel node, bool broadcast = false)
     {
         if (_core.Api is null || node.IsTesting) return;
         node.IsTesting = true;
@@ -177,6 +179,10 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
                 node.IsTesting = false;
                 node.Delay = delay;
                 node.IsAlive = delay > 0;
+                _owner.SyncNodeDelay(node.Name, delay, delay > 0);
+                if (SortIndex == 1) ApplySort();
+                // 单点测速时广播一次，让迷你面板同步延迟（整组测速由 TestAsync 统一广播）。
+                if (broadcast) _owner.RaiseProxiesChangedExceptSelf();
             });
         }
         catch
@@ -186,6 +192,8 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
                 node.IsTesting = false;
                 node.Delay = 0;
                 node.IsAlive = false;
+                _owner.SyncNodeDelay(node.Name, 0, false);
+                if (broadcast) _owner.RaiseProxiesChangedExceptSelf();
             });
         }
     }
@@ -430,6 +438,25 @@ public sealed partial class ProxiesViewModel : ObservableObject
         }
         catch
         {
+        }
+    }
+
+    /// <summary>
+    /// 把单个节点的测速结果同步到所有分组里同名的节点（同一物理节点可能同时出现在多个组）。
+    /// 只更新延迟与存活，不动 IsTesting，避免干扰其他分组并行中的测速。
+    /// </summary>
+    public void SyncNodeDelay(string name, int delay, bool alive)
+    {
+        foreach (var group in Groups)
+        {
+            foreach (var node in group.AllNodes)
+            {
+                if (string.Equals(node.Name, name, StringComparison.Ordinal))
+                {
+                    node.IsAlive = alive;
+                    node.Delay = delay;
+                }
+            }
         }
     }
 

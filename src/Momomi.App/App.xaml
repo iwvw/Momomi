@@ -22,11 +22,15 @@
             <!-- 页面内容最大宽度：对齐 Windows 设置的限宽居中范式 -->
             <x:Double x:Key="PageContentMaxWidth">1064</x:Double>
 
-            <!-- 标题栏右侧不再预留拖拽区，顶栏控件直接贴近窗口按钮 -->
-            <x:Double x:Key="TitleBarMinDragRegionWidth">0</x:Double>
+            <!-- 标题栏右侧预留少量拖拽区，让顶栏控件与窗口按钮之间留约 4px 间距 -->
+            <x:Double x:Key="TitleBarMinDragRegionWidth">4</x:Double>
 
             <!-- 内容区透出 Mica 背景：覆盖 NavigationView 默认的半透明灰层（LayerFillColorDefaultBrush） -->
             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+
+            <!-- 去掉导航页内的分隔线：导航栏与内容区之间的竖线、内容区顶部横线 -->
+            <SolidColorBrush x:Key="NavigationViewItemSeparatorForeground" Color="Transparent" />
+            <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
 
             <!-- 卡片容器用 Grid 而非 Border：Border 同时设置 CornerRadius + BorderThickness + Background
                  时背景与描边会被拆成两个 visual，圆角处出现接缝（microsoft-ui-xaml#9454）。
