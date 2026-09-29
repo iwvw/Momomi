@@ -48,9 +48,19 @@ public sealed partial class SettingsPage : Page
         AppHost.Host.Core.StateChanged -= OnCoreStateChanged;
     }
 
-    private void OnExternalChange(object? sender, EventArgs e) => _ = ReloadAsync();
+    // 事件可能从后台线程触发：必须调度回 UI 线程再 Reload，
+    // 否则 LoadAsync 里的属性赋值会让 x:Bind 跨界更新控件抛 COMException。
+    private void OnExternalChange(object? sender, EventArgs e) => DispatchReload();
 
-    private void OnCoreStateChanged(object? sender, Momomi.Core.Services.CoreStateChanged e) => _ = ReloadAsync();
+    private void OnCoreStateChanged(object? sender, Momomi.Core.Services.CoreStateChanged e) => DispatchReload();
+
+    private void DispatchReload()
+    {
+        if (DispatcherQueue.HasThreadAccess)
+            _ = ReloadAsync();
+        else
+            DispatcherQueue.TryEnqueue(() => _ = ReloadAsync());
+    }
 
     private async Task ReloadAsync()
     {
