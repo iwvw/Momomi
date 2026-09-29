@@ -592,11 +592,14 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (selector is not null)
         {
             await selector.SetSystemProxyAsync(enabled);
+            // 不能读 selector.SystemProxyOn：它是经 DispatcherQueue 异步回写的，
+            // 此处可能仍是旧值，会把刚切换的状态覆盖回去。直接读注册表真实状态。
             _applyingSwitch = true;
             try
             {
-                SystemProxyEnabled = selector.SystemProxyOn;
-                StatusText = selector.SystemProxyOn ? "系统代理已开启" : "系统代理已关闭";
+                var on = _host.SystemProxy.IsEnabled();
+                SystemProxyEnabled = on;
+                StatusText = on ? "系统代理已开启" : "系统代理已关闭";
             }
             finally
             {
@@ -634,11 +637,13 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (selector is not null)
         {
             await selector.SetTunAsync(enabled);
+            // 同系统代理：selector.TunOn 异步回写，此处读真实设置值。
             _applyingSwitch = true;
             try
             {
-                TunEnabled = selector.TunOn;
-                StatusText = selector.TunOn ? "TUN 已开启" : "TUN 已关闭";
+                var on = await _host.Settings.GetBoolAsync("core.tun");
+                TunEnabled = on;
+                StatusText = on ? "TUN 已开启" : "TUN 已关闭";
             }
             finally
             {

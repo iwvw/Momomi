@@ -65,7 +65,6 @@ public sealed partial class SettingsPage : Page
     private async Task ReloadAsync()
     {
         await ViewModel.LoadAsync();
-        await ViewModel.LoadKernelVersionsCommand.ExecuteAsync(null);
 
         _syncing = true;
         try
@@ -107,6 +106,10 @@ public sealed partial class SettingsPage : Page
         {
             _syncing = false;
         }
+
+        // 内核版本列表走网络（可能很慢），后台加载，不阻塞上面的下拉框初始化。
+        if (!ViewModel.LoadKernelVersionsCommand.IsRunning)
+            _ = ViewModel.LoadKernelVersionsCommand.ExecuteAsync(null);
     }
 
     private void Theme_SelectionChanged(object sender, SelectionChangedEventArgs e)
