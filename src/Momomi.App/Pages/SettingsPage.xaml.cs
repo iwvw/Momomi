@@ -218,8 +218,7 @@ public sealed partial class SettingsPage : Page
 
         if (e.Key == Windows.System.VirtualKey.Back)
         {
-            var cleared = await ViewModel.ApplyHotkeyAsync(action, "");
-            if (cleared) box.Text = "";
+            await ClearHotkeyAsync(action, box);
             return;
         }
 
@@ -241,8 +240,69 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        var ok = await ViewModel.ApplyHotkeyAsync(action, text);
-        if (ok) box.Text = text;
+        await ApplyHotkeyAsync(action, text, box);
+    }
+
+    /// <summary>绑定快捷键；与应用内其它动作冲突时弹窗确认是否抢占。</summary>
+    private async Task ApplyHotkeyAsync(string action, string text, TextBox? box)
+    {
+        var result = await ViewModel.TryBindHotkeyAsync(action, text);
+        switch (result.Status)
+        {
+            case Momomi.App.Services.HotkeyApplyStatus.Ok:
+                if (box is not null) box.Text = text;
+                break;
+
+            case Momomi.App.Services.HotkeyApplyStatus.InternalConflict when result.Conflict is not null:
+                var conflictName = SettingsViewModel.HotkeyDisplayName(result.Conflict.Value);
+                var dialog = new ContentDialog
+                {
+                    Title = "快捷键冲突",
+                    Content = $"「{text}」已绑定给「{conflictName}」。\n是否移除对方的绑定并改绑到这里？",
+                    PrimaryButtonText = "改绑",
+                    CloseButtonText = "取消",
+                    DefaultButton = ContentDialogButton.Primary,
+                    XamlRoot = XamlRoot,
+                };
+                if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+                {
+                    var ok = await ViewModel.ResolveHotkeyConflictAsync(action, text, result.Conflict.Value.ToString());
+                    if (ok && box is not null) box.Text = text;
+                }
+                else
+                {
+                    // 取消：把输入框恢复为当前动作的实际绑定。
+                    if (box is not null) box.Text = await GetCurrentHotkeyTextAsync(action);
+                }
+                break;
+
+            case Momomi.App.Services.HotkeyApplyStatus.Occupied:
+                ViewModel.StatusText = "快捷键注册失败：可能已被其他程序占用";
+                if (box is not null) box.Text = await GetCurrentHotkeyTextAsync(action);
+                break;
+
+            case Momomi.App.Services.HotkeyApplyStatus.Invalid:
+                ViewModel.StatusText = "快捷键无效：需至少一个修饰键 + 一个可用的主键";
+                if (box is not null) box.Text = await GetCurrentHotkeyTextAsync(action);
+                break;
+        }
+    }
+
+    private async Task<string> GetCurrentHotkeyTextAsync(string action)
+    {
+        var host = global::Momomi.App.AppHost.Host;
+        return await host.Settings.GetAsync($"hotkey.{action}") ?? "";
+    }
+
+    private async Task<bool> ClearHotkeyAsync(string action, TextBox box)
+    {
+        var result = await ViewModel.TryBindHotkeyAsync(action, "");
+        if (result.Status is Momomi.App.Services.HotkeyApplyStatus.Cleared)
+        {
+            box.Text = "";
+            return true;
+        }
+        return false;
     }
 
     /// <summary>把 VirtualKey 转成解析器认识的名称。</summary>

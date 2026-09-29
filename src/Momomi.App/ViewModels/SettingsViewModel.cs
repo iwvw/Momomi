@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Momomi.App.Services;
 using Momomi.Core.Services;
 
 namespace Momomi.App.ViewModels;
@@ -175,19 +176,74 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial string HotkeyModeDirect { get; set; } = "";
 
-    /// <summary>快捷键变更后由设置页调用：注册并持久化，返回是否成功。</summary>
-    public async Task<bool> ApplyHotkeyAsync(string action, string text)
+    /// <summary>
+    /// 尝试绑定快捷键，返回结果供页面决定是否提示冲突：
+    /// 与应用内其它动作冲突时返回冲突动作，且不做任何修改；被其它程序占用则返回失败。
+    /// </summary>
+    public async Task<HotkeyApplyResult> TryBindHotkeyAsync(string action, string text)
     {
-        if (!Enum.TryParse<Momomi.App.Services.HotkeyAction>(action, out var hotkeyAction)) return false;
+        if (!Enum.TryParse<Momomi.App.Services.HotkeyAction>(action, out var hotkeyAction))
+            return new HotkeyApplyResult(HotkeyApplyStatus.Invalid, null);
+
+        var window = global::Momomi.App.App.Main;
+        if (window is null) return new HotkeyApplyResult(HotkeyApplyStatus.Invalid, null);
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await window.Hotkeys.UnbindAsync(hotkeyAction);
+            await ReloadHotkeysAsync();
+            StatusText = "已清除快捷键";
+            return new HotkeyApplyResult(HotkeyApplyStatus.Cleared, null);
+        }
+
+        if (!Momomi.App.Services.HotkeyParser.TryParse(text, out _, out _))
+            return new HotkeyApplyResult(HotkeyApplyStatus.Invalid, null);
+
+        var normalized = text.Trim();
+        var conflict = await window.Hotkeys.FindConflictActionAsync(hotkeyAction, normalized);
+        if (conflict is not null)
+            return new HotkeyApplyResult(HotkeyApplyStatus.InternalConflict, conflict.Value);
+
+        var ok = await window.Hotkeys.SetAsync(hotkeyAction, normalized);
+        if (!ok) return new HotkeyApplyResult(HotkeyApplyStatus.Occupied, null);
+
+        await ReloadHotkeysAsync();
+        StatusText = $"快捷键已设为 {normalized}";
+        return new HotkeyApplyResult(HotkeyApplyStatus.Ok, null);
+    }
+
+    /// <summary>用户确认覆盖后：解除冲突动作的绑定，再把该快捷键绑到当前动作。</summary>
+    public async Task<bool> ResolveHotkeyConflictAsync(string action, string text, string conflictAction)
+    {
+        if (!Enum.TryParse<Momomi.App.Services.HotkeyAction>(action, out var target)) return false;
+        if (!Enum.TryParse<Momomi.App.Services.HotkeyAction>(conflictAction, out var conflict)) return false;
         var window = global::Momomi.App.App.Main;
         if (window is null) return false;
 
-        var ok = await window.Hotkeys.SetAsync(hotkeyAction, text).ConfigureAwait(false);
+        var normalized = text.Trim();
+        await window.Hotkeys.UnbindAsync(conflict);
+        var ok = await window.Hotkeys.SetAsync(target, normalized);
+        await ReloadHotkeysAsync();
         StatusText = ok
-            ? (string.IsNullOrWhiteSpace(text) ? "已清除快捷键" : $"快捷键已设为 {text}")
+            ? $"已从「{Momomi.App.Services.HotkeyManager.DisplayName(conflict)}」移除并设为 {normalized}"
             : "快捷键注册失败：可能已被其他程序占用";
         return ok;
     }
+
+    private async Task ReloadHotkeysAsync()
+    {
+        HotkeyShowWindow = await _host.Settings.GetAsync("hotkey.ShowWindow") ?? "";
+        HotkeyToggleSystemProxy = await _host.Settings.GetAsync("hotkey.ToggleSystemProxy") ?? "";
+        HotkeyToggleTun = await _host.Settings.GetAsync("hotkey.ToggleTun") ?? "";
+        HotkeyToggleMiniPanel = await _host.Settings.GetAsync("hotkey.ToggleMiniPanel") ?? "";
+        HotkeyModeRule = await _host.Settings.GetAsync("hotkey.ModeRule") ?? "";
+        HotkeyModeGlobal = await _host.Settings.GetAsync("hotkey.ModeGlobal") ?? "";
+        HotkeyModeDirect = await _host.Settings.GetAsync("hotkey.ModeDirect") ?? "";
+    }
+
+    /// <summary>动作的中文显示名（供冲突提示）。</summary>
+    public static string HotkeyDisplayName(Momomi.App.Services.HotkeyAction action)
+        => Momomi.App.Services.HotkeyManager.DisplayName(action);
 
     [ObservableProperty]
     public partial int GithubProxyIndex { get; set; }
