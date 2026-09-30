@@ -141,11 +141,52 @@ public sealed class MihomoProcessManager : IMihomoProcessManager
     private void CaptureLine(string? line)
     {
         if (string.IsNullOrWhiteSpace(line)) return;
+        // 只保留真正的问题行：mihomo 的常规 level=info/debug 流量日志量大且无诊断价值，
+        // 全部堆进错误提示会让界面又长又乱。崩溃时的关键信息多为 error/fatal/warning。
+        if (!LooksLikeError(line)) return;
         lock (_gate)
         {
-            _recentError.Add(line);
-            if (_recentError.Count > 50) _recentError.RemoveAt(0);
+            _recentError.Add(Clean(line));
+            if (_recentError.Count > 10) _recentError.RemoveAt(0);
         }
+    }
+
+    /// <summary>判断一行 mihomo 输出是否为错误/警告级别（兼容 log-level 文本与 JSON 两种格式）。</summary>
+    private static bool LooksLikeError(string line)
+    {
+        if (line.Contains("level=error", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("level=fatal", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("level=warning", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("level=warn", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (line.Contains("\"level\":\"error\"", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("\"level\":\"fatal\"", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("\"level\":\"warning\"", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("\"level\":\"warn\"", StringComparison.OrdinalIgnoreCase))
+            return true;
+        // 无 level 字段但含 error/fatal 关键字的（如初始化的致命报错）。
+        return !line.Contains("level=info", StringComparison.OrdinalIgnoreCase)
+            && !line.Contains("level=debug", StringComparison.OrdinalIgnoreCase)
+            && (line.Contains("error", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("fatal", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("panic", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>精简一行日志：去掉时间戳与级别前缀，只留 msg 正文，便于在界面上阅读。</summary>
+    private static string Clean(string line)
+    {
+        var msgIndex = line.IndexOf("msg=", StringComparison.OrdinalIgnoreCase);
+        if (msgIndex >= 0)
+        {
+            var msg = line[(msgIndex + 4)..].Trim();
+            if (msg.Length > 1 && msg[0] == '"')
+            {
+                var end = msg.IndexOf('"', 1);
+                if (end > 0) msg = msg[1..end];
+            }
+            if (msg.Length > 0) return msg;
+        }
+        return line;
     }
 
     private void OnProcessExited(object? sender, EventArgs e)

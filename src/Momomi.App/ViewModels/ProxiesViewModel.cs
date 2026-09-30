@@ -117,25 +117,23 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            // 限流并发逐节点测速：每个返回即刷新，不必等全部完成。
-            using var gate = new SemaphoreSlim(16);
-            var tasks = _all.Select(async n =>
-            {
-                await gate.WaitAsync().ConfigureAwait(false);
-                try
+            // 统一走 DelayTester：并发受控 + 每节点多次取最小，与全部测速/单点测速一致。
+            _owner.Dispatcher.TryEnqueue(() => { foreach (var n in _all) n.IsTesting = true; });
+            var names = _all.Select(n => n.Name).ToList();
+            await DelayTester.MeasureAllAsync(
+                _core.Api, names, _owner.DelayTestUrl, _owner.DelayTestTimeoutMs, _owner.DelayTestConcurrency,
+                (name, delay) =>
                 {
-                    await TestNodeAsync(n).ConfigureAwait(false);
-                }
-                finally
-                {
-                    gate.Release();
-                }
-            }).ToList();
-
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+                    _owner.Dispatcher.TryEnqueue(() =>
+                    {
+                        _owner.SyncNodeDelay(name, delay, delay > 0);
+                    });
+                    return Task.CompletedTask;
+                }).ConfigureAwait(false);
 
             _owner.Dispatcher.TryEnqueue(() =>
             {
+                foreach (var n in _all) n.IsTesting = false;
                 if (SortIndex == 1) ApplySort();
                 _owner.ReportStatus($"{Name} 测速完成");
                 IsBusy = false;
@@ -169,33 +167,19 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
     {
         if (_core.Api is null || node.IsTesting) return;
         node.IsTesting = true;
-        try
+        var delay = await DelayTester
+            .MeasureAsync(_core.Api, node.Name, _owner.DelayTestUrl, _owner.DelayTestTimeoutMs)
+            .ConfigureAwait(false);
+        _owner.Dispatcher.TryEnqueue(() =>
         {
-            var delay = await _core.Api
-                .ProxyDelayAsync(node.Name, _owner.DelayTestUrl, _owner.DelayTestTimeoutMs)
-                .ConfigureAwait(false);
-            _owner.Dispatcher.TryEnqueue(() =>
-            {
-                node.IsTesting = false;
-                node.Delay = delay;
-                node.IsAlive = delay > 0;
-                _owner.SyncNodeDelay(node.Name, delay, delay > 0);
-                if (SortIndex == 1) ApplySort();
-                // 单点测速时广播一次，让迷你面板同步延迟（整组测速由 TestAsync 统一广播）。
-                if (broadcast) _owner.RaiseProxiesChangedExceptSelf();
-            });
-        }
-        catch
-        {
-            _owner.Dispatcher.TryEnqueue(() =>
-            {
-                node.IsTesting = false;
-                node.Delay = 0;
-                node.IsAlive = false;
-                _owner.SyncNodeDelay(node.Name, 0, false);
-                if (broadcast) _owner.RaiseProxiesChangedExceptSelf();
-            });
-        }
+            node.IsTesting = false;
+            node.Delay = delay;
+            node.IsAlive = delay > 0;
+            _owner.SyncNodeDelay(node.Name, delay, delay > 0);
+            if (SortIndex == 1) ApplySort();
+            // 单点测速时广播一次，让迷你面板同步延迟（整组测速由 TestAsync 统一广播）。
+            if (broadcast) _owner.RaiseProxiesChangedExceptSelf();
+        });
     }
 }
 
@@ -488,14 +472,18 @@ public sealed partial class ProxiesViewModel : ObservableObject
 
             var names = byName.Keys.ToList();
             foreach (var g in Groups) g.SetBusy(true);
-
-            using var gate = new SemaphoreSlim(Math.Max(1, DelayTestConcurrency));
-            var tasks = names.Select(async name =>
+            // 测速期间为每个待测节点点亮旋转动画（单点测速在 TestNodeAsync 里已处理）。
+            _dispatcher.TryEnqueue(() =>
             {
-                await gate.WaitAsync().ConfigureAwait(false);
-                try
+                foreach (var node in byName.Values.SelectMany(v => v))
+                    node.IsTesting = true;
+            });
+
+            // 统一走 DelayTester：并发受控 + 每节点多次取最小，与单点/组测速一致。
+            await DelayTester.MeasureAllAsync(
+                _core.Api, names, DelayTestUrl, DelayTestTimeoutMs, DelayTestConcurrency,
+                (name, delay) =>
                 {
-                    var delay = await TestOnceAsync(name).ConfigureAwait(false);
                     _dispatcher.TryEnqueue(() =>
                     {
                         foreach (var node in byName[name])
@@ -505,14 +493,8 @@ public sealed partial class ProxiesViewModel : ObservableObject
                             node.IsAlive = delay > 0;
                         }
                     });
-                }
-                finally
-                {
-                    gate.Release();
-                }
-            }).ToList();
-
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+                    return Task.CompletedTask;
+                }).ConfigureAwait(false);
 
             _dispatcher.TryEnqueue(() =>
             {
@@ -524,21 +506,6 @@ public sealed partial class ProxiesViewModel : ObservableObject
         finally
         {
             IsBusy = false;
-        }
-    }
-
-    /// <summary>对单个物理节点发起一次测速，返回延迟（0 表示超时/失败）。</summary>
-    private async Task<int> TestOnceAsync(string name)
-    {
-        try
-        {
-            return await _core.Api!
-                .ProxyDelayAsync(name, DelayTestUrl, DelayTestTimeoutMs)
-                .ConfigureAwait(false);
-        }
-        catch
-        {
-            return 0;
         }
     }
 

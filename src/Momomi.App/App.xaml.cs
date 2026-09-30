@@ -82,12 +82,24 @@ public partial class App : Application
         _window = new MainWindow();
         Main = (MainWindow)_window;
 
+        var launchArgs = Environment.GetCommandLineArgs();
+        var launchedByStartup = launchArgs.Any(a => string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
+        var launchedAsMini = launchArgs.Any(a => string.Equals(a, "--mini", StringComparison.OrdinalIgnoreCase));
+
+        // 仅迷你面板模式：不显示主窗口，只拉起迷你面板，省去主窗口整棵可视化树的显示开销。
+        if (launchedAsMini)
+        {
+            _ = ShowMiniOnlyAsync();
+            _ = ApplyThemeFromSettingsAsync();
+            _ = AutoStartCoreAsync();
+            _ = AutoCheckUpdateAsync();
+            return;
+        }
+
         // 静默启动（开机自启 + 该开关打开）时不显示主窗口，最小化到托盘。
         var silent = false;
         try
         {
-            var launchArgs = Environment.GetCommandLineArgs();
-            var launchedByStartup = launchArgs.Any(a => string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
             if (launchedByStartup)
                 silent = await AppHost.Host.Settings.GetBoolAsync("ui.silentStart").ConfigureAwait(false);
         }
@@ -95,13 +107,47 @@ public partial class App : Application
         {
         }
 
-        if (silent) Main.HideToTray();
-        else _window.Activate();
+        // 「启动时最小化到托盘」：每次启动都不显示主窗口，只保留托盘与迷你面板。
+        var startMinimized = false;
+        try
+        {
+            startMinimized = await AppHost.Host.Settings.GetBoolAsync("ui.startMinimized").ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+
+        if (silent || startMinimized)
+        {
+            var main = Main;
+            if (main is not null)
+                main.DispatcherQueue.TryEnqueue(() => main.StartMinimizedToTray());
+        }
+        else
+        {
+            _window.Activate();
+        }
 
         _ = ApplyThemeFromSettingsAsync();
         _ = AutoStartCoreAsync();
         _ = NavigateFromCommandLineAsync();
         _ = AutoCheckUpdateAsync();
+    }
+
+    /// <summary>仅迷你面板模式：延迟等待就绪后只弹出迷你面板，不激活主窗口。</summary>
+    private static async Task ShowMiniOnlyAsync()
+    {
+        try
+        {
+            await Task.Delay(800).ConfigureAwait(false);
+            var main = Main;
+            if (main is not null)
+                main.DispatcherQueue.TryEnqueue(() => main.ShowMiniPanel());
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"显示迷你面板失败：{ex}");
+        }
     }
 
     /// <summary>启动时后台静默检查应用更新（不打扰，结果供设置页展示）。</summary>
@@ -127,7 +173,6 @@ public partial class App : Application
         {
             var args = Environment.GetCommandLineArgs();
             string? tag = null;
-            var mini = false;
             for (var i = 0; i < args.Length - 1; i++)
             {
                 if (string.Equals(args[i], "--page", StringComparison.OrdinalIgnoreCase))
@@ -135,19 +180,6 @@ public partial class App : Application
                     tag = args[i + 1];
                     break;
                 }
-            }
-
-            foreach (var arg in args)
-            {
-                if (string.Equals(arg, "--mini", StringComparison.OrdinalIgnoreCase))
-                    mini = true;
-            }
-
-            if (mini)
-            {
-                await Task.Delay(1200);
-                Main?.ShowMiniPanel();
-                return;
             }
 
             if (string.IsNullOrEmpty(tag)) return;

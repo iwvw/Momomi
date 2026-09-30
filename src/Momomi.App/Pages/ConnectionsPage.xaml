@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="Momomi.App.Pages.ConnectionsPage"
-    NavigationCacheMode="Required"
     x:Name="PageRoot"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -10,6 +9,16 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:Momomi.App.ViewModels"
     mc:Ignorable="d">
+
+    <Page.Resources>
+        <!-- 工具栏开关（实时/排行）选中态弱化：用淡色底替代强调色填充，避免与主操作抢视觉 -->
+        <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="{ThemeResource SubtleFillColorSecondary}" />
+        <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="{ThemeResource SubtleFillColorTertiary}" />
+        <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="{ThemeResource SubtleFillColorTertiary}" />
+        <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="{ThemeResource TextFillColorPrimary}" />
+        <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPointerOver" Color="{ThemeResource TextFillColorPrimary}" />
+        <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPressed" Color="{ThemeResource TextFillColorPrimary}" />
+    </Page.Resources>
 
     <Grid RowSpacing="16">
         <Grid.RowDefinitions>
@@ -60,14 +69,8 @@
                 <ComboBoxItem Content="按域名" />
             </ComboBox>
 
-            <Button Grid.Column="2" VerticalAlignment="Center" Width="32" Height="32" Padding="0"
-                    Click="SortDirection_Click"
-                    ToolTipService.ToolTip="升序 / 降序">
-                <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.SortGlyph, Mode=OneWay}" />
-            </Button>
-
-            <ToggleButton x:Name="RealtimeButton" Grid.Column="3" VerticalAlignment="Center"
-                          Height="32" MinWidth="0" Padding="12,0"
+            <ToggleButton x:Name="RealtimeButton" Grid.Column="2"
+                          Style="{StaticResource ToolbarToggleButtonStyle}"
                           Click="Realtime_Click"
                           ToolTipService.ToolTip="实时刷新，暂停后冻结列表">
                 <StackPanel Orientation="Horizontal" Spacing="6">
@@ -76,7 +79,13 @@
                 </StackPanel>
             </ToggleButton>
 
-            <Button Grid.Column="4" VerticalAlignment="Center" Height="32" MinWidth="0" Padding="12,0"
+            <Button Grid.Column="3" Style="{StaticResource IconButtonStyle}"
+                    Click="SortDirection_Click"
+                    ToolTipService.ToolTip="升序 / 降序">
+                <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.SortGlyph, Mode=OneWay}" />
+            </Button>
+
+            <Button Grid.Column="4" Style="{StaticResource ToolbarButtonStyle}"
                     Click="ToggleView_Click"
                     ToolTipService.ToolTip="切换卡片 / 表格视图">
                 <StackPanel Orientation="Horizontal" Spacing="6">
@@ -85,8 +94,8 @@
                 </StackPanel>
             </Button>
 
-            <ToggleButton x:Name="RankingButton" Grid.Column="5" VerticalAlignment="Center"
-                          Height="32" MinWidth="0" Padding="12,0"
+            <ToggleButton x:Name="RankingButton" Grid.Column="5"
+                          Style="{StaticResource ToolbarToggleButtonStyle}"
                           IsChecked="{x:Bind ViewModel.IsRankingView, Mode=TwoWay}"
                           ToolTipService.ToolTip="流量排行：按主机/进程/来源聚合，点选下钻">
                 <StackPanel Orientation="Horizontal" Spacing="6">
@@ -95,7 +104,7 @@
                 </StackPanel>
             </ToggleButton>
 
-            <Button Grid.Column="6" VerticalAlignment="Center" Width="32" Height="32" Padding="0"
+            <Button Grid.Column="6" Style="{StaticResource IconButtonStyle}"
                     ToolTipService.ToolTip="表格列选择"
                     Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay}"
                     Click="Columns_Click">
@@ -115,8 +124,9 @@
                 </Button.Flyout>
             </Button>
 
-            <Button Grid.Column="7" VerticalAlignment="Center" Height="32" MinWidth="0" Padding="12,0"
+            <Button Grid.Column="7" Style="{StaticResource DangerButtonStyle}"
                     Command="{x:Bind ViewModel.CloseAllCommand}"
+                    ToolTipService.ToolTip="关闭全部连接"
                     Content="全部关闭" />
         </Grid>
 
@@ -281,19 +291,19 @@
                             <TextBlock Grid.Column="6" Text="{x:Bind Duration}"
                                        Visibility="{Binding Columns[6].IsVisible, ElementName=PageRoot}" />
                             <StackPanel Grid.Column="7" Orientation="Horizontal" Spacing="4">
-                                <Button Style="{StaticResource IconButtonStyle}" Width="24" Height="24"
+                                <Button Style="{StaticResource IconButtonStyle}" Width="28" Height="28"
                                         ToolTipService.ToolTip="详情" Tag="{x:Bind}" Click="Details_Click">
-                                    <FontIcon FontSize="10" Glyph="&#xE8A7;" />
+                                    <FontIcon FontSize="12" Glyph="&#xE8A7;" />
                                 </Button>
-                                <Button Style="{StaticResource IconButtonStyle}" Width="24" Height="24"
+                                <Button Style="{StaticResource IconButtonStyle}" Width="28" Height="28"
                                         ToolTipService.ToolTip="复制为规则" Tag="{x:Bind}" Click="CopyRule_Click">
-                                    <FontIcon FontSize="10" Glyph="&#xE8C8;" />
+                                    <FontIcon FontSize="12" Glyph="&#xE8C8;" />
                                 </Button>
-                                <Button Style="{StaticResource IconButtonStyle}" Width="24" Height="24"
+                                <Button Style="{StaticResource IconButtonStyle}" Width="28" Height="28"
                                         ToolTipService.ToolTip="关闭此连接"
                                         Command="{Binding DataContext.CloseConnectionCommand, ElementName=PageRoot}"
                                         CommandParameter="{x:Bind}">
-                                    <FontIcon FontSize="10" Glyph="&#xE711;" />
+                                    <FontIcon FontSize="12" Glyph="&#xE711;" />
                                 </Button>
                             </StackPanel>
                         </Grid>
@@ -399,6 +409,7 @@
                                 <Button Style="{StaticResource IconButtonStyle}"
                                         Width="28" Height="28"
                                         ToolTipService.ToolTip="关闭此连接"
+                                        Foreground="{ThemeResource SystemFillColorCriticalBrush}"
                                         Command="{Binding DataContext.CloseConnectionCommand, ElementName=PageRoot}"
                                         CommandParameter="{x:Bind}">
                                     <FontIcon FontSize="12" Glyph="&#xE711;" />

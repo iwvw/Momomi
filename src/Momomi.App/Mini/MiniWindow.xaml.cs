@@ -107,27 +107,27 @@ public sealed partial class MiniWindow : Window
             switch (style)
             {
                 case 1 when MicaController.IsSupported():
-                    SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+                    SetBackdrop(new MicaBackdrop { Kind = MicaKind.Base });
                     Panel.SetSolidBackground(false);
                     break;
                 case 2:
-                    SystemBackdrop = null;
+                    SetBackdrop(null);
                     Panel.SetSolidBackground(true);
                     break;
                 default:
                     if (global::Microsoft.UI.Composition.SystemBackdrops.DesktopAcrylicController.IsSupported())
                     {
-                        SystemBackdrop = new global::Momomi.App.Controls.AlwaysActiveAcrylicBackdrop();
+                        SetBackdrop(new global::Momomi.App.Controls.AlwaysActiveAcrylicBackdrop());
                         Panel.SetSolidBackground(false);
                     }
                     else if (MicaController.IsSupported())
                     {
-                        SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+                        SetBackdrop(new MicaBackdrop { Kind = MicaKind.Base });
                         Panel.SetSolidBackground(false);
                     }
                     else
                     {
-                        SystemBackdrop = null;
+                        SetBackdrop(null);
                         Panel.SetSolidBackground(true);
                     }
                     break;
@@ -135,6 +135,23 @@ public sealed partial class MiniWindow : Window
         }
         catch
         {
+        }
+    }
+
+    /// <summary>替换背景材质并释放旧实例，避免切换材质时泄漏控制器。</summary>
+    private void SetBackdrop(SystemBackdrop? next)
+    {
+        var previous = SystemBackdrop;
+        SystemBackdrop = next;
+        if (!ReferenceEquals(previous, next) && previous is IDisposable disposable)
+        {
+            try
+            {
+                disposable.Dispose();
+            }
+            catch
+            {
+            }
         }
     }
 
@@ -149,6 +166,7 @@ public sealed partial class MiniWindow : Window
     {
         _forceClose = true;
         _statsTimer.Stop();
+        Panel.ViewModel.Dispose();
         _slider.Dispose();
         Close();
     }
@@ -292,6 +310,7 @@ public sealed partial class MiniWindow : Window
             _forceClose = true;
             // 通知宿主（MainWindow）把 _miniWindow 置空，避免引用失效窗口。
             Dismissed?.Invoke(this, EventArgs.Empty);
+            Panel.ViewModel.Dispose();
             _slider.Dispose();
             Close();
         });

@@ -83,7 +83,8 @@ public sealed partial class MainWindow : Window
         };
 
         ApplyBackdrop();
-        NavFrame.Navigate(typeof(DashboardPage));
+        // 不在构造时加载首页：仅用迷你面板 / 静默启动到托盘时不创建页面，
+        // 首次真正显示主窗口（Activate/ShowAndActivate）时才加载，降低常驻内存。
 
         _ = InitializePaneWidthAsync();
         _ = InitializeNavigationStyleAsync();
@@ -96,7 +97,11 @@ public sealed partial class MainWindow : Window
         };
         _ = InitializeModeBarAsync();
 
-        Activated += (_, _) => _ = ModeSelector.RefreshSwitchesAsync();
+        Activated += (_, _) =>
+        {
+            EnsureInitialPageLoaded();
+            _ = ModeSelector.RefreshSwitchesAsync();
+        };
 
         CreateTrayIcon();
 
@@ -259,12 +264,29 @@ public sealed partial class MainWindow : Window
         try
         {
             if (DesktopAcrylicController.IsSupported())
-                SystemBackdrop = new Controls.AlwaysActiveAcrylicBackdrop();
+                SetBackdrop(new Controls.AlwaysActiveAcrylicBackdrop());
             else if (MicaController.IsSupported())
-                SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+                SetBackdrop(new MicaBackdrop { Kind = MicaKind.Base });
         }
         catch
         {
+        }
+    }
+
+    /// <summary>替换系统背景材质，并释放旧实例（AlwaysActiveAcrylicBackdrop 持有控制器需显式释放）。</summary>
+    private void SetBackdrop(SystemBackdrop? next)
+    {
+        var previous = SystemBackdrop;
+        SystemBackdrop = next;
+        if (!ReferenceEquals(previous, next) && previous is IDisposable disposable)
+        {
+            try
+            {
+                disposable.Dispose();
+            }
+            catch
+            {
+            }
         }
     }
 
@@ -276,18 +298,18 @@ public sealed partial class MainWindow : Window
             switch (style)
             {
                 case 1 when MicaController.IsSupported():
-                    SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+                    SetBackdrop(new MicaBackdrop { Kind = MicaKind.Base });
                     break;
                 case 2:
-                    SystemBackdrop = null;
+                    SetBackdrop(null);
                     break;
                 default:
                     if (DesktopAcrylicController.IsSupported())
-                        SystemBackdrop = new Controls.AlwaysActiveAcrylicBackdrop();
+                        SetBackdrop(new Controls.AlwaysActiveAcrylicBackdrop());
                     else if (MicaController.IsSupported())
-                        SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+                        SetBackdrop(new MicaBackdrop { Kind = MicaKind.Base });
                     else
-                        SystemBackdrop = null;
+                        SetBackdrop(null);
                     break;
             }
         }
@@ -837,10 +859,16 @@ public sealed partial class MainWindow : Window
     private void MinimizeToTray()
     {
         AppWindow.Hide();
+        ViewModels.AppSignals.RaiseMainWindowVisibility(false);
+        // 释放主界面页面的可视化树并压缩工作集：托盘/仅迷你模式下常驻内存显著下降。
+        ReleasePageContent();
     }
 
     /// <summary>隐藏主窗口到托盘（用于静默启动）。</summary>
     public void HideToTray() => MinimizeToTray();
+
+    /// <summary>启动时直接最小化到托盘（供 App 依据设置调用）。</summary>
+    public void StartMinimizedToTray() => MinimizeToTray();
 
     private void OnTrayLeftClick()
     {
@@ -877,9 +905,55 @@ public sealed partial class MainWindow : Window
 
     public void ShowAndActivate()
     {
+        EnsureInitialPageLoaded();
         AppWindow.Show();
+        ViewModels.AppSignals.RaiseMainWindowVisibility(true);
         SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
     }
+
+    private Type? _lastPageType;
+
+    /// <summary>首次显示或从托盘恢复时加载页面：优先恢复上次的页面类型，否则用首页。</summary>
+    private void EnsureInitialPageLoaded()
+    {
+        if (NavFrame.Content is not null) return;
+        _lastPageType ??= typeof(DashboardPage);
+        NavFrame.Navigate(_lastPageType);
+    }
+
+    /// <summary>隐藏到托盘时释放当前页面内容（保留页面类型），并压缩工作集，降低常驻内存。</summary>
+    private void ReleasePageContent()
+    {
+        try
+        {
+            if (NavFrame.Content is not null)
+                _lastPageType = NavFrame.Content.GetType();
+            NavFrame.Content = null;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, blocking: false);
+            TrimWorkingSet();
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"释放页面内容失败：{ex}");
+        }
+    }
+
+    /// <summary>把物理内存工作集交还系统（不减少私有提交，但任务管理器观感明显下降）。</summary>
+    private static void TrimWorkingSet()
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetCurrentProcess();
+            _ = EmptyWorkingSet(process.Handle);
+        }
+        catch
+        {
+        }
+    }
+
+    [DllImport("psapi.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EmptyWorkingSet(IntPtr hProcess);
 
     private void ExitFromTray()
     {

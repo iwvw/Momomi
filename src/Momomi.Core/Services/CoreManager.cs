@@ -476,7 +476,10 @@ public sealed class CoreManager : ICoreManager
     {
         lock (_streamGate) StopStreamsLocked();
         if (_state is CoreState.Stopping or CoreState.Stopped) return;
-        SetState(CoreState.Error, _version, $"内核进程已退出（代码 {e.ExitCode}）{Environment.NewLine}{e.LastError}");
+        SetState(CoreState.Error, _version,
+            string.IsNullOrWhiteSpace(e.LastError)
+                ? $"内核进程已退出（代码 {e.ExitCode}）"
+                : $"内核进程已退出（代码 {e.ExitCode}）：{e.LastError}");
     }
 
     private void OnWatchdog(object? state)

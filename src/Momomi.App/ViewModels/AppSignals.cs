@@ -12,7 +12,12 @@ public static class AppSignals
     /// <summary>模式、系统代理、TUN 等运行开关发生变化。</summary>
     public static event EventHandler? SwitchesChanged;
 
+    /// <summary>主窗口显示/隐藏（隐藏到托盘或仅用迷你面板时为 false）。页面据此暂停后台轮询。</summary>
+    public static event EventHandler<bool>? MainWindowVisibilityChanged;
+
     public static void RaiseProxiesChanged() => ProxiesChanged?.Invoke(null, EventArgs.Empty);
 
     public static void RaiseSwitchesChanged() => SwitchesChanged?.Invoke(null, EventArgs.Empty);
+
+    public static void RaiseMainWindowVisibility(bool visible) => MainWindowVisibilityChanged?.Invoke(null, visible);
 }

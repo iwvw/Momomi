@@ -8,11 +8,15 @@ using Momomi.App.ViewModels;
 
 namespace Momomi.App.Mini;
 
-public sealed partial class MiniPanelViewModel : ObservableObject
+public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
 {
     private readonly MomomiHost _host;
     private readonly ICoreManager _core;
     private readonly DispatcherQueue _dispatcher;
+    private readonly EventHandler<TrafficSnapshot> _onTraffic;
+    private readonly EventHandler<CoreStateChanged> _onState;
+    private readonly EventHandler _onProxiesChanged;
+    private bool _disposed;
     private IReadOnlyDictionary<string, ProxyItem> _proxies =
         new Dictionary<string, ProxyItem>();
     private bool _groupsLoaded;
@@ -54,26 +58,41 @@ public sealed partial class MiniPanelViewModel : ObservableObject
         _core = host.Core;
         _dispatcher = dispatcher;
         ModeSelector = new ModeSelectorViewModel(host, dispatcher);
-        _core.TrafficUpdated += (_, t) => _dispatcher.TryEnqueue(() =>
+
+        _onTraffic = (_, t) => _dispatcher.TryEnqueue(() =>
         {
             UpRate = Format.Rate(t.Up);
             DownRate = Format.Rate(t.Down);
         });
-        _core.StateChanged += (_, e) => _dispatcher.TryEnqueue(() =>
+        _onState = (_, e) => _dispatcher.TryEnqueue(() =>
         {
             ApplyCoreState(e.State);
             if (e.State != CoreState.Running) _groupsLoaded = false;
             _ = ReloadAsync();
         });
-
-        AppSignals.ProxiesChanged += (_, _) =>
+        _onProxiesChanged = (_, _) =>
         {
             // 自己发起的广播（如切换节点）已就地更新，跳过整页重建。
             if (_suppressSelfReload) return;
             _dispatcher.TryEnqueue(() => _ = LoadAsync(force: true));
         };
 
+        _core.TrafficUpdated += _onTraffic;
+        _core.StateChanged += _onState;
+        AppSignals.ProxiesChanged += _onProxiesChanged;
+
         ApplyCoreState(_core.State);
+    }
+
+    /// <summary>退订所有事件，供迷你窗口关闭时调用，避免静态事件累积订阅造成泄漏。</summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _core.TrafficUpdated -= _onTraffic;
+        _core.StateChanged -= _onState;
+        AppSignals.ProxiesChanged -= _onProxiesChanged;
+        ModeSelector.Dispose();
     }
 
     private bool _suppressSelfReload;
@@ -233,31 +252,32 @@ public sealed partial class MiniPanelViewModel : ObservableObject
     {
         if (_core.Api is null || group.IsTesting) return;
         _dispatcher.TryEnqueue(() => group.IsTesting = true);
-        try
-        {
-            var delays = await _core.Api
-                .GroupDelayAsync(group.Name, _delayTestUrl, _delayTestTimeoutMs)
-                .ConfigureAwait(false);
-            _dispatcher.TryEnqueue(() =>
+        // 统一走 DelayTester：并发受控 + 每节点多次取最小，与主面板测速逻辑一致。
+        var names = group.Nodes.Select(n => n.Name).ToList();
+        var delays = new Dictionary<string, int>(StringComparer.Ordinal);
+        await DelayTester.MeasureAllAsync(
+            _core.Api, names, _delayTestUrl, _delayTestTimeoutMs, _delayTestConcurrency,
+            (name, delay) =>
             {
-                group.ApplyDelays(delays);
-                group.IsTesting = false;
-                // 广播让主面板等其他视图同步延迟；自己已就地更新，跳过重载。
-                _suppressSelfReload = true;
-                try
-                {
-                    AppSignals.RaiseProxiesChanged();
-                }
-                finally
-                {
-                    _suppressSelfReload = false;
-                }
-            });
-        }
-        catch
+                lock (delays) delays[name] = delay;
+                return Task.CompletedTask;
+            }).ConfigureAwait(false);
+
+        _dispatcher.TryEnqueue(() =>
         {
-            _dispatcher.TryEnqueue(() => group.IsTesting = false);
-        }
+            group.ApplyDelays(delays);
+            group.IsTesting = false;
+            // 广播让主面板等其他视图同步延迟；自己已就地更新，跳过重载。
+            _suppressSelfReload = true;
+            try
+            {
+                AppSignals.RaiseProxiesChanged();
+            }
+            finally
+            {
+                _suppressSelfReload = false;
+            }
+        });
     }
 
     [RelayCommand]

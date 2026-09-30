@@ -128,6 +128,9 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial bool SilentStart { get; set; }
 
     [ObservableProperty]
+    public partial bool StartMinimized { get; set; }
+
+    [ObservableProperty]
     public partial bool AutoQuitWithoutCore { get; set; }
 
     [ObservableProperty]
@@ -324,6 +327,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             ElevatedHostStatus = _host.Elevated.IsElevatedHostRunning ? "运行中" : "未运行";
 
             SilentStart = await _host.Settings.GetBoolAsync("ui.silentStart");
+            StartMinimized = await _host.Settings.GetBoolAsync("ui.startMinimized");
             AutoQuitWithoutCore = await _host.Settings.GetBoolAsync("ui.autoQuitWithoutCore");
             AutoQuitWithoutCoreDelay = await _host.Settings.GetIntAsync("ui.autoQuitWithoutCoreDelay", 30);
             AutoUpdateProfileOnStart = await _host.Settings.GetBoolAsync("profile.autoUpdate", true);
@@ -462,6 +466,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         if (_loading) return;
         _ = _host.Settings.SetBoolAsync("ui.silentStart", value);
+    }
+
+    partial void OnStartMinimizedChanged(bool value)
+    {
+        if (_loading) return;
+        _ = _host.Settings.SetBoolAsync("ui.startMinimized", value);
     }
 
     partial void OnAutoQuitWithoutCoreChanged(bool value)

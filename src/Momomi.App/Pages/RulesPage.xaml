@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="Momomi.App.Pages.RulesPage"
-    NavigationCacheMode="Required"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:Momomi.App.Controls"
@@ -105,12 +104,14 @@
                                        Visibility="{x:Bind HasHit, Mode=OneTime, Converter={StaticResource BoolToVisibility}}"
                                        Text="{x:Bind Size}" />
                             <ToggleButton Grid.Column="5"
-                                          MinWidth="0" Padding="0"
-                                          VerticalAlignment="Center"
-                                          Tag="{x:Bind}"
-                                          Click="Disable_Click"
-                                          ToolTipService.ToolTip="临时禁用（仅当前会话，重载配置后恢复）">
-                                <FontIcon FontSize="10" Glyph="&#xE74A;" />
+                                           Width="28" Height="28"
+                                           MinWidth="0" Padding="0"
+                                           HorizontalAlignment="Left"
+                                           VerticalAlignment="Center"
+                                           Tag="{x:Bind}"
+                                           Click="Disable_Click"
+                                           ToolTipService.ToolTip="临时禁用（仅当前会话，重载配置后恢复）">
+                                <FontIcon FontSize="12" Glyph="&#xE74A;" />
                             </ToggleButton>
                         </Grid>
                     </DataTemplate>

@@ -10,7 +10,8 @@ public static class DelayTestSettings
 {
     public const string DefaultUrl = "https://www.gstatic.com/generate_204";
     public const int DefaultTimeoutMs = 3000;
-    public const int DefaultConcurrency = 16;
+    // 并发过高时节点间会互相争抢带宽/连接，批量测速读数被抬高；默认降到 8 更接近单点测速。
+    public const int DefaultConcurrency = 8;
 
     public static async Task<(string Url, int TimeoutMs, int Concurrency)> ReadAsync(ISettingsService settings)
     {

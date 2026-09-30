@@ -4,7 +4,7 @@ using Momomi.Core.Services;
 
 namespace Momomi.App.ViewModels;
 
-public sealed partial class ModeSelectorViewModel : ObservableObject
+public sealed partial class ModeSelectorViewModel : ObservableObject, IDisposable
 {
     private static readonly string[] Modes = ["rule", "global", "direct"];
 
@@ -12,6 +12,9 @@ public sealed partial class ModeSelectorViewModel : ObservableObject
 
     private readonly MomomiHost _host;
     private readonly DispatcherQueue _dispatcher;
+    private readonly EventHandler<CoreStateChanged> _onCoreState;
+    private readonly EventHandler _onSwitchesChanged;
+    private bool _disposed;
     private bool _loading;
     private bool _suppressSwitch;
     private bool _switchBusy;
@@ -44,9 +47,19 @@ public sealed partial class ModeSelectorViewModel : ObservableObject
     {
         _host = host;
         _dispatcher = dispatcher;
-        _host.Core.StateChanged += (_, e) => _dispatcher.TryEnqueue(() => OnCoreStateChanged(e.State));
-        AppSignals.SwitchesChanged += (_, _) => _dispatcher.TryEnqueue(() => _ = LoadAsync());
+        _onCoreState = (_, e) => _dispatcher.TryEnqueue(() => OnCoreStateChanged(e.State));
+        _onSwitchesChanged = (_, _) => _dispatcher.TryEnqueue(() => _ = LoadAsync());
+        _host.Core.StateChanged += _onCoreState;
+        AppSignals.SwitchesChanged += _onSwitchesChanged;
         OnCoreStateChanged(_host.Core.State);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _host.Core.StateChanged -= _onCoreState;
+        AppSignals.SwitchesChanged -= _onSwitchesChanged;
     }
 
     private void OnCoreStateChanged(CoreState state)

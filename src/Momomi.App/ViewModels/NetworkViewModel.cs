@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Net.Http;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -159,7 +158,7 @@ public sealed partial class NetworkViewModel : ObservableObject
         }
     }
 
-    /// <summary>逐个测试所有目标延迟。</summary>
+    /// <summary>并发测试所有目标延迟，与节点测速同策略。</summary>
     [RelayCommand]
     public async Task TestAllAsync()
     {
@@ -168,7 +167,25 @@ public sealed partial class NetworkViewModel : ObservableObject
         try
         {
             foreach (var target in Targets)
-                await TestOneAsync(target).ConfigureAwait(false);
+                target.IsTesting = true;
+
+            // 与节点测速同策略：并发受控 + 每目标多次取最小。
+            await DelayTester.MeasureAllHttpAsync(
+                Targets,
+                t => t.Url,
+                MakeLatencyClient,
+                concurrency: 4,
+                timeoutMs: 6000,
+                (target, ms) =>
+                {
+                    _dispatcher.TryEnqueue(() =>
+                    {
+                        target.SetResult(ms);
+                        target.IsTesting = false;
+                    });
+                    return Task.CompletedTask;
+                }).ConfigureAwait(false);
+
             _dispatcher.TryEnqueue(() => StatusText = "检测完成");
         }
         finally
@@ -178,37 +195,16 @@ public sealed partial class NetworkViewModel : ObservableObject
         }
     }
 
-    private async Task TestOneAsync(LatencyTargetViewModel target)
-    {
-        _dispatcher.TryEnqueue(() => target.IsTesting = true);
-        try
-        {
-            using var client = MakeLatencyClient();
-            var sw = Stopwatch.StartNew();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-            using var response = await client.GetAsync(target.Url, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            sw.Stop();
-            var ms = sw.ElapsedMilliseconds;
-            _dispatcher.TryEnqueue(() => target.SetResult(ms));
-        }
-        catch
-        {
-            _dispatcher.TryEnqueue(() => target.SetResult(null));
-        }
-        finally
-        {
-            _dispatcher.TryEnqueue(() => target.IsTesting = false);
-        }
-    }
-
     private HttpClient MakeClient()
     {
         var handler = new HttpClientHandler { Proxy = DownloadProxy.Create() };
         return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
     }
 
-    /// <summary>延迟测量客户端：直连（不经内核代理），反映当前网络的真实延迟。</summary>
+    /// <summary>延迟测量客户端：经当前代理（与出口 IP 检测同一链路），量的是端到端真实延迟。</summary>
     private static HttpClient MakeLatencyClient()
-        => new() { Timeout = TimeSpan.FromSeconds(8) };
+    {
+        var handler = new HttpClientHandler { Proxy = DownloadProxy.Create() };
+        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
+    }
 }

@@ -12,7 +12,9 @@ namespace Momomi.App.ViewModels;
 public static class ProcessIconProvider
 {
     private static readonly Dictionary<string, ImageSource?> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Queue<string> Order = new();
     private static readonly object Gate = new();
+    private const int MaxEntries = 256;
 
     public static ImageSource? Get(string? processPath)
     {
@@ -35,6 +37,16 @@ public static class ProcessIconProvider
 
         lock (Gate)
         {
+            if (!Cache.ContainsKey(processPath))
+            {
+                // 无上限会随连接记录里的进程路径持续增长；按 FIFO 淘汰最旧项。
+                if (Order.Count >= MaxEntries)
+                {
+                    var oldest = Order.Dequeue();
+                    Cache.Remove(oldest);
+                }
+                Order.Enqueue(processPath);
+            }
             Cache[processPath] = source;
         }
         return source;

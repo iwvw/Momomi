@@ -121,6 +121,7 @@ public sealed partial class DashboardViewModel : ObservableObject
     private readonly EventHandler<MemorySnapshot> _onMemory;
     private readonly EventHandler<ConnectionsSnapshot> _onConnections;
     private readonly EventHandler _onProxiesReloaded;
+    private readonly EventHandler<bool> _onMainWindowVisibility;
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
 
@@ -148,9 +149,11 @@ public sealed partial class DashboardViewModel : ObservableObject
         _onMemory = (_, m) => _dispatcher.TryEnqueue(() => Memory = Format.Bytes(m.InUse));
         _onConnections = (_, c) => _dispatcher.TryEnqueue(() => ConnectionCount = c.Connections.Count);
         _onProxiesReloaded = (_, _) => _dispatcher.TryEnqueue(() => _ = LoadAllAsync());
+        _onMainWindowVisibility = (_, visible) => OnMainWindowVisibility(null, visible);
     }
 
     private bool _attached;
+    private bool _mainWindowVisible = true;
 
     public void Attach()
     {
@@ -162,6 +165,7 @@ public sealed partial class DashboardViewModel : ObservableObject
         _core.MemoryUpdated += _onMemory;
         _core.ConnectionsUpdated += _onConnections;
         AppSignals.ProxiesChanged += _onProxiesReloaded;
+        AppSignals.MainWindowVisibilityChanged += _onMainWindowVisibility;
 
         // 兜底：内核刚启动代理未就绪导致检测失败时，周期重试直到出口 IP 出现。
         _refreshTimer = new Microsoft.UI.Xaml.DispatcherTimer
@@ -169,13 +173,32 @@ public sealed partial class DashboardViewModel : ObservableObject
             Interval = TimeSpan.FromSeconds(5),
         };
         _refreshTimer.Tick += (_, _) => _ = RefreshNetworkAsync();
-        _refreshTimer.Start();
+        if (_mainWindowVisible) _refreshTimer.Start();
 
         OnStateChanged(new CoreStateChanged(_core.State, _core.Version, _core.LastError));
-        _ = RefreshNetworkAsync();
+        if (_mainWindowVisible) _ = RefreshNetworkAsync();
     }
 
     private Microsoft.UI.Xaml.DispatcherTimer? _refreshTimer;
+
+    private void OnMainWindowVisibility(object? sender, bool visible)
+    {
+        // 主窗口隐藏（托盘 / 仅迷你面板）时暂停首页轮询与网络探测，避免无谓的请求与分配。
+        _mainWindowVisible = visible;
+        _dispatcher.TryEnqueue(() =>
+        {
+            if (_refreshTimer is null) return;
+            if (visible)
+            {
+                _refreshTimer.Start();
+                _ = RefreshNetworkAsync();
+            }
+            else
+            {
+                _refreshTimer.Stop();
+            }
+        });
+    }
 
     public void Detach()
     {
@@ -190,6 +213,7 @@ public sealed partial class DashboardViewModel : ObservableObject
         _core.MemoryUpdated -= _onMemory;
         _core.ConnectionsUpdated -= _onConnections;
         AppSignals.ProxiesChanged -= _onProxiesReloaded;
+        AppSignals.MainWindowVisibilityChanged -= _onMainWindowVisibility;
     }
 
     private void OnStateChanged(CoreStateChanged e)
@@ -295,34 +319,28 @@ public sealed partial class DashboardViewModel : ObservableObject
         try
         {
             foreach (var target in Targets)
-                await TestOneTargetAsync(target).ConfigureAwait(false);
+                _dispatcher.TryEnqueue(() => target.IsTesting = true);
+
+            // 与节点测速同策略：并发受控 + 每目标多次取最小。
+            await DelayTester.MeasureAllHttpAsync(
+                Targets,
+                t => t.Url,
+                MakeLatencyClient,
+                concurrency: 4,
+                timeoutMs: 6000,
+                (target, ms) =>
+                {
+                    _dispatcher.TryEnqueue(() =>
+                    {
+                        target.SetResult(ms);
+                        target.IsTesting = false;
+                    });
+                    return Task.CompletedTask;
+                }).ConfigureAwait(false);
         }
         finally
         {
             _dispatcher.TryEnqueue(() => IsTestingAll = false);
-        }
-    }
-
-    private async Task TestOneTargetAsync(LatencyTargetViewModel target)
-    {
-        _dispatcher.TryEnqueue(() => target.IsTesting = true);
-        try
-        {
-            using var client = MakeLatencyClient();
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-            using var response = await client.GetAsync(target.Url, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            sw.Stop();
-            _dispatcher.TryEnqueue(() => target.SetResult(sw.ElapsedMilliseconds));
-        }
-        catch
-        {
-            _dispatcher.TryEnqueue(() => target.SetResult(null));
-        }
-        finally
-        {
-            _dispatcher.TryEnqueue(() => target.IsTesting = false);
         }
     }
 
@@ -369,9 +387,12 @@ public sealed partial class DashboardViewModel : ObservableObject
         return new System.Net.Http.HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
     }
 
-    /// <summary>延迟测量客户端：直连（不经内核代理），反映当前网络的真实延迟。</summary>
+    /// <summary>延迟测量客户端：经当前代理（与出口 IP 检测同一链路），量的是端到端真实延迟。</summary>
     private static System.Net.Http.HttpClient MakeLatencyClient()
-        => new() { Timeout = TimeSpan.FromSeconds(8) };
+    {
+        var handler = new System.Net.Http.HttpClientHandler { Proxy = DownloadProxy.Create() };
+        return new System.Net.Http.HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
+    }
 
     private async Task LoadAllAsync()
     {

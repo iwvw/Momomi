@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="Momomi.App.Pages.DashboardPage"
-    NavigationCacheMode="Required"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:Momomi.App.Controls"
@@ -48,16 +47,17 @@
 
                 <InfoBar IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
                          IsClosable="False"
-                         Severity="Warning"
-                         Title="内核提示"
-                         Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}" />
-
-
-                <InfoBar IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
-                         IsClosable="False"
-                         Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
                          Severity="Error"
-                         Title="内核异常" />
+                         Title="内核异常">
+                    <InfoBar.Content>
+                        <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto">
+                            <TextBlock Text="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
+                                       TextWrapping="Wrap"
+                                       IsTextSelectionEnabled="True"
+                                       Margin="0,4,0,4" />
+                        </ScrollViewer>
+                    </InfoBar.Content>
+                </InfoBar>
 
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
