@@ -30,12 +30,16 @@ else {
 $template = Get-Content -LiteralPath $TemplatePath -Raw
 
 $sizeMap = [ordered]@{
-    '{{SIZE_X64_SETUP}}'      = Format-Size "Momomi-$Version-x64-setup.exe"
-    '{{SIZE_X64_PORTABLE}}'   = Format-Size "Momomi-$Version-x64-portable.zip"
-    '{{SIZE_X64_FULL_SETUP}}' = Format-Size "Momomi-$Version-x64-full-setup.exe"
-    '{{SIZE_X64_FULL}}'       = Format-Size "Momomi-$Version-x64-full.zip"
-    '{{SIZE_ARM64_PORTABLE}}' = Format-Size "Momomi-$Version-arm64-portable.zip"
-    '{{SIZE_ARM64_FULL}}'     = Format-Size "Momomi-$Version-arm64-full.zip"
+    '{{SIZE_X64_SETUP}}'           = Format-Size "Momomi-$Version-x64-setup.exe"
+    '{{SIZE_X64_PORTABLE}}'        = Format-Size "Momomi-$Version-x64-portable.zip"
+    '{{SIZE_X64_FULL_SETUP}}'      = Format-Size "Momomi-$Version-x64-full-setup.exe"
+    '{{SIZE_X64_FULL}}'            = Format-Size "Momomi-$Version-x64-full.zip"
+    '{{SIZE_X64_SEP_SETUP}}'       = Format-Size "Momomi-$Version-x64-sep-setup.exe"
+    '{{SIZE_X64_SEP}}'             = Format-Size "Momomi-$Version-x64-sep.zip"
+    '{{SIZE_X64_FULL_SEP_SETUP}}'  = Format-Size "Momomi-$Version-x64-full-sep-setup.exe"
+    '{{SIZE_X64_FULL_SEP}}'        = Format-Size "Momomi-$Version-x64-full-sep.zip"
+    '{{SIZE_ARM64_PORTABLE}}'      = Format-Size "Momomi-$Version-arm64-portable.zip"
+    '{{SIZE_ARM64_FULL}}'          = Format-Size "Momomi-$Version-arm64-full.zip"
 }
 
 $body = $template.Replace('{{CHANGES}}', $changes).Replace('{{VERSION}}', $Version)

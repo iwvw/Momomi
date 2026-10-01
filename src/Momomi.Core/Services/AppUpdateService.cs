@@ -201,23 +201,43 @@ public sealed class AppUpdateService : IAppUpdateService
         };
 
         var full = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "bundled"));
+        // 分离版：不含 WinUI 运行时（依赖系统已安装的 Windows App Runtime）。合并版自带。
+        var sep = !File.Exists(Path.Combine(AppContext.BaseDirectory, "Microsoft.ui.xaml.dll"));
 
+        // 命名约定：
+        //  合并版 安装：-{arch}-setup.exe / -{arch}-full-setup.exe
+        //  合并版 便携：-{arch}-portable.zip / -{arch}-full.zip
+        //  分离版 安装：-{arch}-sep-setup.exe / -{arch}-full-sep-setup.exe
+        //  分离版 便携：-{arch}-sep.zip / -{arch}-full-sep.zip
+        string exact, kind;
         if (installed)
         {
-            var setupName = $"Momomi-{version}-{arch}{(full ? "-full" : "")}-setup.exe";
-            var asset = assets.FirstOrDefault(a => string.Equals(a.Name, setupName, StringComparison.OrdinalIgnoreCase))
-                        ?? assets.FirstOrDefault(a => a.Name.Contains($"{arch}", StringComparison.OrdinalIgnoreCase)
-                                                     && a.Name.EndsWith("-setup.exe", StringComparison.OrdinalIgnoreCase));
-            return asset?.DownloadUrl;
+            exact = sep
+                ? $"Momomi-{version}-{arch}-{(full ? "full-sep" : "sep")}-setup.exe"
+                : $"Momomi-{version}-{arch}{(full ? "-full" : "")}-setup.exe";
+            kind = "-setup.exe";
+        }
+        else
+        {
+            exact = sep
+                ? $"Momomi-{version}-{arch}-{(full ? "full-sep" : "sep")}.zip"
+                : $"Momomi-{version}-{arch}-{(full ? "full" : "portable")}.zip";
+            kind = ".zip";
         }
 
-        var suffix = full ? "full" : "portable";
-        var zipName = $"Momomi-{version}-{arch}-{suffix}.zip";
-        var zip = assets.FirstOrDefault(a => string.Equals(a.Name, zipName, StringComparison.OrdinalIgnoreCase))
-                  ?? assets.FirstOrDefault(a => a.Name.Contains($"{arch}", StringComparison.OrdinalIgnoreCase)
-                                               && a.Name.Contains($"{suffix}.zip", StringComparison.OrdinalIgnoreCase)
-                                               && a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
-        return zip?.DownloadUrl;
+        var match = assets.FirstOrDefault(a => string.Equals(a.Name, exact, StringComparison.OrdinalIgnoreCase));
+        if (match is not null) return match.DownloadUrl;
+
+        // 回退：按架构 + 形态关键词宽松匹配。先精确到当前形态关键词，再退而只按架构 + 后缀。
+        var key = sep ? (full ? "full-sep" : "sep") : (full ? "full" : (installed ? "" : "portable"));
+        var fallback = assets.FirstOrDefault(a =>
+                           a.Name.Contains(arch, StringComparison.OrdinalIgnoreCase)
+                           && a.Name.Contains(key, StringComparison.OrdinalIgnoreCase)
+                           && a.Name.EndsWith(kind, StringComparison.OrdinalIgnoreCase))
+                       ?? assets.FirstOrDefault(a =>
+                           a.Name.Contains(arch, StringComparison.OrdinalIgnoreCase)
+                           && a.Name.EndsWith(kind, StringComparison.OrdinalIgnoreCase));
+        return fallback?.DownloadUrl;
     }
 
     private async Task<string> FetchLatestAsync(CancellationToken ct)

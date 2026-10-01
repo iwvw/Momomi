@@ -28,28 +28,53 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # ---- 合并版（自包含：自带 .NET 与 WinUI 运行时，解压即用）----
           # 精简版：不含内核与 geodata，首次启动联网下载（体积小）
           - arch: x64
             rid: win-x64
             platform: x64
             variant: slim
+            selfContained: true
+            winuiSelfContained: true
             karch: amd64
           - arch: arm64
             rid: win-arm64
             platform: ARM64
             variant: slim
+            selfContained: true
+            winuiSelfContained: true
             karch: arm64
           # 完整版：内置内核与 geodata，开箱即用（体积大）
           - arch: x64
             rid: win-x64
             platform: x64
             variant: full
+            selfContained: true
+            winuiSelfContained: true
             karch: amd64
           - arch: arm64
             rid: win-arm64
             platform: ARM64
             variant: full
+            selfContained: true
+            winuiSelfContained: true
             karch: arm64
+          # ---- 分离版（框架依赖：需系统已装 .NET 10 与 Windows App Runtime 2.x）----
+          # 仅 x64，体积最小。
+          - arch: x64
+            rid: win-x64
+            platform: x64
+            variant: sep
+            selfContained: false
+            winuiSelfContained: false
+            karch: amd64
+          - arch: x64
+            rid: win-x64
+            platform: x64
+            variant: full-sep
+            selfContained: false
+            winuiSelfContained: false
+            karch: amd64
 
     steps:
       - name: Checkout
@@ -78,13 +103,14 @@ jobs:
           dotnet publish src/Momomi.App/Momomi.App.csproj `
             -c $env:CONFIGURATION `
             -r ${{ matrix.rid }} `
-            --self-contained `
+            -p:SelfContained=${{ matrix.selfContained }} `
+            -p:WindowsAppSDKSelfContained=${{ matrix.winuiSelfContained }} `
             -p:Platform=${{ matrix.platform }} `
             -p:Version=${{ steps.ver.outputs.version }} `
             -o publish
 
       - name: Fetch bundled kernel & geodata
-        if: matrix.variant == 'full'
+        if: contains(matrix.variant, 'full')
         shell: pwsh
         run: |
           pwsh -File build/fetch-bundle.ps1 -DestDir "publish/bundled" -Arch ${{ matrix.karch }}
@@ -93,7 +119,14 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.ver.outputs.version }}"
-          $suffix = if ("${{ matrix.variant }}" -eq "full") { "full" } else { "portable" }
+          # 合并版：portable / full；分离版：sep / full-sep。
+          $variant = "${{ matrix.variant }}"
+          $suffix = switch ($variant) {
+            'full'     { 'full' }
+            'sep'      { 'sep' }
+            'full-sep' { 'full-sep' }
+            default    { 'portable' }
+          }
           $zip = "Momomi-$ver-${{ matrix.arch }}-$suffix.zip"
           Compress-Archive -Path "publish/*" -DestinationPath $zip -CompressionLevel Optimal
           Write-Host "Created $zip"
@@ -130,11 +163,21 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.ver.outputs.version }}"
-          $suffix = if ("${{ matrix.variant }}" -eq "full") { "-full" } else { "" }
+          # NameSuffix 直接决定安装包文件名：Momomi-<ver>-x64<NameSuffix>-setup.exe
+          $variant = "${{ matrix.variant }}"
+          $suffix = switch ($variant) {
+            'full'     { '-full' }
+            'sep'      { '-sep' }
+            'full-sep' { '-full-sep' }
+            default    { '' }
+          }
+          # 分离版安装器需检测系统运行时，传入标记。
+          $runtimeCheck = if ($variant -eq 'sep' -or $variant -eq 'full-sep') { '1' } else { '0' }
           $isl = "${{ github.workspace }}\build\languages\ChineseSimplified.isl"
           $args = @(
             "/DAppVersion=$ver",
             "/DNameSuffix=$suffix",
+            "/DRequireRuntime=$runtimeCheck",
             "/DSourceDir=${{ github.workspace }}\publish",
             "/DOutputDir=${{ github.workspace }}",
             "build\installer.iss"
