@@ -69,6 +69,6 @@ Filename: "{app}\Momomi.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; \
 [UninstallRun]
 Filename: "schtasks.exe"; Parameters: "/Delete /TN ""Momomi"" /F"; Flags: runhidden; RunOnceId: "DeleteStartupTask"
 
-[UninstallDelete]
-; 卸载时清理程序目录，但保留 data（用户数据/内核）与 %LocalAppData% 旧数据，避免误删订阅与配置。
-Type: filesandordirs; Name: "{app}"; Excludes: "data"
+; 卸载时由安装器自动移除其安装的文件；运行期生成的 data（用户数据/内核/地理数据）
+; 不在安装记录内，会被保留，避免误删订阅与配置。
+
