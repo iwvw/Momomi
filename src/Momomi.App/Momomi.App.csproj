@@ -18,6 +18,9 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- 只保留中文与英文的卫星资源程序集，去掉其余 80 多个语言目录（约省 11 MB）。
+         应用界面只有中文，英文作为回退。 -->
+    <SatelliteResourceLanguages>zh-Hans;zh-Hant;en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
@@ -107,6 +110,18 @@
       <UnusedRuntimeDll Include="$(PublishDir)System.Windows.Forms.Design.dll" />
     </ItemGroup>
     <Delete Files="@(UnusedRuntimeDll)" ContinueOnError="true" />
-    <Message Importance="high" Text="已移除未使用的运行时组件（Windows ML/AI/搜索/小组件/WebView2/WinForms 设计器）。" />
+
+    <!-- WinForms 卫星资源：托盘已改用 H.NotifyIcon，这些 .resources.dll 无用（约 11 MB）。 -->
+    <ItemGroup>
+      <UnusedFormsResources Include="$(PublishDir)**\System.Windows.Forms*.resources.dll" />
+      <UnusedFormsResources Include="$(PublishDir)**\Microsoft.VisualBasic*.resources.dll" />
+    </ItemGroup>
+    <Delete Files="@(UnusedFormsResources)" ContinueOnError="true" />
+
+    <!-- 语言目录只保留中英文：删除其余语言的 .mui 与残留空目录（约省 15 MB）。
+         MSBuild 通配对目录名条件支持不佳，改用内联 PowerShell 精确清理。 -->
+    <Exec Command="powershell -NoProfile -Command &quot;$keep=@('zh-CN','zh-Hans','zh-Hant','en','en-us','en-US','en-GB'); Get-ChildItem -LiteralPath '$(PublishDir)' -Directory | Where-Object { $_.Name -match '^[a-z]{2}(-[A-Za-z]+)?$' -and $keep -notcontains $_.Name } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue&quot;" ContinueOnError="true" />
+
+    <Message Importance="high" Text="已移除未使用的运行时组件（Windows ML/AI/搜索/小组件/WebView2/WinForms 设计器/卫星资源/多余语言目录）。" />
   </Target>
 </Project>
