@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" role="img" aria-labelledby="title desc">
+  <title id="title">Momomi — Windows 上的 mihomo 代理客户端</title>
+  <desc id="desc">Momomi 是一个基于 mihomo 内核的 Windows 代理客户端，支持规则/全局/直连三种模式、系统代理与 TUN、订阅与代理组、实时连接和流量统计。右侧用路由示意图表示应用流量经 Momomi 分流到不同节点。</desc>
+
+  <rect width="1200" height="400" fill="#0B0F14"/>
+  <g stroke="#161F2B" stroke-width="1" opacity="0.55">
+    <line x1="40" y1="0" x2="40" y2="400"/>
+    <line x1="80" y1="0" x2="80" y2="400"/>
+    <line x1="120" y1="0" x2="120" y2="400"/>
+    <line x1="160" y1="0" x2="160" y2="400"/>
+    <line x1="200" y1="0" x2="200" y2="400"/>
+    <line x1="240" y1="0" x2="240" y2="400"/>
+    <line x1="280" y1="0" x2="280" y2="400"/>
+    <line x1="320" y1="0" x2="320" y2="400"/>
+    <line x1="360" y1="0" x2="360" y2="400"/>
+    <line x1="400" y1="0" x2="400" y2="400"/>
+    <line x1="440" y1="0" x2="440" y2="400"/>
+    <line x1="480" y1="0" x2="480" y2="400"/>
+    <line x1="520" y1="0" x2="520" y2="400"/>
+    <line x1="560" y1="0" x2="560" y2="400"/>
+    <line x1="600" y1="0" x2="600" y2="400"/>
+    <line x1="640" y1="0" x2="640" y2="400"/>
+    <line x1="680" y1="0" x2="680" y2="400"/>
+    <line x1="720" y1="0" x2="720" y2="400"/>
+    <line x1="760" y1="0" x2="760" y2="400"/>
+    <line x1="800" y1="0" x2="800" y2="400"/>
+    <line x1="840" y1="0" x2="840" y2="400"/>
+    <line x1="880" y1="0" x2="880" y2="400"/>
+    <line x1="920" y1="0" x2="920" y2="400"/>
+    <line x1="960" y1="0" x2="960" y2="400"/>
+    <line x1="1000" y1="0" x2="1000" y2="400"/>
+    <line x1="1040" y1="0" x2="1040" y2="400"/>
+    <line x1="1080" y1="0" x2="1080" y2="400"/>
+    <line x1="1120" y1="0" x2="1120" y2="400"/>
+    <line x1="1160" y1="0" x2="1160" y2="400"/>
+    <line x1="0" y1="40" x2="1200" y2="40"/>
+    <line x1="0" y1="80" x2="1200" y2="80"/>
+    <line x1="0" y1="120" x2="1200" y2="120"/>
+    <line x1="0" y1="160" x2="1200" y2="160"/>
+    <line x1="0" y1="200" x2="1200" y2="200"/>
+    <line x1="0" y1="240" x2="1200" y2="240"/>
+    <line x1="0" y1="280" x2="1200" y2="280"/>
+    <line x1="0" y1="320" x2="1200" y2="320"/>
+    <line x1="0" y1="360" x2="1200" y2="360"/>
+  </g>
+
+  <!-- brand -->
+  <text x="66" y="150" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif" font-size="76" font-weight="700" letter-spacing="-1" fill="#E6EDF3">Momomi</text>
+  <text x="66" y="60" font-family="'Cascadia Code','Consolas','SFMono-Regular',ui-monospace,monospace" font-size="13" letter-spacing="2" fill="#5A6675">MIHOMO KERNEL · WINDOWS CLIENT</text>
+  <text x="66" y="200" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif" font-size="22" fill="#E6EDF3">Windows 上的 mihomo 代理客户端</text>
+  <text x="66" y="232" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif" font-size="17" fill="#8B98A5">订阅、代理组、TUN、实时连接与流量统计。</text>
+
+  <g><rect x="64" y="286" width="72.36" height="26" rx="13" fill="#0F1620" stroke="#243040"/><text x="100.18" y="303" font-family="'Cascadia Code','Consolas','SFMono-Regular',ui-monospace,monospace" font-size="13" fill="#3FB950" text-anchor="middle">v0.7.1</text></g>
+  <g><rect x="144.36" y="286" width="112.66" height="26" rx="13" fill="#0F1620" stroke="#243040"/><text x="200.69" y="303" font-family="'Cascadia Code','Consolas','SFMono-Regular',ui-monospace,monospace" font-size="13" fill="#8B98A5" text-anchor="middle">x64 / ARM64</text></g>
+  <g><rect x="265.02" y="286" width="112.66" height="26" rx="13" fill="#0F1620" stroke="#243040"/><text x="321.35" y="303" font-family="'Cascadia Code','Consolas','SFMono-Regular',ui-monospace,monospace" font-size="13" fill="#8B98A5" text-anchor="middle">Windows 10+</text></g>
+  <g><rect x="385.68" y="286" width="80.42" height="26" rx="13" fill="#0F1620" stroke="#243040"/><text x="425.89" y="303" font-family="'Cascadia Code','Consolas','SFMono-Regular',ui-monospace,monospace" font-size="13" fill="#58A6FF" text-anchor="middle">WinUI 3</text></g>
+
+  <!-- routing diagram -->
+  <text x="664" y="130" font-family="'Cascadia Code','Consolas','SFMono-Regular',ui-monospace,monospace" font-size="12" letter-spacing="1.5" fill="#5A6675">RULE-BASED ROUTING</text>
+
+  <g>
+    <rect x="664" y="160" width="132" height="72" rx="12" fill="#0F1620" stroke="#243040"/>
+    <text x="730.0" y="192" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif" font-size="16" fill="#E6EDF3" text-anchor="middle">应用与系统流量</text>
+    <text x="730.0" y="215" font-family="'Cascadia Code','Consolas','SFMono-Regular',ui-monospace,monospace" font-size="12" fill="#5A6675" text-anchor="middle">7890 · mixed</text>
+  </g>
+
+  <g stroke="#243040" stroke-width="1.5" fill="none">
+    <line x1="796" y1="196" x2="852" y2="196"/>
+  </g>
+
+  <g stroke="#243040" stroke-width="1.5" fill="none">
+    <line x1="951.3" y1="166.6" x2="1056.0" y2="96.0"/>
+    <line x1="960.0" y1="196.0" x2="1056.0" y2="196.0"/>
+    <line x1="951.3" y1="225.4" x2="1056.0" y2="296.0"/>
+  </g>
+  <path d="M 1056.0 96.0 l -4.8 9.1 l -5.4 -8.4 z" fill="#243040"/>
+  <path d="M 1056.0 196.0 l -9.0 5.0 l 0.0 -10.0 z" fill="#243040"/>
+  <path d="M 1056.0 296.0 l -10.3 -0.7 l 5.4 -8.4 z" fill="#243040"/>
+  <g>
+      <rect x="1060" y="74" width="96" height="44" rx="12" fill="#10261A" stroke="#3FB950"/>
+      <circle cx="1078" cy="96" r="4" fill="#3FB950"/>
+      <text x="1092" y="102" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif" font-size="17" fill="#E6EDF3">香港</text>
+    </g>
+    <g>
+      <rect x="1060" y="174" width="96" height="44" rx="12" fill="#0F1620" stroke="#243040"/>
+      <circle cx="1078" cy="196" r="4" fill="#5A6675"/>
+      <text x="1092" y="202" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif" font-size="17" fill="#8B98A5">日本</text>
+    </g>
+    <g>
+      <rect x="1060" y="274" width="96" height="44" rx="12" fill="#0F1620" stroke="#243040"/>
+      <circle cx="1078" cy="296" r="4" fill="#5A6675"/>
+      <text x="1092" y="302" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,sans-serif" font-size="17" fill="#8B98A5">新加坡</text>
+    </g>
+
+  <g fill="#243040">
+    <path d="M 850 196 l -8 -5 l 0 10 z"/>
+  </g>
+  <circle cx="906" cy="196" r="54" fill="#0F1620" stroke="#3FB950" stroke-width="2"/>
+  <path d="M 891 176 L 896 176 L 896 181 L 901 181 L 901 186 L 906 186 L 911 186 L 916 186 L 916 191 L 911 191 L 906 191 L 901 191 L 901 186 L 896 186 L 896 191 L 891 191 L 891 196 L 891 201 L 891 206 L 891 211 L 896 211 L 896 216 L 891 216 L 891 211 L 886 211 L 886 206 L 886 201 L 886 196 L 886 191 L 891 191 L 891 186 L 891 181 Z M 921 176 L 926 176 L 926 181 L 926 186 L 926 191 L 921 191 L 921 186 L 916 186 L 916 181 L 921 181 Z M 896 196 L 901 196 L 901 201 L 896 201 Z M 916 196 L 921 196 L 921 201 L 916 201 Z M 906 201 L 911 201 L 911 206 L 916 206 L 916 211 L 911 211 L 906 211 L 901 211 L 901 206 L 906 206 Z M 921 211 L 926 211 L 926 216 L 921 216 Z" fill="#E6EDF3" fill-rule="nonzero"/>
+  <text x="906" y="272" font-family="'Cascadia Code','Consolas','SFMono-Regular',ui-monospace,monospace" font-size="12" fill="#8B98A5" text-anchor="middle">规则 / 全局 / 直连</text>
+</svg>
