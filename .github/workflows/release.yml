@@ -158,6 +158,11 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -168,9 +173,28 @@ jobs:
         shell: pwsh
         run: Get-ChildItem artifacts -Recurse | Select-Object Name, Length
 
+      - name: Resolve version & previous tag
+        id: meta
+        shell: pwsh
+        run: |
+          $v = $env:GITHUB_REF -replace '^refs/tags/v', ''
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $prev = git describe --tags --abbrev=0 "v$v^" 2>$null
+          "previous=$prev" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "version=$v previous=$prev"
+
+      - name: Generate release notes
+        shell: pwsh
+        run: |
+          pwsh -File .github/scripts/gen-release-notes.ps1 `
+            -Version "${{ steps.meta.outputs.version }}" `
+            -ArtifactsDir "${{ github.workspace }}/artifacts" `
+            -OutputPath "${{ github.workspace }}/release-notes.md" `
+            -PreviousTag "${{ steps.meta.outputs.previous }}"
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
-          generate_release_notes: true
+          body_path: release-notes.md
           draft: false
