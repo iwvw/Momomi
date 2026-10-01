@@ -57,6 +57,10 @@ public sealed partial class MiniWindow : Window
         _targetRect = DpiLayout.ComputeBottomRight(_appWindow, DesignWidth, DesignHeight, MarginRight, MarginBottom);
         _appWindow.MoveAndResize(_targetRect);
 
+        // 窗口创建后默认可见：立即移到屏幕外并隐藏，避免预热/首次构造时闪出。
+        _appWindow.MoveAndResize(SlideMath.Hidden(_targetRect, SlideDirection.BottomUp));
+        _appWindow.Hide();
+
         _appWindow.Closing += OnClosing;
 
         Panel.OpenFullRequested += (_, _) => OpenFullPanel();

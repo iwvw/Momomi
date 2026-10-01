@@ -123,7 +123,7 @@ public sealed partial class NetworkViewModel : ObservableObject
 
     private async Task<string> QueryExitIpAsync()
     {
-        using var client = MakeClient();
+        var client = MakeClient();
         foreach (var url in new[] { "https://api.ipify.org", "https://ipv4.icanhazip.com", "https://ifconfig.me/ip" })
         {
             try
@@ -142,7 +142,7 @@ public sealed partial class NetworkViewModel : ObservableObject
     {
         try
         {
-            using var client = MakeClient();
+            var client = MakeClient();
             var json = await client.GetStringAsync($"https://ipwho.is/{ip}").ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
@@ -195,16 +195,17 @@ public sealed partial class NetworkViewModel : ObservableObject
         }
     }
 
-    private HttpClient MakeClient()
+    // 静态共享客户端：DownloadProxy 动态读端口，复用可避免频繁新建的 socket 压力。
+    private static readonly HttpClient SharedProxyClient = CreateProxyClient();
+
+    private static HttpClient CreateProxyClient()
     {
         var handler = new HttpClientHandler { Proxy = DownloadProxy.Create() };
         return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
     }
 
+    private static HttpClient MakeClient() => SharedProxyClient;
+
     /// <summary>延迟测量客户端：经当前代理（与出口 IP 检测同一链路），量的是端到端真实延迟。</summary>
-    private static HttpClient MakeLatencyClient()
-    {
-        var handler = new HttpClientHandler { Proxy = DownloadProxy.Create() };
-        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
-    }
+    private static HttpClient MakeLatencyClient() => SharedProxyClient;
 }

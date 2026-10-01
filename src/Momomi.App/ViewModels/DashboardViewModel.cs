@@ -272,7 +272,8 @@ public sealed partial class DashboardViewModel : ObservableObject
     private async Task CheckExitIpOnceAsync()
     {
         // 仅在内核运行时检测：此时才走代理，出口 IP 才是真实代理出口。
-        // 失败不更新时间戳，DispatcherTimer（5 秒）会持续重试直到成功。
+        // 失败不更新时间戳，DispatcherTimer（5 秒）会持续重试；成功一次后即停掉定时器，
+        // 避免常驻每 5 秒发起 HTTP 探测（不断新建 HttpClient/原生资源，是私有内存增长的主因）。
         var now = DateTimeOffset.Now;
         if (IsCheckingExit || _core.Api is null || _core.State != CoreState.Running
             || now - _lastExitCheck < TimeSpan.FromSeconds(3)) return;
@@ -291,6 +292,8 @@ public sealed partial class DashboardViewModel : ObservableObject
                     ExitCountry = country;
                     ExitFlag = CountryNames.GetFlag(code);
                     HasExitIp = true;
+                    // 已拿到出口 IP，兜底定时器完成使命，停止以免长期空转。
+                    _refreshTimer?.Stop();
                 });
             }
         }
@@ -346,7 +349,7 @@ public sealed partial class DashboardViewModel : ObservableObject
 
     private async Task<string> QueryExitIpAsync()
     {
-        using var client = MakeNetworkClient();
+        var client = MakeNetworkClient();
         foreach (var url in new[] { "https://api.ipify.org", "https://ipv4.icanhazip.com", "https://ifconfig.me/ip" })
         {
             try
@@ -365,7 +368,7 @@ public sealed partial class DashboardViewModel : ObservableObject
     {
         try
         {
-            using var client = MakeNetworkClient();
+            var client = MakeNetworkClient();
             var json = await client.GetStringAsync($"https://ipwho.is/{ip}").ConfigureAwait(false);
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             var root = doc.RootElement;
@@ -381,18 +384,21 @@ public sealed partial class DashboardViewModel : ObservableObject
         }
     }
 
-    private System.Net.Http.HttpClient MakeNetworkClient()
+    // 静态共享客户端：DownloadProxy 的 Provider 每次请求动态读取端口，
+    // 复用同一 handler/client 可避免频繁新建导致的 socket/TIME_WAIT 压力。
+    private static readonly System.Net.Http.HttpClient SharedProxyClient = CreateProxyClient();
+    private static readonly System.Net.Http.HttpClient SharedLatencyClient = CreateProxyClient();
+
+    private static System.Net.Http.HttpClient CreateProxyClient()
     {
         var handler = new System.Net.Http.HttpClientHandler { Proxy = DownloadProxy.Create() };
         return new System.Net.Http.HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
     }
 
+    private static System.Net.Http.HttpClient MakeNetworkClient() => SharedProxyClient;
+
     /// <summary>延迟测量客户端：经当前代理（与出口 IP 检测同一链路），量的是端到端真实延迟。</summary>
-    private static System.Net.Http.HttpClient MakeLatencyClient()
-    {
-        var handler = new System.Net.Http.HttpClientHandler { Proxy = DownloadProxy.Create() };
-        return new System.Net.Http.HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
-    }
+    private static System.Net.Http.HttpClient MakeLatencyClient() => SharedLatencyClient;
 
     private async Task LoadAllAsync()
     {

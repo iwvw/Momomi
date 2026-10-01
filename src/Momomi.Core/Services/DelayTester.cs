@@ -43,6 +43,7 @@ public static class DelayTester
     /// <summary>
     /// 测单个 HTTP 目标（多次取最小值），返回延迟毫秒；null 表示全部尝试失败。
     /// 与节点测速同策略：先建连、请求头即返回，用同一份早退阈值。
+    /// 注意：client 由调用方持有并复用（不在此 Dispose），避免每次测量新建 HttpClient 造成 socket 压力。
     /// </summary>
     public static async Task<long?> MeasureHttpAsync(
         Func<HttpClient> clientFactory, string url, int timeoutMs = 6000, CancellationToken ct = default)
@@ -52,7 +53,7 @@ public static class DelayTester
         {
             try
             {
-                using var client = clientFactory();
+                var client = clientFactory();
                 var sw = Stopwatch.StartNew();
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));

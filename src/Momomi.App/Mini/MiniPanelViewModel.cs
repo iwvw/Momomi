@@ -50,6 +50,26 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool HasGroups { get; set; }
 
+    /// <summary>当前订阅名称（无则空）。</summary>
+    [ObservableProperty]
+    public partial string SubscriptionName { get; set; } = "";
+
+    /// <summary>当前订阅已用流量文本（无用量字段为空）。</summary>
+    [ObservableProperty]
+    public partial string SubscriptionUsageText { get; set; } = "";
+
+    /// <summary>当前订阅剩余流量占比 0-100（用于进度条）；无总量时为 0。</summary>
+    [ObservableProperty]
+    public partial double SubscriptionUsagePercent { get; set; }
+
+    /// <summary>是否有订阅用量信息（无则隐藏整块）。</summary>
+    [ObservableProperty]
+    public partial bool HasSubscriptionUsage { get; set; }
+
+    /// <summary>是否显示进度条（有总量才显示）。</summary>
+    [ObservableProperty]
+    public partial bool HasSubscriptionTotal { get; set; }
+
     public DispatcherQueue Dispatcher => _dispatcher;
 
     public MiniPanelViewModel(MomomiHost host, DispatcherQueue dispatcher)
@@ -129,7 +149,52 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
         _delayTestTimeoutMs = timeout;
         _delayTestConcurrency = concurrency;
         _autoCloseConnection = await _host.Settings.GetBoolAsync("core.autoCloseConnection", true).ConfigureAwait(false);
+        await LoadSubscriptionUsageAsync().ConfigureAwait(false);
         await LoadAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>读取当前订阅的流量用量。无 subscription-userinfo 或无用量的订阅不显示。</summary>
+    private async Task LoadSubscriptionUsageAsync()
+    {
+        try
+        {
+            var active = await _host.Profiles.GetActiveAsync().ConfigureAwait(false);
+            var info = active is null ? null : SubscriptionUsage.Parse(active.SubscriptionUserInfo);
+            var name = active?.Name ?? "";
+            _dispatcher.TryEnqueue(() => ApplySubscriptionUsage(name, info));
+        }
+        catch
+        {
+            _dispatcher.TryEnqueue(() => ApplySubscriptionUsage("", null));
+        }
+    }
+
+    private void ApplySubscriptionUsage(string name, SubscriptionUsage? info)
+    {
+        if (info is null || (info.Total <= 0 && info.Used <= 0))
+        {
+            HasSubscriptionUsage = false;
+            HasSubscriptionTotal = false;
+            SubscriptionName = "";
+            SubscriptionUsageText = "";
+            SubscriptionUsagePercent = 0;
+            return;
+        }
+
+        SubscriptionName = string.IsNullOrWhiteSpace(name) ? "当前订阅" : name;
+        if (info.Total > 0)
+        {
+            SubscriptionUsageText = $"已用 {Format.Bytes(info.Used)} / {Format.Bytes(info.Total)}";
+            SubscriptionUsagePercent = Math.Clamp((double)info.Used / info.Total * 100, 0, 100);
+            HasSubscriptionTotal = true;
+        }
+        else
+        {
+            SubscriptionUsageText = $"已用 ↑ {Format.Bytes(info.Upload)}  ↓ {Format.Bytes(info.Download)}";
+            HasSubscriptionTotal = false;
+        }
+
+        HasSubscriptionUsage = true;
     }
 
     public async Task SelectModeAsync(int index) => await ModeSelector.SelectAsync(index);
@@ -313,6 +378,7 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
             {
                 IsUpdatingSubscription = false;
                 _ = LoadAsync(force: true);
+                _ = LoadSubscriptionUsageAsync();
             });
         }
     }

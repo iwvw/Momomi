@@ -60,11 +60,12 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Border
             x:Name="SolidBackdrop"
-            Grid.RowSpan="4"
+            Grid.RowSpan="5"
             Margin="-16,-12,-16,-12"
             Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             Visibility="Collapsed" />
@@ -306,5 +307,30 @@
                 </ListView.ItemTemplate>
             </ListView>
         </Grid>
+
+        <!-- 当前订阅流量：无用量字段则整块隐藏 -->
+        <StackPanel Grid.Row="4" Spacing="4"
+                    Visibility="{x:Bind ViewModel.HasSubscriptionUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           TextTrimming="CharacterEllipsis"
+                           Text="{x:Bind ViewModel.SubscriptionName, Mode=OneWay}" />
+                <TextBlock Grid.Column="1"
+                           HorizontalAlignment="Right"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Text="{x:Bind ViewModel.SubscriptionUsageText, Mode=OneWay}" />
+            </Grid>
+            <ProgressBar Height="4"
+                         Minimum="0" Maximum="100"
+                         Value="{x:Bind ViewModel.SubscriptionUsagePercent, Mode=OneWay}"
+                         Visibility="{x:Bind ViewModel.HasSubscriptionTotal, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+        </StackPanel>
     </Grid>
 </UserControl>
