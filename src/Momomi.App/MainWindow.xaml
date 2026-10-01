@@ -29,6 +29,18 @@
                     <TextBlock VerticalAlignment="Center"
                                FontSize="14" FontWeight="SemiBold"
                                Text="Momomi" />
+                    <Border VerticalAlignment="Center"
+                            Padding="6,2"
+                            CornerRadius="4"
+                            Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1">
+                        <TextBlock x:Name="AppVersionText"
+                                   VerticalAlignment="Center"
+                                   FontSize="11"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   Text="v-" />
+                    </Border>
                 </StackPanel>
             </TitleBar.LeftHeader>
             <TitleBar.RightHeader>

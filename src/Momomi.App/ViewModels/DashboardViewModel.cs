@@ -47,6 +47,19 @@ public sealed partial class DashboardViewModel : ObservableObject
     [ObservableProperty]
     public partial string? ErrorMessage { get; set; }
 
+    /// <summary>首装自动下载内核时显示进度反馈。</summary>
+    [ObservableProperty]
+    public partial bool IsInstallingKernel { get; set; }
+
+    [ObservableProperty]
+    public partial string KernelInstallText { get; set; } = "";
+
+    [ObservableProperty]
+    public partial double KernelInstallPercent { get; set; }
+
+    [ObservableProperty]
+    public partial bool KernelInstallIndeterminate { get; set; } = true;
+
     [ObservableProperty]
     public partial string Mode { get; set; } = "rule";
 
@@ -122,6 +135,7 @@ public sealed partial class DashboardViewModel : ObservableObject
     private readonly EventHandler<ConnectionsSnapshot> _onConnections;
     private readonly EventHandler _onProxiesReloaded;
     private readonly EventHandler<bool> _onMainWindowVisibility;
+    private readonly EventHandler<KernelInstallProgress> _onKernelInstall;
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
 
@@ -150,6 +164,7 @@ public sealed partial class DashboardViewModel : ObservableObject
         _onConnections = (_, c) => _dispatcher.TryEnqueue(() => ConnectionCount = c.Connections.Count);
         _onProxiesReloaded = (_, _) => _dispatcher.TryEnqueue(() => _ = LoadAllAsync());
         _onMainWindowVisibility = (_, visible) => OnMainWindowVisibility(null, visible);
+        _onKernelInstall = (_, p) => _dispatcher.TryEnqueue(() => OnKernelInstallProgress(p));
     }
 
     private bool _attached;
@@ -166,6 +181,7 @@ public sealed partial class DashboardViewModel : ObservableObject
         _core.ConnectionsUpdated += _onConnections;
         AppSignals.ProxiesChanged += _onProxiesReloaded;
         AppSignals.MainWindowVisibilityChanged += _onMainWindowVisibility;
+        AppSignals.KernelInstallProgressChanged += _onKernelInstall;
 
         // 兜底：内核刚启动代理未就绪导致检测失败时，周期重试直到出口 IP 出现。
         _refreshTimer = new Microsoft.UI.Xaml.DispatcherTimer
@@ -176,6 +192,8 @@ public sealed partial class DashboardViewModel : ObservableObject
         if (_mainWindowVisible) _refreshTimer.Start();
 
         OnStateChanged(new CoreStateChanged(_core.State, _core.Version, _core.LastError));
+        // 补一次当前安装态：首页可能在下载已开始后才加载。
+        if (AppSignals.KernelInstall is { } install) OnKernelInstallProgress(install);
         if (_mainWindowVisible) _ = RefreshNetworkAsync();
     }
 
@@ -214,6 +232,21 @@ public sealed partial class DashboardViewModel : ObservableObject
         _core.ConnectionsUpdated -= _onConnections;
         AppSignals.ProxiesChanged -= _onProxiesReloaded;
         AppSignals.MainWindowVisibilityChanged -= _onMainWindowVisibility;
+        AppSignals.KernelInstallProgressChanged -= _onKernelInstall;
+    }
+
+    private void OnKernelInstallProgress(KernelInstallProgress progress)
+    {
+        if (string.IsNullOrEmpty(progress.Text) && progress.Percent is null)
+        {
+            IsInstallingKernel = false;
+            return;
+        }
+
+        IsInstallingKernel = true;
+        KernelInstallText = progress.Text;
+        KernelInstallIndeterminate = progress.Percent is null;
+        KernelInstallPercent = progress.Percent ?? 0;
     }
 
     private void OnStateChanged(CoreStateChanged e)

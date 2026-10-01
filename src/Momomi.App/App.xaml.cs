@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 using Momomi.Core.Services;
 
@@ -8,6 +9,11 @@ public partial class App : Application
     private Window? _window;
 
     public static MainWindow? Main { get; private set; }
+
+    // 单实例互斥：防止开机自启计划任务、托盘重复点击、用户多次双击等导致多开。
+    private static Mutex? _instanceMutex;
+    private const string MutexName = "Momomi.SingleInstance.v1";
+    private const string WindowTitle = "Momomi";
 
     private static readonly string LogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -32,6 +38,52 @@ public partial class App : Application
         {
         }
     }
+
+    /// <summary>尝试成为唯一实例。返回 false 表示已有实例在运行。</summary>
+    private static bool TryAcquireSingleInstance()
+    {
+        try
+        {
+            _instanceMutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
+            if (createdNew) return true;
+            _instanceMutex.Dispose();
+            _instanceMutex = null;
+            return false;
+        }
+        catch
+        {
+            // 互斥体异常时不阻止启动（宁多开不失败）。
+            return true;
+        }
+    }
+
+    /// <summary>通知已有实例把窗口/迷你面板带到前台。</summary>
+    private static void ActivateExistingInstance()
+    {
+        try
+        {
+            var hwnd = FindWindow(null, WindowTitle);
+            if (hwnd != IntPtr.Zero)
+            {
+                ShowWindow(hwnd, SW_RESTORE);
+                SetForegroundWindow(hwnd);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private const int SW_RESTORE = 9;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     public static void ApplyTheme(string theme)
     {
@@ -70,6 +122,14 @@ public partial class App : Application
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // 单实例：已有实例在运行时，激活它的窗口后直接退出本进程，避免多开。
+        if (!TryAcquireSingleInstance())
+        {
+            ActivateExistingInstance();
+            Exit();
+            return;
+        }
+
         try
         {
             await AppHost.InitializeAsync();
@@ -255,11 +315,73 @@ public partial class App : Application
 
             // 先应用当前订阅生成运行时配置，再启动内核。
             await host.ApplyActiveProfileAsync().ConfigureAwait(false);
+            await EnsureKernelInstalledAsync(host).ConfigureAwait(false);
             await host.Core.StartAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             WriteLog($"自动启动内核失败：{ex}");
+        }
+    }
+
+    /// <summary>
+    /// 内核缺失时自动下载（修精简版首装「找不到内核」）。
+    /// 已内置内核（完整版释放过）或网络失败则跳过，交由用户到设置页手动处理。
+    /// 全程通过 AppSignals 上报进度，前端首页/托盘可显示反馈。
+    /// </summary>
+    private static async Task EnsureKernelInstalledAsync(MomomiHost host)
+    {
+        if (File.Exists(host.KernelUpdate.BinaryPath)) return;
+
+        try
+        {
+            WriteLog("未找到内核，尝试自动下载…");
+            ViewModels.AppSignals.RaiseKernelInstall(new ViewModels.KernelInstallProgress("正在检查内核版本…", null));
+
+            var info = await host.KernelUpdate.CheckAsync().ConfigureAwait(false);
+            var target = info.LatestVersion;
+            if (string.IsNullOrEmpty(target))
+            {
+                WriteLog($"自动下载内核失败：无法确定版本（{info.Error}）");
+                ViewModels.AppSignals.RaiseKernelInstall(new ViewModels.KernelInstallProgress("内核下载失败，请在设置页手动下载", null));
+                return;
+            }
+
+            var downloadProgress = new Progress<double>(p =>
+                ViewModels.AppSignals.RaiseKernelInstall(
+                    new ViewModels.KernelInstallProgress($"正在下载内核 {target}… {p * 100:0}%", p * 100)));
+
+            var ok = await host.KernelUpdate.DownloadAndInstallAsync(target, downloadProgress).ConfigureAwait(false);
+            if (!ok)
+            {
+                WriteLog("自动下载内核失败，请在设置页手动下载");
+                ViewModels.AppSignals.RaiseKernelInstall(new ViewModels.KernelInstallProgress("内核下载失败，请在设置页手动下载", null));
+                return;
+            }
+
+            try
+            {
+                ViewModels.AppSignals.RaiseKernelInstall(new ViewModels.KernelInstallProgress("正在下载地理数据…", null));
+                var geoProgress = new Progress<double>(p =>
+                    ViewModels.AppSignals.RaiseKernelInstall(
+                        new ViewModels.KernelInstallProgress($"正在下载地理数据… {p * 100:0}%", p * 100)));
+                await host.KernelUpdate.EnsureGeodataAsync(geoProgress).ConfigureAwait(false);
+                if (await host.Settings.GetBoolAsync("core.tun").ConfigureAwait(false))
+                    await host.KernelUpdate.EnsureWintunAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+            WriteLog($"内核已自动下载到 {host.KernelUpdate.BinaryPath}");
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"自动下载内核异常：{ex}");
+        }
+        finally
+        {
+            // 清除安装态（无论成功失败），首页/托盘恢复正常显示。
+            ViewModels.AppSignals.RaiseKernelInstall(null);
         }
     }
 }

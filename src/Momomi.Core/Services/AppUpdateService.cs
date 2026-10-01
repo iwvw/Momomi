@@ -177,7 +177,8 @@ public sealed class AppUpdateService : IAppUpdateService
         }
         else if (extractDir is not null)
         {
-            sb.AppendLine($"robocopy \"{extractDir}\" \"{appDir}\" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul");
+            // /XD data：便携版覆盖更新时排除数据目录，避免把用户数据/内核当程序文件覆盖或删除。
+            sb.AppendLine($"robocopy \"{extractDir}\" \"{appDir}\" /E /XD data /NFL /NDL /NJH /NJS /R:1 /W:1 >nul");
             sb.AppendLine($"rmdir /s /q \"{extractDir}\"");
         }
 

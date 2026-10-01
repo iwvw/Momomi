@@ -37,6 +37,7 @@ public sealed partial class MainWindow : Window
 
         InitializeComponent();
         Title = "Momomi";
+        AppVersionText.Text = $"v{Momomi.Core.Services.AppUpdateService.GetCurrentVersion()}";
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);

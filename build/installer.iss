@@ -50,8 +50,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startupicon"; Description: "开机自动启动"; GroupDescription: "启动项"
 
 [Files]
-; 打包整个发布目录
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; 打包整个发布目录（排除运行时生成的 data 数据目录）
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "data\*"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\Momomi.exe"
@@ -70,5 +70,5 @@ Filename: "{app}\Momomi.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; \
 Filename: "schtasks.exe"; Parameters: "/Delete /TN ""Momomi"" /F"; Flags: runhidden; RunOnceId: "DeleteStartupTask"
 
 [UninstallDelete]
-; 卸载时仅清理程序目录（用户数据在 %LocalAppData%\Momomi，保留以免误删订阅与配置）
-Type: filesandordirs; Name: "{app}"
+; 卸载时清理程序目录，但保留 data（用户数据/内核）与 %LocalAppData% 旧数据，避免误删订阅与配置。
+Type: filesandordirs; Name: "{app}"; Excludes: "data"

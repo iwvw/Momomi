@@ -59,6 +59,20 @@
                     </InfoBar.Content>
                 </InfoBar>
 
+                <!-- 首装自动下载内核/地理数据的进度反馈 -->
+                <InfoBar IsOpen="{x:Bind ViewModel.IsInstallingKernel, Mode=OneWay}"
+                         IsClosable="False"
+                         Severity="Informational"
+                         Title="正在准备内核"
+                         Message="{x:Bind ViewModel.KernelInstallText, Mode=OneWay}">
+                    <InfoBar.Content>
+                        <ProgressBar Height="4" Margin="0,4,0,4"
+                                     Minimum="0" Maximum="100"
+                                     Value="{x:Bind ViewModel.KernelInstallPercent, Mode=OneWay}"
+                                     IsIndeterminate="{x:Bind ViewModel.KernelInstallIndeterminate, Mode=OneWay}" />
+                    </InfoBar.Content>
+                </InfoBar>
+
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
