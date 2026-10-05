@@ -139,6 +139,21 @@ public partial class App : Application
             WriteLog($"MomomiHost 初始化失败：{ex}");
         }
 
+        // 修复历史版本用 schtasks 默认参数创建的自启任务：其电源/空闲/超时设置会在
+        // 笔记本拔电源、系统空闲或连续运行 72 小时后被任务计划程序终止（表现为程序自己退出）。
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                if (AppHost.IsReady && AppHost.Host.Startup.RepairIfNeeded())
+                    WriteLog("已修复自启计划任务的电源/空闲/超时设置");
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"修复自启任务失败：{ex}");
+            }
+        });
+
         _window = new MainWindow();
         Main = (MainWindow)_window;
 
