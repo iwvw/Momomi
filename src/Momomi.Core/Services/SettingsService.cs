@@ -127,7 +127,6 @@ public sealed class StartupService : IStartupService
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                StandardOutputEncoding = System.Text.Encoding.Unicode,
             };
             using var proc = Process.Start(psi);
             if (proc is null) return null;

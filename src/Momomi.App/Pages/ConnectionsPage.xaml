@@ -130,13 +130,16 @@
                     Content="全部关闭" />
         </Grid>
 
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
-                      Padding="36,0,36,0">
-            <Border>
-            <StackPanel Spacing="8" Margin="0,0,0,24" MaxWidth="{StaticResource PageContentMaxWidth}">
+        <Grid Grid.Row="2" MaxWidth="{StaticResource PageContentMaxWidth}"
+              Margin="36,0,36,24" RowSpacing="8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
             <!-- 流量排行视图：维度切换 + 排行列表，点选下钻 -->
-            <Grid Style="{StaticResource CardStyle}" Padding="16,12"
+            <Grid Grid.Row="0" Style="{StaticResource CardStyle}" Padding="16,12"
                   Visibility="{x:Bind ViewModel.IsRankingView, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                 <StackPanel Spacing="10">
                     <Grid ColumnSpacing="10">
@@ -158,8 +161,18 @@
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    Text="{x:Bind ViewModel.RankingHint, Mode=OneWay}" />
                     </Grid>
-                    <ItemsControl ItemsSource="{x:Bind ViewModel.Rankings}">
-                        <ItemsControl.ItemTemplate>
+                    <ListView ItemsSource="{x:Bind ViewModel.Rankings}"
+                              SelectionMode="None"
+                              MaxHeight="320"
+                              Padding="0">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="MinHeight" Value="0" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
                             <DataTemplate x:DataType="vm:RankingRowViewModel">
                                 <Button HorizontalContentAlignment="Stretch" Padding="8,5"
                                         Background="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedToBrush}}"
@@ -180,13 +193,13 @@
                                     </Grid>
                                 </Button>
                             </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                        </ListView.ItemTemplate>
+                    </ListView>
                 </StackPanel>
             </Grid>
 
-            <!-- 表格视图：表头 + 行，列可排序可开关 -->
-            <Grid Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+            <!-- 表格视图：表头（固定不滚动），列可排序可开关 -->
+            <Grid Grid.Row="1" Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -263,9 +276,19 @@
                 </Border>
             </Grid>
 
-            <ItemsControl ItemsSource="{x:Bind ViewModel.Items}"
-                          Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                <ItemsControl.ItemTemplate>
+            <ListView Grid.Row="2"
+                      ItemsSource="{x:Bind ViewModel.Items}"
+                      SelectionMode="None"
+                      Padding="0,0,0,24"
+                      Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="0" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
                     <DataTemplate x:DataType="vm:ConnectionRowViewModel">
                         <Grid ColumnSpacing="12" Padding="12,6">
                             <Grid.ColumnDefinitions>
@@ -284,11 +307,11 @@
                                        Visibility="{Binding Columns[2].IsVisible, ElementName=PageRoot}" />
                             <TextBlock Grid.Column="3" Text="{x:Bind Rule}" TextTrimming="CharacterEllipsis"
                                        Visibility="{Binding Columns[3].IsVisible, ElementName=PageRoot}" />
-                            <TextBlock Grid.Column="4" Style="{StaticResource RateUpBrush}" Text="{x:Bind Upload}"
+                            <TextBlock Grid.Column="4" Style="{StaticResource RateUpBrush}" Text="{x:Bind Upload, Mode=OneWay}"
                                        Visibility="{Binding Columns[4].IsVisible, ElementName=PageRoot}" />
-                            <TextBlock Grid.Column="5" Style="{StaticResource RateDownBrush}" Text="{x:Bind Download}"
+                            <TextBlock Grid.Column="5" Style="{StaticResource RateDownBrush}" Text="{x:Bind Download, Mode=OneWay}"
                                        Visibility="{Binding Columns[5].IsVisible, ElementName=PageRoot}" />
-                            <TextBlock Grid.Column="6" Text="{x:Bind Duration}"
+                            <TextBlock Grid.Column="6" Text="{x:Bind Duration, Mode=OneWay}"
                                        Visibility="{Binding Columns[6].IsVisible, ElementName=PageRoot}" />
                             <StackPanel Grid.Column="7" Orientation="Horizontal" Spacing="4">
                                 <Button Style="{StaticResource IconButtonStyle}" Width="28" Height="28"
@@ -308,13 +331,23 @@
                             </StackPanel>
                         </Grid>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                </ListView.ItemTemplate>
+            </ListView>
 
             <!-- 卡片视图 -->
-            <ItemsControl ItemsSource="{x:Bind ViewModel.Items}"
-                          Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
-                <ItemsControl.ItemTemplate>
+            <ListView Grid.Row="2"
+                      ItemsSource="{x:Bind ViewModel.Items}"
+                      SelectionMode="None"
+                      Padding="0,0,0,24"
+                      Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="0" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
                     <DataTemplate x:DataType="vm:ConnectionRowViewModel">
                         <Grid Style="{StaticResource CardStyle}" Margin="0,0,0,8" Padding="14,12">
                             <Grid.ColumnDefinitions>
@@ -361,22 +394,22 @@
                                         HorizontalAlignment="Right">
                                 <TextBlock HorizontalAlignment="Right"
                                            Style="{StaticResource CaptionTextBlockStyle}"
-                                           Text="{x:Bind Upload}" />
+                                           Text="{x:Bind Upload, Mode=OneWay}" />
                                 <TextBlock HorizontalAlignment="Right"
                                            Style="{StaticResource CaptionTextBlockStyle}"
                                            Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                                           Text="{x:Bind UpRate, Mode=OneTime}" />
+                                           Text="{x:Bind UpRate, Mode=OneWay}" />
                             </StackPanel>
 
                             <StackPanel Grid.Column="3" Spacing="2" MinWidth="72" Margin="12,0,0,0"
                                         VerticalAlignment="Center" HorizontalAlignment="Right">
                                 <TextBlock HorizontalAlignment="Right"
                                            Style="{StaticResource CaptionTextBlockStyle}"
-                                           Text="{x:Bind Download}" />
+                                           Text="{x:Bind Download, Mode=OneWay}" />
                                 <TextBlock HorizontalAlignment="Right"
                                            Style="{StaticResource CaptionTextBlockStyle}"
                                            Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                           Text="{x:Bind DownRate, Mode=OneTime}" />
+                                           Text="{x:Bind DownRate, Mode=OneWay}" />
                             </StackPanel>
 
                             <StackPanel Grid.Column="4" Spacing="2" MinWidth="56" Margin="12,0,0,0"
@@ -387,7 +420,7 @@
                                            Text="时长" />
                                 <TextBlock HorizontalAlignment="Right"
                                            Style="{StaticResource CaptionTextBlockStyle}"
-                                           Text="{x:Bind Duration}" />
+                                           Text="{x:Bind Duration, Mode=OneWay}" />
                             </StackPanel>
 
                             <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="4"
@@ -417,10 +450,8 @@
                             </StackPanel>
                         </Grid>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-            </StackPanel>
-            </Border>
-        </ScrollViewer>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
     </Grid>
 </Page>

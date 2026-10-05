@@ -28,9 +28,15 @@ public sealed partial class ConnectionColumnOption : ObservableObject
 public sealed partial class RankingRowViewModel : ObservableObject
 {
     public string Name { get; }
-    public string Up { get; }
-    public string Down { get; }
-    public int Count { get; }
+
+    [ObservableProperty]
+    public partial string Up { get; set; }
+
+    [ObservableProperty]
+    public partial string Down { get; set; }
+
+    [ObservableProperty]
+    public partial int Count { get; set; }
 
     [ObservableProperty]
     public partial bool IsSelected { get; set; }
@@ -43,9 +49,17 @@ public sealed partial class RankingRowViewModel : ObservableObject
         Count = count;
         IsSelected = selected;
     }
+
+    public void Update(string up, string down, int count, bool selected)
+    {
+        Up = up;
+        Down = down;
+        Count = count;
+        IsSelected = selected;
+    }
 }
 
-public sealed partial class ConnectionRowViewModel
+public sealed partial class ConnectionRowViewModel : ObservableObject
 {
     public string Id { get; }
     public string Host { get; }
@@ -53,26 +67,34 @@ public sealed partial class ConnectionRowViewModel
     public string Rule { get; }
     public string Chain { get; }
     public string Process { get; }
-    public string Upload { get; }
-    public string Download { get; }
-    public string Duration { get; }
     public string Source { get; }
     public string Destination { get; }
     public bool HasRule { get; }
     public bool HasChain { get; }
 
-    public string UpRate { get; private set; } = "";
-    public string DownRate { get; private set; } = "";
+    // 随快照变化的展示字段：改为可观察，行对象按 Id 复用后原地刷新，避免整表重建。
+    [ObservableProperty]
+    public partial string Upload { get; set; }
 
-    public bool HasRate => !string.IsNullOrEmpty(UpRate) || !string.IsNullOrEmpty(DownRate);
+    [ObservableProperty]
+    public partial string Download { get; set; }
+
+    [ObservableProperty]
+    public partial string Duration { get; set; }
+
+    [ObservableProperty]
+    public partial string UpRate { get; set; }
+
+    [ObservableProperty]
+    public partial string DownRate { get; set; }
 
     /// <summary>进程大图标，用于列表左侧显示。</summary>
     public Microsoft.UI.Xaml.Media.ImageSource? Icon { get; }
 
-    // 排序用的原始数值。
-    public long UploadBytes { get; }
-    public long DownloadBytes { get; }
-    public double DurationSeconds { get; }
+    // 排序用的原始数值（非绑定，仅排序时读取）。
+    public long UploadBytes { get; private set; }
+    public long DownloadBytes { get; private set; }
+    public double DurationSeconds { get; private set; }
 
     public ConnectionRowViewModel(ConnectionItem item)
     {
@@ -88,19 +110,31 @@ public sealed partial class ConnectionRowViewModel
         Process = string.IsNullOrEmpty(item.Metadata.Process)
             ? System.IO.Path.GetFileName(item.Metadata.ProcessPath)
             : item.Metadata.Process;
-        Upload = Format.Bytes(item.Upload);
-        Download = Format.Bytes(item.Download);
-        UploadBytes = item.Upload;
-        DownloadBytes = item.Download;
-        DurationSeconds = Math.Max(0, (DateTimeOffset.Now - item.Start).TotalSeconds);
-        Duration = Format.Duration(DateTimeOffset.Now - item.Start);
         Source = $"{item.Metadata.SourceIP}:{item.Metadata.SourcePort}";
         Destination = $"{item.Metadata.DestinationIP}:{item.Metadata.DestinationPort}";
         Icon = ProcessIconProvider.Get(item.Metadata.ProcessPath);
+
+        Upload = Format.Bytes(item.Upload);
+        Download = Format.Bytes(item.Download);
+        Duration = Format.Duration(DateTimeOffset.Now - item.Start);
+        UpRate = "";
+        DownRate = "";
+        Update(item, DateTimeOffset.Now);
     }
 
     /// <summary>图标为空时是否显示，控制图标占位可见性。</summary>
     public bool HasIcon => Icon is not null;
+
+    /// <summary>用最新快照原地刷新可变字段（生成器仅在值变化时触发通知）。</summary>
+    public void Update(ConnectionItem item, DateTimeOffset now)
+    {
+        UploadBytes = item.Upload;
+        DownloadBytes = item.Download;
+        DurationSeconds = Math.Max(0, (now - item.Start).TotalSeconds);
+        Upload = Format.Bytes(item.Upload);
+        Download = Format.Bytes(item.Download);
+        Duration = Format.Duration(now - item.Start);
+    }
 
     public void SetRate(long upBytes, long downBytes)
     {
@@ -222,8 +256,11 @@ public sealed partial class ConnectionsViewModel : ObservableObject
 
     private void RebuildRankings()
     {
-        Rankings.Clear();
-        if (_latest is null) return;
+        if (_latest is null)
+        {
+            Rankings.Clear();
+            return;
+        }
 
         var byKey = new Dictionary<string, (long Up, long Down, int Count)>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in _latest.Connections)
@@ -243,16 +280,38 @@ public sealed partial class ConnectionsViewModel : ObservableObject
             byKey[key] = (acc.Up + c.Upload, acc.Down + c.Download, acc.Count + 1);
         }
 
-        foreach (var (key, acc) in byKey
+        var ordered = byKey
             .OrderByDescending(p => p.Value.Up + p.Value.Down)
-            .ThenByDescending(p => p.Value.Count))
+            .ThenByDescending(p => p.Value.Count)
+            .ToList();
+
+        // 按名称复用行对象，只做原地更新与增删，避免每秒整表重建。
+        var existing = new Dictionary<string, RankingRowViewModel>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in Rankings) existing[r.Name] = r;
+
+        var target = new List<RankingRowViewModel>(ordered.Count);
+        foreach (var (key, acc) in ordered)
         {
-            Rankings.Add(new RankingRowViewModel(
-                key,
-                Format.Bytes(acc.Up),
-                Format.Bytes(acc.Down),
-                acc.Count,
-                ReferenceEquals(SelectedRanking?.Name, key)));
+            var selected = ReferenceEquals(SelectedRanking?.Name, key);
+            if (existing.TryGetValue(key, out var row))
+                row.Update(Format.Bytes(acc.Up), Format.Bytes(acc.Down), acc.Count, selected);
+            else
+                row = new RankingRowViewModel(key, Format.Bytes(acc.Up), Format.Bytes(acc.Down), acc.Count, selected);
+            target.Add(row);
+        }
+
+        var targetSet = new HashSet<RankingRowViewModel>(target);
+        for (var i = Rankings.Count - 1; i >= 0; i--)
+        {
+            if (!targetSet.Contains(Rankings[i])) Rankings.RemoveAt(i);
+        }
+        for (var i = 0; i < target.Count; i++)
+        {
+            var row = target[i];
+            if (i < Rankings.Count && ReferenceEquals(Rankings[i], row)) continue;
+            var at = Rankings.IndexOf(row);
+            if (at >= 0) Rankings.Move(at, i);
+            else Rankings.Insert(i, row);
         }
     }
 
@@ -308,7 +367,8 @@ public sealed partial class ConnectionsViewModel : ObservableObject
     }
 
     private ConnectionsSnapshot? _latest;
-    private Dictionary<string, (long Up, long Down, DateTimeOffset At)> _previous = new();
+    private readonly Dictionary<string, (long Up, long Down, DateTimeOffset At)> _previous = new();
+    private readonly Dictionary<string, ConnectionRowViewModel> _rowCache = new();
     private DateTimeOffset _lastRender = DateTimeOffset.MinValue;
     private readonly EventHandler<ConnectionsSnapshot> _onConnectionsUpdated;
 
@@ -356,34 +416,57 @@ public sealed partial class ConnectionsViewModel : ObservableObject
     {
         var keyword = Filter?.Trim() ?? "";
         var drilldown = SelectedRanking?.Name;
-        var rows = snapshot.Connections
-            .Where(c => keyword.Length == 0
+
+        // 行对象按连接 Id 复用：只对新增行建对象、对消失行回收，其余原地刷新。
+        // 避免每秒整表重建导致 ListView 重新实例化容器与滚动跳顶。
+        var next = new Dictionary<string, (long Up, long Down, DateTimeOffset At)>(snapshot.Connections.Count);
+        var rows = new List<ConnectionRowViewModel>(snapshot.Connections.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var c in snapshot.Connections)
+        {
+            var matches = (keyword.Length == 0
                 || (c.Metadata.Host?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
                 || (c.Metadata.Process?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
                 || (c.Metadata.DestinationIP?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false))
-            .Where(c => drilldown is null || MatchesRanking(c, drilldown))
-            .Select(c => new ConnectionRowViewModel(c))
-            .ToList();
+                && (drilldown is null || MatchesRanking(c, drilldown));
+            if (!matches) continue;
 
-        var next = new Dictionary<string, (long Up, long Down, DateTimeOffset At)>(rows.Count);
-        foreach (var row in rows)
-        {
-            var item = snapshot.Connections.First(c => c.Id == row.Id);
-            if (_previous.TryGetValue(row.Id, out var prev))
+            if (!_rowCache.TryGetValue(c.Id, out var row))
+            {
+                row = new ConnectionRowViewModel(c);
+                _rowCache[c.Id] = row;
+            }
+            else
+            {
+                row.Update(c, now);
+            }
+
+            if (_previous.TryGetValue(c.Id, out var prev))
             {
                 var seconds = Math.Max(0.001, (now - prev.At).TotalSeconds);
-                var upRate = (long)Math.Max(0, (item.Upload - prev.Up) / seconds);
-                var downRate = (long)Math.Max(0, (item.Download - prev.Down) / seconds);
+                var upRate = (long)Math.Max(0, (c.Upload - prev.Up) / seconds);
+                var downRate = (long)Math.Max(0, (c.Download - prev.Down) / seconds);
                 row.SetRate(upRate, downRate);
             }
-            next[row.Id] = (item.Upload, item.Download, now);
+
+            next[c.Id] = (c.Upload, c.Download, now);
+            seen.Add(c.Id);
+            rows.Add(row);
         }
-        _previous = next;
+
+        // 回收已消失连接的缓存行，避免无界增长。
+        if (_rowCache.Count > seen.Count)
+        {
+            var stale = _rowCache.Keys.Where(k => !seen.Contains(k)).ToList();
+            foreach (var k in stale) _rowCache.Remove(k);
+        }
+
+        _previous.Clear();
+        foreach (var kv in next) _previous[kv.Key] = kv.Value;
 
         rows = SortRows(rows);
-
-        Items.Clear();
-        foreach (var row in rows) Items.Add(row);
+        SyncItems(rows);
 
         Count = snapshot.Connections.Count;
         FilteredCount = rows.Count;
@@ -395,6 +478,57 @@ public sealed partial class ConnectionsViewModel : ObservableObject
         OnPropertyChanged(nameof(MemoryText));
 
         if (IsRankingView) RebuildRankings();
+    }
+
+    /// <summary>按目标顺序对 Items 做最小改动（复用实例），保持滚动位置与容器。</summary>
+    private void SyncItems(List<ConnectionRowViewModel> target)
+    {
+        // 快路径：顺序与内容完全一致时直接返回（按持续时间排序时顺序稳定，是每秒刷新的常见情形）。
+        if (Items.Count == target.Count)
+        {
+            var same = true;
+            for (var i = 0; i < target.Count; i++)
+            {
+                if (!ReferenceEquals(Items[i], target[i]))
+                {
+                    same = false;
+                    break;
+                }
+            }
+            if (same) return;
+        }
+
+        var targetSet = new HashSet<ConnectionRowViewModel>(target);
+
+        // 先移除不再存在的项（从后往前删，避免索引抖动）。
+        for (var i = Items.Count - 1; i >= 0; i--)
+        {
+            if (!targetSet.Contains(Items[i]))
+                Items.RemoveAt(i);
+        }
+
+        // 建立索引映射，避免逐个 IndexOf 的 O(n) 查找。
+        var pos = new Dictionary<ConnectionRowViewModel, int>(Items.Count);
+        for (var i = 0; i < Items.Count; i++) pos[Items[i]] = i;
+
+        for (var i = 0; i < target.Count; i++)
+        {
+            var row = target[i];
+            if (i < Items.Count && ReferenceEquals(Items[i], row)) continue;
+
+            if (pos.TryGetValue(row, out var existing))
+            {
+                Items.Move(existing, i);
+                var lo = Math.Min(existing, i);
+                var hi = Math.Max(existing, i);
+                for (var k = lo; k <= hi; k++) pos[Items[k]] = k;
+            }
+            else
+            {
+                Items.Insert(i, row);
+                for (var k = i; k < Items.Count; k++) pos[Items[k]] = k;
+            }
+        }
     }
 
     private bool MatchesRanking(ConnectionItem c, string key)

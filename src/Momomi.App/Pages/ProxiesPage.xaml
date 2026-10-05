@@ -113,7 +113,7 @@
                                         <Grid>
                                             <!-- 底层：默认主题描边 + 选中态填充。
                                                  用 ControlStrokeColorDefaultBrush：暗色下是浅色描边，浅色下是深色描边 -->
-                                            <Grid CornerRadius="6"
+                                            <Grid CornerRadius="8"
                                                     BorderThickness="1"
                                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                                                     Background="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedToBrush}}" />
@@ -177,7 +177,7 @@
                                                 </Grid>
                                             </Button>
                                             <!-- 顶层：选中态强调色描边，置于最上；未选中透明，不参与命中测试 -->
-                                            <Grid CornerRadius="6"
+                                            <Grid CornerRadius="8"
                                                     BorderThickness="1"
                                                     IsHitTestVisible="False"
                                                     Background="Transparent"
