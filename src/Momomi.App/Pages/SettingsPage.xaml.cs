@@ -355,4 +355,19 @@ public sealed partial class SettingsPage : Page
             case "SsidProfileMap": ViewModel.SsidProfileMap = text; break;
         }
     }
+
+    private async void ClearLoopback_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "清除回环豁免",
+            Content = "将移除所有 UWP 应用的本地回环豁免，之后应用商店类应用将无法通过本机代理联网。是否继续？",
+            PrimaryButtonText = "清除",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            await ViewModel.ClearLoopbackCommand.ExecuteAsync(null);
+    }
 }

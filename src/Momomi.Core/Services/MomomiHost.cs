@@ -16,6 +16,7 @@ public sealed class MomomiHost : IDisposable
     public IElevatedClient Elevated { get; }
     public IAppUpdateService AppUpdate { get; }
     public SsidService Ssid { get; }
+    public ILoopbackExemptionService Loopback { get; }
     public PacServer Pac { get; } = new();
 
     private readonly TrafficRecorder _recorder;
@@ -49,6 +50,7 @@ public sealed class MomomiHost : IDisposable
         Profiles = new ProfileService(Database, Settings, Path.Combine(_root, "profiles"));
         AppUpdate = new AppUpdateService(Settings);
         Ssid = new SsidService(this);
+        Loopback = new LoopbackExemptionService();
 
         var paths = new CorePaths(
             BinaryPath: KernelUpdate.BinaryPath,

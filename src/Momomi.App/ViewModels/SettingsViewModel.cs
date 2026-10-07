@@ -373,6 +373,8 @@ public sealed partial class SettingsViewModel : ObservableObject
             TunRouteExcludeAddress = await _host.Settings.GetAsync("core.tunRouteExcludeAddress") ?? "";
             PauseSsids = await _host.Settings.GetAsync("ui.pauseSsids") ?? "";
             SsidProfileMap = await _host.Settings.GetAsync("ui.ssidProfileMap") ?? "";
+
+            await RefreshLoopbackStatusAsync();
         }
         finally
         {
@@ -1087,4 +1089,77 @@ public sealed partial class SettingsViewModel : ObservableObject
         AppHasUpdate = info.HasUpdate;
         if (info.Error is not null) AppStatusText = $"检查失败：{info.Error}";
     }
+
+    [ObservableProperty]
+    public partial bool IsLoopbackBusy { get; set; }
+
+    [ObservableProperty]
+    public partial string LoopbackStatusText { get; set; } = "尚未处理";
+
+    public async Task RefreshLoopbackStatusAsync()
+    {
+        try
+        {
+            var count = await Task.Run(() => _host.Loopback.GetExemptedCount());
+            LoopbackStatusText = $"当前已豁免 {count} 个应用";
+        }
+        catch (Exception ex)
+        {
+            LoopbackStatusText = $"读取失败：{ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExemptLoopbackAsync()
+    {
+        if (IsLoopbackBusy) return;
+        IsLoopbackBusy = true;
+        LoopbackStatusText = "正在解除限制…";
+        try
+        {
+            var result = await Task.Run(() => _host.Loopback.ExemptAll());
+            if (!result.Success)
+            {
+                LoopbackStatusText = $"解除失败：{result.Error}";
+                return;
+            }
+            LoopbackStatusText = result.Added > 0
+                ? $"已解除限制：新增 {result.Added} 个，共 {result.Total} 个应用"
+                : $"全部 {result.Total} 个应用均已解除限制";
+        }
+        catch (Exception ex)
+        {
+            LoopbackStatusText = $"解除失败：{ex.Message}";
+        }
+        finally
+        {
+            IsLoopbackBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ClearLoopbackAsync()
+    {
+        if (IsLoopbackBusy) return;
+        IsLoopbackBusy = true;
+        LoopbackStatusText = "正在清除…";
+        try
+        {
+            var before = await Task.Run(() => _host.Loopback.Clear());
+            LoopbackStatusText = before < 0
+                ? "清除失败：需要管理员权限"
+                : $"已清除全部回环豁免（原有 {before} 个）";
+        }
+        catch (Exception ex)
+        {
+            LoopbackStatusText = $"清除失败：{ex.Message}";
+        }
+        finally
+        {
+            IsLoopbackBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private Task RefreshLoopback() => RefreshLoopbackStatusAsync();
 }

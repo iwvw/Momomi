@@ -195,6 +195,25 @@
                     <controls:SettingsCard Description="切换节点后自动断开旧连接" Header="切换节点自动关闭连接">
                         <ToggleSwitch IsOn="{x:Bind ViewModel.AutoCloseConnection, Mode=TwoWay}" />
                     </controls:SettingsCard>
+
+                    <controls:SettingsCard Description="UWP（应用商店）应用默认无法连接本机代理，解除后它们才能走代理联网" Header="解除 UWP 回环限制">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock VerticalAlignment="Center"
+                                       MinWidth="200"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Text="{x:Bind ViewModel.LoopbackStatusText, Mode=OneWay}" />
+                            <ProgressRing Width="16" Height="16"
+                                          IsActive="{x:Bind ViewModel.IsLoopbackBusy, Mode=OneWay}"
+                                          Visibility="{x:Bind ViewModel.IsLoopbackBusy, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                            <Button MinWidth="0" Padding="10,4"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    Command="{x:Bind ViewModel.ExemptLoopbackCommand}"
+                                    Content="解除限制" />
+                            <Button MinWidth="0" Padding="10,4"
+                                    Click="ClearLoopback_Click"
+                                    Content="清除" />
+                        </StackPanel>
+                    </controls:SettingsCard>
                     </controls:SettingsExpander.Items>
                 </controls:SettingsExpander>
 
