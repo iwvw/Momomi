@@ -460,8 +460,11 @@ public sealed class CoreManager : ICoreManager
             await _api.ReloadConfigAsync(configPath, force: true, ct).ConfigureAwait(false);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            // 重载被拒（如配置存在悬空引用：代理组引用了已删除的节点）时内核会保留旧配置，
+            // 表现为「订阅已更新但旧节点仍在」。记录原因便于排查。
+            Log($"[CoreManager] 配置重载失败，内核仍使用旧配置：{ex.Message}");
             return false;
         }
     }

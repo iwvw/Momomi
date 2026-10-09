@@ -96,9 +96,21 @@ public sealed class MomomiHost : IDisposable
             {
                 var enabled = await Settings.GetBoolAsync("profile.autoUpdate", true).ConfigureAwait(false);
                 if (!enabled) return;
+
                 var items = await Profiles.ListAsync().ConfigureAwait(false);
+                var activeId = items.FirstOrDefault(i => i.IsActive)?.Id;
+                var activeRefreshed = false;
+
                 foreach (var item in items.Where(i => i.Kind == "url"))
-                    await Profiles.RefreshAsync(item.Id).ConfigureAwait(false);
+                {
+                    if (await Profiles.RefreshAsync(item.Id).ConfigureAwait(false) && item.Id == activeId)
+                        activeRefreshed = true;
+                }
+
+                // 定时更新只写了订阅文件；必须再重新生成 runtime.yaml 并热重载内核，
+                // 否则内核仍持有旧配置，订阅里已删除的节点会继续在前端显示。
+                if (activeRefreshed)
+                    await ApplyActiveProfileAsync().ConfigureAwait(false);
             }
             catch
             {
