@@ -2,8 +2,18 @@
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <assemblyIdentity version="1.0.0.0" name="Momomi.App.app"/>
 
+  <!-- MSIX 包身份：把本可执行文件与 Package.appxmanifest 的身份关联起来，
+       使打包形态下 Package.Current 等身份相关 API 可用。三个属性必须与
+       Package.appxmanifest 的 Identity 完全一致（publisher/packageName/applicationId）。
+       非打包（unpackaged）运行时本元素被忽略。 -->
+  <msix xmlns="urn:schemas-microsoft-com:msix.v1"
+        publisher="CN=DSUK"
+        packageName="Momomi.App"
+        applicationId="Momomi"/>
+
   <!-- 主程序以管理员身份运行：内核作为子进程继承管理员令牌，TUN 直接生效，
-       无需独立的提权宿主，从根本上避免“UAC 不通知时提权失败、内核卡住”。 -->
+       无需独立的提权宿主，从根本上避免“UAC 不通知时提权失败、内核卡住”。
+       MSIX 打包形态另用 app.packaged.manifest（highestAvailable），见该文件说明。 -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

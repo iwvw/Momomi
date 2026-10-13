@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using System.Text;
+
 namespace Momomi.Data;
 
 /// <summary>
@@ -5,6 +8,7 @@ namespace Momomi.Data;
 /// 优先放在程序目录下的 data\，便于便携使用与整体迁移；
 /// 若程序目录不可写（如装到只读位置），自动回退到 %LOCALAPPDATA%\Momomi。
 /// 首次使用程序目录且其中尚无数据时，从旧的 %LOCALAPPDATA%\Momomi 迁移一次。
+/// MSIX 打包形态下安装目录恒为只读，直接使用 %LOCALAPPDATA%\Momomi。
 /// </summary>
 public static class MomomiAppData
 {
@@ -21,6 +25,13 @@ public static class MomomiAppData
         var legacy = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppFolderName);
 
+        // MSIX 打包形态：安装目录只读，且虚拟化已关闭，直接用 %LOCALAPPDATA%\Momomi。
+        if (IsPackaged())
+        {
+            Directory.CreateDirectory(legacy);
+            return legacy;
+        }
+
         var portable = Path.Combine(AppContext.BaseDirectory, DataFolderName);
         if (TryPrepareWritable(portable, out var error) is { } dir)
         {
@@ -32,6 +43,25 @@ public static class MomomiAppData
         Directory.CreateDirectory(legacy);
         return legacy;
     }
+
+    /// <summary>当前进程是否运行在 MSIX 包身份下（打包形态）。</summary>
+    private static bool IsPackaged()
+    {
+        try
+        {
+            uint length = 0;
+            // 非打包进程返回 APPMODEL_ERROR_NO_PACKAGE(15700)；打包进程返回 ERROR_INSUFFICIENT_BUFFER(122)。
+            var result = GetCurrentPackageFullName(ref length, null);
+            return result != 15700;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetCurrentPackageFullName(ref uint packageFullNameLength, StringBuilder? packageFullName);
 
     /// <summary>尝试创建并写入探测文件；成功返回目录，失败返回 null。</summary>
     private static string? TryPrepareWritable(string directory, out string? error)

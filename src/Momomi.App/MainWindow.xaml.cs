@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using CommunityToolkit.WinUI.Controls;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -41,7 +42,9 @@ public sealed partial class MainWindow : Window
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+        // 标题栏内容行保持 48px，但系统按钮（最小化/最大化/关闭）用标准高度（约 32px）顶部对齐，
+        // 形成"半高"观感；Tall 会让按钮占满整行高度。
+        AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Standard;
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
@@ -277,7 +280,7 @@ public sealed partial class MainWindow : Window
         try
         {
             if (DesktopAcrylicController.IsSupported())
-                SetBackdrop(new Controls.AlwaysActiveAcrylicBackdrop());
+                SetBackdrop(new Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop());
             else if (MicaController.IsSupported())
                 SetBackdrop(new MicaBackdrop { Kind = MicaKind.Base });
         }
@@ -286,7 +289,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>替换系统背景材质，并释放旧实例（AlwaysActiveAcrylicBackdrop 持有控制器需显式释放）。</summary>
+    /// <summary>替换系统背景材质。</summary>
     private void SetBackdrop(SystemBackdrop? next)
     {
         var previous = SystemBackdrop;
@@ -318,7 +321,7 @@ public sealed partial class MainWindow : Window
                     break;
                 default:
                     if (DesktopAcrylicController.IsSupported())
-                        SetBackdrop(new Controls.AlwaysActiveAcrylicBackdrop());
+                        SetBackdrop(new Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop());
                     else if (MicaController.IsSupported())
                         SetBackdrop(new MicaBackdrop { Kind = MicaKind.Base });
                     else
@@ -343,9 +346,37 @@ public sealed partial class MainWindow : Window
         {
             root.ActualThemeChanged += (_, _) =>
             {
+                ApplyCaptionButtonTheme(root.ActualTheme);
                 _tray?.ApplyTheme(root.ActualTheme);
                 UpdateTrayState();
             };
+        }
+    }
+
+    /// <summary>
+    /// 标题栏系统按钮（最小化/最大化/关闭）由系统绘制，不随根元素 RequestedTheme 自动变化；
+    /// 且运行时改色后系统不会自行重绘，需在主题变化时重新下发一次。
+    /// </summary>
+    private void ApplyCaptionButtonTheme(ElementTheme theme)
+    {
+        try
+        {
+            var dark = theme == ElementTheme.Dark;
+            var titleBar = AppWindow.TitleBar;
+            var fg = dark ? Windows.UI.Color.FromArgb(255, 255, 255, 255)
+                          : Windows.UI.Color.FromArgb(255, 0, 0, 0);
+            titleBar.ButtonForegroundColor = fg;
+            titleBar.ButtonHoverForegroundColor = fg;
+            titleBar.ButtonPressedForegroundColor = fg;
+            titleBar.ForegroundColor = fg;
+            titleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+            titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+            titleBar.ButtonHoverBackgroundColor = dark
+                ? Windows.UI.Color.FromArgb(24, 255, 255, 255)
+                : Windows.UI.Color.FromArgb(24, 0, 0, 0);
+        }
+        catch
+        {
         }
     }
 
@@ -354,20 +385,8 @@ public sealed partial class MainWindow : Window
     /// </summary>
     public void ApplyThemeToChrome(string theme)
     {
-        try
-        {
-            var titleBar = AppWindow.TitleBar;
-            var dark = theme == "dark" || (theme == "default" && IsSystemDark());
-            var fg = dark ? Windows.UI.Color.FromArgb(255, 255, 255, 255)
-                          : Windows.UI.Color.FromArgb(255, 0, 0, 0);
-            titleBar.ButtonForegroundColor = fg;
-            titleBar.ForegroundColor = fg;
-            titleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
-            titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
-        }
-        catch
-        {
-        }
+        var dark = theme == "dark" || (theme == "default" && IsSystemDark());
+        ApplyCaptionButtonTheme(dark ? ElementTheme.Dark : ElementTheme.Light);
 
         // 托盘菜单主题跟随（SecondWindow 是独立窗口，需显式设 ContextMenuThemeMode）。
         var actualTheme = (Content as FrameworkElement)?.ActualTheme ?? ElementTheme.Default;
@@ -713,10 +732,7 @@ public sealed partial class MainWindow : Window
         _modeBarLoading = true;
         try
         {
-            var index = ModeSelector.SelectedIndex;
-            ModeRuleButton.IsChecked = index == 0;
-            ModeGlobalButton.IsChecked = index == 1;
-            ModeDirectButton.IsChecked = index == 2;
+            ModeSegmented.SelectedIndex = ModeSelector.SelectedIndex;
         }
         finally
         {
@@ -838,11 +854,12 @@ public sealed partial class MainWindow : Window
         SyncModeBar();
     }
 
-    private async void ModeButton_Click(object sender, RoutedEventArgs e)
+    private async void ModeSegmented_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_modeBarLoading) return;
-        if (sender is not ToggleButton button) return;
-        if (button.Tag is not string tag || !int.TryParse(tag, out var index)) return;
+        if (sender is not Segmented segmented) return;
+        var index = segmented.SelectedIndex;
+        if (index < 0) return;
 
         if (ModeSelector.SelectedIndex == index)
         {

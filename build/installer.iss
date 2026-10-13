@@ -78,10 +78,10 @@ Filename: "schtasks.exe"; Parameters: "/Delete /TN ""Momomi"" /F"; Flags: runhid
 
 [Code]
 #if RequireRuntime == "1"
-// 分离版：启动前检测 .NET 10 运行时与 Windows App Runtime 2.x，缺失则提示（不自动安装）。
+// 分离版：启动前检测 .NET 运行时 10.0 与 Windows App Runtime 2.4（均为 x64），缺失则提示（不自动安装）。
 const
   DotnetUrl = 'https://dotnet.microsoft.com/download/dotnet/10.0';
-  WinAppRuntimeUrl = 'https://aka.ms/windowsappsdk/2.4/latest/windowsappruntimeinstall-x64.exe';
+  WinAppRuntimeUrl = 'https://aka.ms/windowsappsdk/2.4/2.4.0/windowsappruntimeinstall-x64.exe';
 
 // 运行一段 PowerShell 探测命令，把结果写入临时文件并读取。
 function RunProbe(const Script: String): String;
@@ -107,14 +107,15 @@ end;
 
 function HasDotnet10(): Boolean;
 begin
-  // 检测已安装的 Microsoft.NETCore.App 10.x 运行时。
+  // 检测已安装的 Microsoft.NETCore.App 10.x 运行时（.NET 运行时，非桌面运行时）。
   Result := Pos('10.', RunProbe('(dotnet --list-runtimes | Select-String ''Microsoft.NETCore.App 10\.'' | Select-Object -First 1)')) > 0;
 end;
 
 function HasWindowsAppRuntime(): Boolean;
 begin
-  // Windows App Runtime 2.x 以 Appx 包安装，用 Get-AppxPackage 检测最可靠。
-  Result := RunProbe('$(if (Get-AppxPackage Microsoft.WindowsAppRuntime.2) { ''FOUND'' } else { ''MISSING'' })') = 'FOUND';
+  // Windows App Runtime 2.4 以 Appx 包安装，用 Get-AppxPackage 检测最可靠。
+  // 名称 Microsoft.WindowsAppRuntime.2 对应 2.x 系列，版本须 >= 2.4。
+  Result := RunProbe('$(if (Get-AppxPackage Microsoft.WindowsAppRuntime.2 | Where-Object { $_.Version -ge [Version]''2.4'' }) { ''FOUND'' } else { ''MISSING'' })') = 'FOUND';
 end;
 
 function InitializeSetup(): Boolean;
@@ -123,15 +124,15 @@ var
 begin
   Missing := '';
   if not HasDotnet10() then
-    Missing := Missing + '  - .NET 10 桌面运行时：' + DotnetUrl + #13#10;
+    Missing := Missing + '  - .NET 运行时 10.0（x64）：' + DotnetUrl + #13#10;
   if not HasWindowsAppRuntime() then
-    Missing := Missing + '  - Windows App Runtime 2.x：' + WinAppRuntimeUrl + #13#10;
+    Missing := Missing + '  - Windows App Runtime 2.4（x64）：' + WinAppRuntimeUrl + #13#10;
 
   if Missing <> '' then
   begin
-    if MsgBox('检测到缺少以下系统运行时，Momomi 分离版需要它们才能启动：' + #13#10#13#10 +
+    if MsgBox('检测到缺少以下运行环境，Momomi 分离版需要它们才能启动（均须为 x64）：' + #13#10#13#10 +
               Missing + #13#10 +
-              '是否仍要继续安装？（可稍后自行安装上述运行时）',
+              '是否仍要继续安装？（可稍后自行安装上述运行环境）',
               mbConfirmation, MB_YESNO) = IDNO then
     begin
       Result := False;

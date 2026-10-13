@@ -186,6 +186,53 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" @args
           Get-ChildItem *.exe | ForEach-Object { Write-Host $_.Name }
 
+      - name: Build MSIX package
+        if: matrix.arch == 'x64' && matrix.variant == 'slim'
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          # MSIX 源必须用 WindowsPackageType=MSIX 重新发布：只有该形态内嵌
+          # highestAvailable（requireAdministrator 会被 AppModel 以 0x800702E4 拒绝），
+          # 并携带 msix 身份元素。单独发布到 publish-msix，避免污染 Inno 用的 publish。
+          dotnet publish src/Momomi.App/Momomi.App.csproj `
+            -c $env:CONFIGURATION `
+            -r win-x64 `
+            -p:SelfContained=${{ matrix.selfContained }} `
+            -p:WindowsAppSDKSelfContained=${{ matrix.winuiSelfContained }} `
+            -p:Platform=x64 `
+            -p:WindowsPackageType=MSIX `
+            -p:Version=$ver `
+            -o publish-msix
+          $publisher = "${{ secrets.MSIX_PUBLISHER }}"
+          if ([string]::IsNullOrWhiteSpace($publisher)) { $publisher = 'CN=DSUK' }
+          $certPath = "${{ github.workspace }}\build\msix-signing.pfx"
+          $hasCert = $false
+          if ("${{ secrets.MSIX_CERT_PFX_BASE64 }}") {
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String("${{ secrets.MSIX_CERT_PFX_BASE64 }}"))
+            $hasCert = $true
+          }
+          # 生成 [Version].0 形式的四段版本号（MSIX 要求）。
+          $appxVer = "$ver.0"
+          $args = @{
+            Version   = $appxVer
+            SourceDir = "${{ github.workspace }}\publish-msix"
+            OutputDir = "${{ github.workspace }}"
+            Publisher = $publisher
+            Arch      = 'x64'
+          }
+          if ($hasCert) {
+            $args.CertPath = $certPath
+            $args.CertPassword = "${{ secrets.MSIX_CERT_PASSWORD }}"
+            # 导出公钥证书（.cer）随发布一起提供，供用户导入「受信任人」存储后安装。
+            $cerPath = "${{ github.workspace }}\momomi-signing.cer"
+            $sec = ConvertTo-SecureString -String "${{ secrets.MSIX_CERT_PASSWORD }}" -Force -AsPlainText
+            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certPath, $sec)
+            [IO.File]::WriteAllBytes($cerPath, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+            Write-Host "已导出签名证书公钥：momomi-signing.cer"
+          }
+          pwsh -File build/msix.ps1 @args
+          Get-ChildItem *.msix | ForEach-Object { Write-Host $_.Name }
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -193,6 +240,8 @@ jobs:
           path: |
             Momomi-*.zip
             Momomi-*-setup.exe
+            Momomi-*.msix
+            momomi-signing.cer
           if-no-files-found: warn
 
   release:

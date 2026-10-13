@@ -121,7 +121,7 @@ public sealed partial class MiniWindow : Window
                 default:
                     if (global::Microsoft.UI.Composition.SystemBackdrops.DesktopAcrylicController.IsSupported())
                     {
-                        SetBackdrop(new global::Momomi.App.Controls.AlwaysActiveAcrylicBackdrop());
+                        SetBackdrop(new global::Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop());
                         Panel.SetSolidBackground(false);
                     }
                     else if (MicaController.IsSupported())

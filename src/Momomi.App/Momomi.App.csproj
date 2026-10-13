@@ -8,13 +8,24 @@
     <WindowsSdkPackageVersion>10.0.26100.80</WindowsSdkPackageVersion>
     <LangVersion>preview</LangVersion>
     <RootNamespace>Momomi.App</RootNamespace>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 免打包（Inno/便携）用 requireAdministrator；MSIX 必须用 highestAvailable，
+         否则 AppModel 会以 0x800702E4 拒绝启动。 -->
+    <ApplicationManifest Condition="'$(WindowsPackageType)' != 'MSIX'">app.manifest</ApplicationManifest>
+    <ApplicationManifest Condition="'$(WindowsPackageType)' == 'MSIX'">app.packaged.manifest</ApplicationManifest>
     <Platforms>x86;x64;ARM64</Platforms>
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
     <UseWinUI>true</UseWinUI>
     <!-- 默认自包含（合并版）。分离版由 CI 传 -p:WindowsAppSDKSelfContained=false 覆盖。 -->
     <WindowsAppSDKSelfContained Condition="'$(WindowsAppSDKSelfContained)' == ''">true</WindowsAppSDKSelfContained>
-    <WindowsPackageType>None</WindowsPackageType>
+    <!-- 打包形态：MSIX 时启用包身份；None 为当前的免打包（Inno/便携）形态。
+         由 CI 传 -p:WindowsPackageType=MSIX 切换，二者共用同一份 Package.appxmanifest。
+         打包产物由 build/msix.ps1 统一生成（注入版本号 + 签名），故不在此自动生成。 -->
+    <WindowsPackageType Condition="'$(WindowsPackageType)' == ''">None</WindowsPackageType>
+    <GenerateAppxPackageOnBuild Condition="'$(GenerateAppxPackageOnBuild)' == ''">false</GenerateAppxPackageOnBuild>
+    <!-- MSIX 下的包身份与显示信息（须与 Package.appxmanifest 保持一致）。 -->
+    <AppxPackageName Condition="'$(WindowsPackageType)' == 'MSIX'">Momomi.App</AppxPackageName>
+    <AppxPackageVersion Condition="'$(WindowsPackageType)' == 'MSIX'">$(VersionPrefix).0</AppxPackageVersion>
+    <AppxPackageDir Condition="'$(WindowsPackageType)' == 'MSIX' and '$(AppxPackageDir)' == ''">$(OutDir)AppPackages\</AppxPackageDir>
     <WinUISDKReferences>false</WinUISDKReferences>
     <EnableMsixTooling>true</EnableMsixTooling>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -32,6 +43,8 @@
     <Content Include="Assets\TrayRed.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\FlagsEmoji.ttf" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\flags\*.svg" CopyToOutputDirectory="PreserveNewest" />
+    <!-- MSIX 视觉资产（由 Package.appxmanifest 引用），仅打包形态需要。 -->
+    <Content Include="Assets\Package\*.png" Condition="'$(WindowsPackageType)' == 'MSIX'" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -44,6 +57,7 @@
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.Segmented" Version="8.2.251219" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
     <PackageReference Include="H.NotifyIcon.WinUI" Version="2.5.0-beta.3" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />

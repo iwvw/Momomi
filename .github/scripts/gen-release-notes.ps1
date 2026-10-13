@@ -40,6 +40,8 @@ $sizeMap = [ordered]@{
     '{{SIZE_X64_FULL_SEP}}'        = Format-Size "Momomi-$Version-x64-full-sep.zip"
     '{{SIZE_ARM64_PORTABLE}}'      = Format-Size "Momomi-$Version-arm64-portable.zip"
     '{{SIZE_ARM64_FULL}}'          = Format-Size "Momomi-$Version-arm64-full.zip"
+    '{{SIZE_X64_MSIX}}'            = Format-Size "Momomi-$Version.0-x64.msix"
+    '{{SIZE_MSIX_CER}}'            = Format-Size "momomi-signing.cer"
 }
 
 $body = $template.Replace('{{CHANGES}}', $changes).Replace('{{VERSION}}', $Version)

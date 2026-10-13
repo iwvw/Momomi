@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap10 desktop6 rescap">
+
+  <Identity
+    Name="Momomi.App"
+    Publisher="CN=DSUK"
+    Version="0.7.7.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Momomi</DisplayName>
+    <PublisherDisplayName>DSUK</PublisherDisplayName>
+    <Logo>Assets\Package\StoreLogo.png</Logo>
+    <!-- 关闭注册表与 AppData 的写入虚拟化：系统代理写 HKCU\Internet Settings 必须对其它进程可见，
+         内核对数据目录的读写也必须落到真实路径。关闭后需配套 unvirtualizedResources 能力。 -->
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+  </Properties>
+
+  <Resources>
+    <Resource Language="zh-CN" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Capabilities>
+    <!-- 桌面应用（WinUI 3）在 mediumIL 下运行所需。 -->
+    <rescap:Capability Name="runFullTrust" />
+    <!-- 允许以管理员身份启动（TUN、系统代理、UWP 回环豁免、计划任务自启均依赖提权）。 -->
+    <rescap:Capability Name="allowElevation" />
+    <!-- 配合上方关闭注册表/文件虚拟化。 -->
+    <rescap:Capability Name="unvirtualizedResources" />
+  </Capabilities>
+
+  <Applications>
+    <Application
+      Id="Momomi"
+      Executable="Momomi.exe"
+      EntryPoint="Windows.FullTrustApplication"
+      uap10:TrustLevel="mediumIL"
+      uap10:RuntimeBehavior="packagedClassicApp">
+      <uap:VisualElements
+        DisplayName="Momomi"
+        Description="基于 mihomo 内核的 Windows 代理客户端"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Package\Square150x150Logo.png"
+        Square44x44Logo="Assets\Package\Square44x44Logo.png">
+        <uap:DefaultTile
+          Wide310x150Logo="Assets\Package\Wide310x150Logo.png"
+          Square310x310Logo="Assets\Package\Square310x310Logo.png"
+          Square71x71Logo="Assets\Package\Square71x71Logo.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+</Package>
