@@ -211,13 +211,14 @@ public sealed partial class MiniWindow : Window
         _slider.Animate(start, _targetRect, 255, 255, ShowDurationMs, SlideEasing.EaseOut, OnShowCompleted);
 
         _statsTimer.Start();
-        _ = Panel.RefreshOnShowAsync();
     }
 
     private void OnShowCompleted()
     {
         if (_state != VisState.Showing) return;
         _state = VisState.Shown;
+        // 滑出动画结束后再拉取模式/开关/订阅/代理：避免冷页换入与网络加载突发叠加在动画起步上造成卡顿。
+        _ = Panel.RefreshOnShowAsync();
     }
 
     public void Hide()

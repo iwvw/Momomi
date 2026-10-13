@@ -619,7 +619,7 @@ public sealed partial class MainWindow : Window
         NavFrame.Navigate(_lastPageType);
     }
 
-    /// <summary>隐藏到托盘时释放当前页面内容（保留页面类型），并压缩工作集，降低常驻内存。</summary>
+    /// <summary>隐藏到托盘时释放当前页面内容（保留页面类型），降低常驻内存。</summary>
     private void ReleasePageContent()
     {
         try
@@ -628,30 +628,12 @@ public sealed partial class MainWindow : Window
                 _lastPageType = NavFrame.Content.GetType();
             NavFrame.Content = null;
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, blocking: false);
-            TrimWorkingSet();
         }
         catch (Exception ex)
         {
             global::Momomi.App.App.WriteLog($"释放页面内容失败：{ex}");
         }
     }
-
-    /// <summary>把物理内存工作集交还系统（不减少私有提交，但任务管理器观感明显下降）。</summary>
-    private static void TrimWorkingSet()
-    {
-        try
-        {
-            using var process = System.Diagnostics.Process.GetCurrentProcess();
-            _ = EmptyWorkingSet(process.Handle);
-        }
-        catch
-        {
-        }
-    }
-
-    [DllImport("psapi.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EmptyWorkingSet(IntPtr hProcess);
 
     private void ExitFromTray()
     {
