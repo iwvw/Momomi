@@ -48,7 +48,20 @@ public sealed partial class ProfileRowViewModel : ObservableObject
 
     public string UsageText { get; }
 
-    public ProfileRowViewModel(ProfileItem item)
+    /// <summary>该订阅挂载的覆写名称；空列表表示没有覆写。</summary>
+    public IReadOnlyList<string> OverrideNames { get; }
+
+    public bool HasOverrides => OverrideNames.Count > 0;
+
+    /// <summary>卡片底部展示的覆写摘要，例如「覆写 2 项」。</summary>
+    public string OverrideText => OverrideNames.Count == 0
+        ? ""
+        : $"覆写 {OverrideNames.Count} 项";
+
+    /// <summary>鼠标悬停时列出具体覆写名称，按合并顺序排列。</summary>
+    public string OverrideTooltip => string.Join("\n", OverrideNames);
+
+    public ProfileRowViewModel(ProfileItem item, IReadOnlyList<string>? overrideNames = null)
     {
         Id = item.Id;
         Name = item.Name;
@@ -57,6 +70,7 @@ public sealed partial class ProfileRowViewModel : ObservableObject
         UpdatedText = item.UpdatedText;
         SubscriptionUserInfo = item.SubscriptionUserInfo;
         IsActive = item.IsActive;
+        OverrideNames = overrideNames ?? Array.Empty<string>();
 
         var info = SubscriptionUsage.Parse(item.SubscriptionUserInfo);
         if (info is not null && info.Total > 0)
@@ -167,10 +181,25 @@ public sealed partial class ProfilesViewModel : ObservableObject
         {
             AutoUpdate = await _host.Settings.GetBoolAsync("profile.autoUpdate", true);
             var list = await _host.Profiles.ListAsync();
+            var overrides = await _host.Overrides.ListAsync();
+            var overrideNames = overrides.ToDictionary(o => o.Id, o => o.Name);
+
+            // 每个订阅各自取挂载列表，用于卡片上展示"覆写 N 项"。
+            var mounts = new Dictionary<long, IReadOnlyList<string>>();
+            foreach (var item in list)
+            {
+                var ids = await _host.Overrides.GetProfileOverridesAsync(item.Id);
+                mounts[item.Id] = ids
+                    .Where(overrideNames.ContainsKey)
+                    .Select(id => overrideNames[id])
+                    .ToList();
+            }
+
             _dispatcher.TryEnqueue(() =>
             {
                 Items.Clear();
-                foreach (var item in list) Items.Add(new ProfileRowViewModel(item));
+                foreach (var item in list)
+                    Items.Add(new ProfileRowViewModel(item, mounts[item.Id]));
                 HasItems = Items.Count > 0;
                 StatusText = Items.Count == 0 ? "尚无配置文件" : $"共 {Items.Count} 个配置";
             });
@@ -260,7 +289,7 @@ public sealed partial class ProfilesViewModel : ObservableObject
             await _host.Profiles.SetActiveAsync(row.Id);
             StatusText = $"正在应用 {row.Name}…";
             var applied = await _host.ApplyActiveProfileAsync();
-            StatusText = applied ? $"已切换到 {row.Name}" : $"已切换，但配置应用失败";
+            StatusText = applied ? $"已切换到 {row.Name}" : $"已切换，但内核未能应用新配置（详见 core.log）";
             await LoadAsync();
         }
         catch (Exception ex)
@@ -285,8 +314,19 @@ public sealed partial class ProfilesViewModel : ObservableObject
             var ok = await _host.Profiles.RefreshAsync(row.Id);
             if (ok)
             {
-                if (row.IsActive) await _host.ApplyActiveProfileAsync();
-                StatusText = $"已更新 {row.Name}";
+                if (row.IsActive)
+                {
+                    // 刷新后必须确认配置真正进了内核：热重载被拒时内核会保留旧配置，
+                    // 只报「已更新」会让用户以为节点已经变了。
+                    var applied = await _host.ApplyActiveProfileAsync();
+                    StatusText = applied
+                        ? $"已更新 {row.Name}"
+                        : $"已下载 {row.Name}，但内核未能应用新配置（详见 core.log）";
+                }
+                else
+                {
+                    StatusText = $"已更新 {row.Name}";
+                }
             }
             else
             {
@@ -454,7 +494,7 @@ public sealed partial class ProfilesViewModel : ObservableObject
         try
         {
             var options = await _host.BuildRuntimeOptionsAsync();
-            RuntimePreview = ToDisplayText(MihomoConfigBuilder.BuildRuntimeYaml(EditorText, options));
+            RuntimePreview = ToDisplayText(await _host.GenerateRuntimeYamlAsync(options));
         }
         catch (Exception ex)
         {

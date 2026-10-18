@@ -97,7 +97,28 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
             Content = content,
         };
         using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        if (response.IsSuccessStatusCode) return;
+
+        // 内核拒绝重载时会在响应体里写明原因（例如 "path is not subpath of ... SAFE_PATHS"、
+        // "proxy ... not found"）。只抛 EnsureSuccessStatusCode 会把这个关键信息丢掉，
+        // 排查「订阅已更新但内核还在用旧配置」时完全看不出问题在哪，这里一并带上。
+        var detail = string.Empty;
+        try
+        {
+            detail = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+        detail = detail.Trim();
+        if (detail.Length > 800) detail = detail[..800] + "…";
+
+        throw new HttpRequestException(
+            string.IsNullOrEmpty(detail)
+                ? $"内核拒绝加载配置（HTTP {(int)response.StatusCode}）：{response.ReasonPhrase}"
+                : $"内核拒绝加载配置（HTTP {(int)response.StatusCode}）：{detail}",
+            null,
+            response.StatusCode);
     }
 
     public async Task<IReadOnlyDictionary<string, ProxyItem>> GetProxiesAsync(CancellationToken ct = default)

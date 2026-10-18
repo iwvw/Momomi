@@ -112,7 +112,7 @@ public sealed partial class ProfilesPage : Page
         EditorMaximizeIcon.Glyph = _editorMaximized ? "\uE73F" : "\uE740";
     }
 
-    /// <summary>编辑订阅信息：名称、订阅地址等。</summary>
+    /// <summary>编辑订阅信息：名称、订阅地址，以及挂载哪些覆写。</summary>
     private async Task ShowInfoEditorAsync(ProfileRowViewModel row)
     {
         var host = global::Momomi.App.AppHost.Host;
@@ -124,6 +124,48 @@ public sealed partial class ProfilesPage : Page
         var panel = new StackPanel { Spacing = 12, Width = 420 };
         panel.Children.Add(nameBox);
         panel.Children.Add(urlBox);
+
+        // 覆写挂载：全局启用的覆写对所有订阅生效，这里只列未全局的那些供选择。
+        var mounted = (await host.Overrides.GetProfileOverridesAsync(row.Id)).ToHashSet();
+        var candidates = (await host.Overrides.ListAsync())
+            .Where(o => !o.IsGlobal)
+            .ToList();
+
+        var checkBoxes = new List<(long Id, CheckBox Box)>();
+        if (candidates.Count > 0)
+        {
+            var list = new StackPanel { Spacing = 4 };
+            foreach (var o in candidates)
+            {
+                var box = new CheckBox
+                {
+                    Content = o.Name,
+                    IsChecked = mounted.Contains(o.Id),
+                };
+                checkBoxes.Add((o.Id, box));
+                list.Children.Add(box);
+            }
+
+            var scroll = new ScrollViewer
+            {
+                MaxHeight = 160,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = list,
+            };
+            panel.Children.Add(new TextBlock
+            {
+                Text = "覆写",
+                Margin = new Thickness(0, 4, 0, 0),
+                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            });
+            panel.Children.Add(scroll);
+            panel.Children.Add(new TextBlock
+            {
+                Text = "按勾选顺序叠加在订阅之上；全局启用的覆写在覆写页管理。",
+                TextWrapping = TextWrapping.Wrap,
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            });
+        }
 
         var dialog = new ContentDialog
         {
@@ -137,6 +179,13 @@ public sealed partial class ProfilesPage : Page
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
 
+        // 先记下原有的挂载顺序，保存时保持相对顺序不变。
+        var selectedIds = checkBoxes
+            .Where(c => c.Box.IsChecked == true)
+            .Select(c => c.Id)
+            .OrderBy(id => mounted.Contains(id) ? mounted.ToList().IndexOf(id) : int.MaxValue)
+            .ToList();
+
         var name = nameBox.Text?.Trim();
         var url = urlBox.Text?.Trim();
 
@@ -149,6 +198,8 @@ public sealed partial class ProfilesPage : Page
             try
             {
                 var imported = await host.Profiles.ImportFromUrlAsync(url, name);
+                // 新条目继承旧的覆写挂载，否则换地址后覆写会静默丢失。
+                await host.Overrides.SetProfileOverridesAsync(imported.Id, selectedIds);
                 if (row.IsActive)
                 {
                     await host.Profiles.SetActiveAsync(imported.Id);
@@ -165,6 +216,9 @@ public sealed partial class ProfilesPage : Page
         }
         else
         {
+            await host.Overrides.SetProfileOverridesAsync(row.Id, selectedIds);
+            if (row.IsActive)
+                await host.ApplyActiveProfileAsync();
             ViewModel.StatusText = "订阅信息已保存";
         }
 

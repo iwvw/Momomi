@@ -1,4 +1,5 @@
 using Momomi.Core.Models;
+using Momomi.Data;
 
 namespace Momomi.Core.Services;
 
@@ -41,6 +42,9 @@ public interface ICoreManager : IDisposable
     Task<bool> StartAsync(CancellationToken ct = default);
     Task StopAsync(CancellationToken ct = default);
     Task<bool> ReloadConfigAsync(string configPath, CancellationToken ct = default);
+
+    /// <summary>应用新配置：热重载失败时自动重启内核兜底。返回配置是否已真正生效。</summary>
+    Task<bool> ApplyConfigAsync(string configPath, CancellationToken ct = default);
     Task<bool> RestartAsync(CancellationToken ct = default);
     Task<bool> ValidateAsync(string configPath, CancellationToken ct = default);
 }
@@ -52,6 +56,7 @@ public sealed class CoreManager : ICoreManager
     private readonly IElevatedClient _elevated;
     private readonly ISystemProxyService _systemProxy;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SemaphoreSlim _restartGate = new(1, 1);
     private readonly object _streamGate = new();
     private readonly Timer _watchdog;
 
@@ -89,16 +94,31 @@ public sealed class CoreManager : ICoreManager
 
     private static void Log(string message)
     {
+        var files = new List<string>();
+
+        // 便携/安装版数据目录固定，但排查时常去 LocalApplicationData 找日志；
+        // 两处都写一份，免得「core.log 里没有今天的记录」被误当成没问题。
         try
         {
-            var path = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Momomi", "core.log");
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.AppendAllText(path, $"[{DateTime.Now:O}] {message}{Environment.NewLine}");
+            files.Add(Path.Combine(MomomiAppData.ResolveDirectory(), "core.log"));
         }
         catch
         {
+        }
+        files.Add(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Momomi", "core.log"));
+
+        foreach (var path in files)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.AppendAllText(path, $"[{DateTime.Now:O}] {message}{Environment.NewLine}");
+            }
+            catch
+            {
+            }
         }
     }
 
@@ -465,6 +485,57 @@ public sealed class CoreManager : ICoreManager
             // 重载被拒（如配置存在悬空引用：代理组引用了已删除的节点）时内核会保留旧配置，
             // 表现为「订阅已更新但旧节点仍在」。记录原因便于排查。
             Log($"[CoreManager] 配置重载失败，内核仍使用旧配置：{ex.Message}");
+            return false;
+        }
+    }
+
+    private static readonly TimeSpan RestartForReloadTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// 让内核用新配置生效，优先原地热重载。
+    ///
+    /// 热重载被拒时内核会**保留旧配置继续运行**——这正是「订阅更新了但节点列表没变」的来源。
+    /// 旧逻辑只写一行日志就返回，用户侧毫无感知。这里在重载失败后自动重启内核兜底：
+    /// 新配置在启动时还会再做一次严格校验，起不来会进入 Error 状态并给出原因，
+    /// 至少不会继续拿着旧配置假装"已生效"。
+    /// </summary>
+    public async Task<bool> ApplyConfigAsync(string configPath, CancellationToken ct = default)
+    {
+        if (_state != CoreState.Running) return true;
+        if (await ReloadConfigAsync(configPath, ct).ConfigureAwait(false)) return true;
+
+        Log("[CoreManager] 热重载失败，改为重启内核以应用新配置。");
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(RestartForReloadTimeout);
+
+            await _restartGate.WaitAsync(timeout.Token).ConfigureAwait(false);
+            try
+            {
+                await StopAsync(timeout.Token).ConfigureAwait(false);
+                if (await StartAsync(timeout.Token).ConfigureAwait(false))
+                {
+                    Log("[CoreManager] 内核已重启，新配置生效。");
+                    return true;
+                }
+
+                Log($"[CoreManager] 重启后内核未能运行：{_lastError ?? "未知原因"}");
+                return false;
+            }
+            finally
+            {
+                _restartGate.Release();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Log("[CoreManager] 重启内核超时，仍在使用旧配置。");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log($"[CoreManager] 重启内核失败：{ex.Message}");
             return false;
         }
     }

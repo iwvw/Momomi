@@ -12,8 +12,43 @@ public partial class App : Application
 
     // 单实例互斥：防止开机自启计划任务、托盘重复点击、用户多次双击等导致多开。
     private static Mutex? _instanceMutex;
-    private const string MutexName = "Momomi.SingleInstance.v1";
+    private const string MutexName = "Momomi.SingleInstance.v2";
     private const string WindowTitle = "Momomi";
+
+    /// <summary>
+    /// 参与单实例判定的程序目录。
+    ///
+    /// 互斥体按「身份」区分而不是写死一个名字：安装版的每次升级都会生成新目录（_isXXXX），
+    /// 写死同名会让「旧目录残留的实例」和「新装的实例」互斥失败，两个程序各自拉起一个内核，
+    /// 抢同一个 9090 控制端口和同一个 runtime.yaml——被挤掉的那个会把配置悄悄写坏或
+    /// 拿着旧配置继续跑，正好表现为「订阅更新了但节点没变」。
+    ///
+    /// 同一份程序则永远命中同一个互斥体：包括以管理员（提权）与普通权限先后启动（全局命名空间）。
+    /// 不看代码签名，因为安装版（Inno）与 MSIX 版签名证书不同，但两者都用同一套数据目录，不该同时跑。
+    /// </summary>
+    private static string SingleInstanceKey
+    {
+        get
+        {
+            try
+            {
+                var dir = (AppContext.BaseDirectory ?? "").TrimEnd('\\', '/').ToLowerInvariant();
+                return dir.Length == 0 ? "root" : dir;
+            }
+            catch
+            {
+                return "root";
+            }
+        }
+    }
+
+    private static string MutexNameFor(string key)
+    {
+        // 全局命名空间：同一会话内提权/非提权实例互相看得见。路径哈希进名字，避免目录名里的非法字符。
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(key)))[..16];
+        return $@"Global\{MutexName}.{hash}";
+    }
 
     private static readonly string LogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -44,7 +79,7 @@ public partial class App : Application
     {
         try
         {
-            _instanceMutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
+            _instanceMutex = new Mutex(initiallyOwned: true, MutexNameFor(SingleInstanceKey), out var createdNew);
             if (createdNew) return true;
             _instanceMutex.Dispose();
             _instanceMutex = null;
@@ -57,16 +92,53 @@ public partial class App : Application
         }
     }
 
-    /// <summary>通知已有实例把窗口/迷你面板带到前台。</summary>
+    /// <summary>
+    /// 通知已有实例把窗口或迷你面板带到前台。
+    ///
+    /// 按固定标题 FindWindow 在这里不可行：隐藏到托盘时主窗口会改标题（常驻流量），
+    /// 迷你面板则是无标题的置顶小窗，按标题查不到就会悄无声息地什么都不做。
+    /// 改成枚举顶层窗口，按「进程名 + 标题」定位。
+    /// </summary>
     private static void ActivateExistingInstance()
     {
         try
         {
-            var hwnd = FindWindow(null, WindowTitle);
-            if (hwnd != IntPtr.Zero)
+            var own = Environment.ProcessId;
+            IntPtr fallback = IntPtr.Zero;
+
+            EnumWindows((hwnd, _) =>
             {
-                ShowWindow(hwnd, SW_RESTORE);
-                SetForegroundWindow(hwnd);
+                try
+                {
+                    GetWindowThreadProcessId(hwnd, out var pid);
+                    if (pid == own || !IsWindowVisible(hwnd)) return true;
+
+                    var owner = GetProcessName(pid);
+                    if (!string.Equals(owner, "Momomi", StringComparison.OrdinalIgnoreCase)) return true;
+
+                    var title = GetWindowTitle(hwnd);
+                    if (title.Contains(WindowTitle, StringComparison.OrdinalIgnoreCase))
+                    {
+                        ShowWindow(hwnd, SW_RESTORE);
+                        SetForegroundWindow(hwnd);
+                        fallback = IntPtr.Zero;
+                        return false;
+                    }
+
+                    // 迷你面板标题为空：记下来兜底（直接点托盘图标时它就是用户想看到的那个）。
+                    if (fallback == IntPtr.Zero) fallback = hwnd;
+                    return true;
+                }
+                catch
+                {
+                    return true;
+                }
+            }, IntPtr.Zero);
+
+            if (fallback != IntPtr.Zero)
+            {
+                ShowWindow(fallback, SW_RESTORE);
+                SetForegroundWindow(fallback);
             }
         }
         catch
@@ -74,10 +146,46 @@ public partial class App : Application
         }
     }
 
+    private static string? GetProcessName(uint pid)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById((int)pid);
+            return process.ProcessName;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string GetWindowTitle(IntPtr hwnd)
+    {
+        var length = GetWindowTextLength(hwnd);
+        if (length <= 0) return "";
+        var buffer = new System.Text.StringBuilder(length + 1);
+        GetWindowText(hwnd, buffer, buffer.Capacity);
+        return buffer.ToString();
+    }
+
     private const int SW_RESTORE = 9;
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);

@@ -177,6 +177,18 @@
                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                    Text="{x:Bind ExpireText}" />
                                     </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="6"
+                                                Visibility="{x:Bind HasOverrides, Converter={StaticResource BoolToVisibility}}">
+                                        <FontIcon FontSize="10" VerticalAlignment="Center"
+                                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                  Glyph="&#xE70F;" />
+                                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                   ToolTipService.ToolTip="{x:Bind OverrideTooltip}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Text="{x:Bind OverrideText}" />
+                                    </StackPanel>
                                     <ProgressBar Maximum="100"
                                                  Value="{x:Bind UsagePercent}"
                                                  Height="4"

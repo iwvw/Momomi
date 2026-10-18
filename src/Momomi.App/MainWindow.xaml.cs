@@ -594,28 +594,95 @@ public sealed partial class MainWindow : Window
     public void ToggleMiniWindow()
     {
         EnsureMiniWindow();
-        _miniWindow!.ToggleVisible();
+        if (_miniWindow is null)
+        {
+            // 不在 UI 线程时创建是排队执行的，这次点击直接丢弃，避免操作未初始化的窗口。
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_miniWindow is null) return;
+                _miniWindow.ToggleVisible();
+                UpdateTrayState();
+            });
+            return;
+        }
+
+        _miniWindow.ToggleVisible();
         UpdateTrayState();
     }
 
     public void ShowMiniPanel()
     {
         EnsureMiniWindow();
-        _miniWindow!.Show();
+        if (_miniWindow is null)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_miniWindow is null) return;
+                _miniWindow.Show();
+                UpdateTrayState();
+            });
+            return;
+        }
+
+        _miniWindow.Show();
         UpdateTrayState();
     }
 
-    /// <summary>惰性创建迷你窗口并订阅关闭通知；拖拽收起关闭后会置空引用，下次调用重建。</summary>
+    /// <summary>
+    /// 惰性创建迷你窗口并订阅关闭通知；拖拽收起关闭后会置空引用，下次调用重建。
+    ///
+    /// 必须在 UI 线程上执行：迷你面板、窗口显示与托盘点击可能分别来自后台线程的定时器、
+    /// 内核事件与全局热键，而 WinUI 只允许在创建该窗口的线程上构建可视化树。
+    /// </summary>
     private void EnsureMiniWindow()
     {
         if (_miniWindow is not null) return;
+        if (DispatcherQueue.HasThreadAccess)
+            CreateMiniWindow();
+        else
+            DispatcherQueue.TryEnqueue(CreateMiniWindow);
+    }
+
+    private void CreateMiniWindow()
+    {
+        if (_miniWindow is not null) return;
         var mini = new MiniWindow();
+        _miniWindow = mini;
+        // 窗口可能在主题切换之后才创建（预热、托盘点击），继承当前主题。
+        var theme = global::Momomi.App.App.CurrentTheme;
+        if (!string.Equals(theme, "default", StringComparison.OrdinalIgnoreCase))
+        {
+            try { mini.ApplyTheme(theme); } catch { }
+        }
+        // 首个迷你窗口预热完成后再后台创建下一个：MiniWindow 的构造会解析整份 XAML，
+        // 如果在界面线程上同步回绕创建，用户点一次托盘图标就会卡一下。
         mini.Dismissed += (_, _) =>
         {
             _miniWindow = null;
             UpdateTrayState();
+            DispatcherQueue.TryEnqueue(WarmupNextMiniWindow);
         };
-        _miniWindow = mini;
+    }
+
+    private bool _warmingMiniWindow;
+
+    /// <summary>在后台构建下一个迷你窗口，保证隐藏后再次呼出时不再付出构造开销。</summary>
+    private void WarmupNextMiniWindow()
+    {
+        if (_miniWindow is not null || _warmingMiniWindow) return;
+        _warmingMiniWindow = true;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _warmingMiniWindow = false;
+            try
+            {
+                if (_miniWindow is null && !_forceExit) CreateMiniWindow();
+            }
+            catch (Exception ex)
+            {
+                global::Momomi.App.App.WriteLog($"预热迷你窗口失败：{ex}");
+            }
+        });
     }
 
     public void ApplyMiniPanelTheme(string theme) => _miniWindow?.ApplyTheme(theme);
@@ -900,6 +967,7 @@ public sealed partial class MainWindow : Window
             case "connections": NavFrame.Navigate(typeof(ConnectionsPage)); break;
             case "rules": NavFrame.Navigate(typeof(RulesPage)); break;
             case "profiles": NavFrame.Navigate(typeof(ProfilesPage)); break;
+            case "overrides": NavFrame.Navigate(typeof(OverridesPage)); break;
             case "traffic": NavFrame.Navigate(typeof(TrafficPage)); break;
             case "network": NavFrame.Navigate(typeof(NetworkPage)); break;
             case "logs": NavFrame.Navigate(typeof(LogsPage)); break;

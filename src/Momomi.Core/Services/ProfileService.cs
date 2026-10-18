@@ -292,9 +292,25 @@ public sealed class ProfileService : IProfileService
             await _repo.UpdateContentAsync(id, meta.UserInfo).ConfigureAwait(false);
             return true;
         }
+        catch (Exception ex)
+        {
+            // 失败时返回 false 让调用方提示「刷新失败」，但网络上/解析上的具体原因要留下来，
+            // 否则只会看到「更新了但没变化」，无从判断是订阅源挂了还是配置内容不合法。
+            Log($"[ProfileService] 刷新订阅「{item.Name}」失败：{ex.Message}");
+            return false;
+        }
+    }
+
+    private static void Log(string message)
+    {
+        try
+        {
+            var path = Path.Combine(MomomiAppData.ResolveDirectory(), "core.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.AppendAllText(path, $"[{DateTime.Now:O}] {message}{Environment.NewLine}");
+        }
         catch
         {
-            return false;
         }
     }
 

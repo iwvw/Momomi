@@ -76,6 +76,24 @@ public sealed class MomomiDatabase
                     download INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_conn_ts ON connection_history(ts);
+
+                CREATE TABLE IF NOT EXISTS override_file (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    kind TEXT NOT NULL DEFAULT 'yaml',
+                    source TEXT,
+                    file_path TEXT NOT NULL,
+                    is_global INTEGER NOT NULL DEFAULT 0,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS profile_override (
+                    profile_id INTEGER NOT NULL,
+                    override_id INTEGER NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (profile_id, override_id)
+                );
                 """;
             await cmd.ExecuteNonQueryAsync();
             return 0;
