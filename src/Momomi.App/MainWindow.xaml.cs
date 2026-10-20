@@ -588,10 +588,18 @@ public sealed partial class MainWindow : Window
     private void OnTrayLeftClick()
     {
         // H.NotifyIcon 的 LeftClickCommand 只在真实左键单击时触发（右键菜单不触发），无需再区分。
-        ToggleMiniWindow();
+        //
+        // 光标此刻正停在托盘图标上，所以在事件线程上立刻取显示器，作为面板的落点。
+        // 不能等排到 UI 线程再取：那期间用户可能已经把鼠标移开了。
+        var monitor = Mini.DpiLayout.MonitorForCursor();
+        Dispatch(() => ToggleMiniWindow(monitor));
     }
 
+    /// <summary>切换迷你面板。默认按托盘图标（光标）所在屏幕定位。</summary>
     public void ToggleMiniWindow()
+        => ToggleMiniWindow(Mini.DpiLayout.MonitorForForegroundWindow());
+
+    public void ToggleMiniWindow(IntPtr monitor)
     {
         EnsureMiniWindow();
         if (_miniWindow is null)
@@ -600,17 +608,20 @@ public sealed partial class MainWindow : Window
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (_miniWindow is null) return;
-                _miniWindow.ToggleVisible();
+                _miniWindow.ToggleVisible(monitor);
                 UpdateTrayState();
             });
             return;
         }
 
-        _miniWindow.ToggleVisible();
+        _miniWindow.ToggleVisible(monitor);
         UpdateTrayState();
     }
 
     public void ShowMiniPanel()
+        => ShowMiniPanel(Mini.DpiLayout.MonitorForTrayTaskbar());
+
+    public void ShowMiniPanel(IntPtr monitor)
     {
         EnsureMiniWindow();
         if (_miniWindow is null)
@@ -618,13 +629,13 @@ public sealed partial class MainWindow : Window
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (_miniWindow is null) return;
-                _miniWindow.Show();
+                _miniWindow.Show(monitor);
                 UpdateTrayState();
             });
             return;
         }
 
-        _miniWindow.Show();
+        _miniWindow.Show(monitor);
         UpdateTrayState();
     }
 

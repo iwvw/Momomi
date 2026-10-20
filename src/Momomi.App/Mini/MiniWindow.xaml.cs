@@ -54,7 +54,10 @@ public sealed partial class MiniWindow : Window
         WindowChrome.RemoveNonClientFrame(_hwnd);
         WindowChrome.SetTopmost(_hwnd);
 
-        _targetRect = DpiLayout.ComputeBottomRight(_appWindow, DesignWidth, DesignHeight, MarginRight, MarginBottom);
+        // 初始位置只用于创建窗口，真正呼出时会按托盘图标所在屏幕重算。
+        _targetRect = DpiLayout.ComputeBottomRight(
+            _appWindow, DesignWidth, DesignHeight, MarginRight, MarginBottom,
+            DpiLayout.MonitorForTrayTaskbar());
         _appWindow.MoveAndResize(_targetRect);
 
         // 窗口创建后默认可见：立即移到屏幕外并隐藏，避免预热/首次构造时闪出。
@@ -177,25 +180,55 @@ public sealed partial class MiniWindow : Window
 
     public bool IsVisible => _state is VisState.Showing or VisState.Shown;
 
-    public void ToggleVisible()
+    public void ToggleVisible() => ToggleVisible(IntPtr.Zero);
+
+    /// <summary>
+    /// 切换显示。显示时按 <paramref name="monitor"/> 指定的屏幕定位（IntPtr.Zero 表示跟随窗口自身）。
+    /// </summary>
+    public void ToggleVisible(IntPtr monitor)
     {
         if (_state is VisState.Showing or VisState.Shown) Hide();
-        else Show();
+        else Show(monitor);
     }
 
-    public void Show()
+    /// <summary>
+    /// 重算迷你面板的右下角位置。
+    /// </summary>
+    /// <param name="monitor">
+    /// 目标显示器。呼出时传托盘图标所在屏幕，收起时传 IntPtr.Zero（跟随窗口自身）。
+    /// </param>
+    private void UpdateTargetRect(IntPtr monitor)
+    {
+        _targetRect = DpiLayout.ComputeBottomRight(
+            _appWindow, DesignWidth, DesignHeight, MarginRight, MarginBottom, monitor);
+    }
+
+    public void Show() => Show(IntPtr.Zero);
+
+    /// <summary>
+    /// 显示面板。<paramref name="monitor"/> 为目标显示器（托盘图标所在屏幕），
+    /// IntPtr.Zero 表示跟随窗口当前所在屏幕。
+    /// </summary>
+    public void Show(IntPtr monitor)
     {
         bool wasHidden = _state is VisState.Hidden;
         _state = VisState.Showing;
 
-        _targetRect = DpiLayout.ComputeBottomRight(_appWindow, DesignWidth, DesignHeight, MarginRight, MarginBottom);
+        // 每次呼出都重新定位：托盘图标可能已经换到另一块屏幕（改缩放后同样需要）。
+        UpdateTargetRect(monitor);
         var hiddenRect = SlideMath.Hidden(_targetRect, SlideDirection.BottomUp);
 
         Windows.Graphics.RectInt32 start = hiddenRect;
         if (!wasHidden)
         {
             var current = DpiLayout.GetCurrentRect(_hwnd);
-            if (current.Width > 0 && current.Height > 0) start = current;
+            // 面板已经在别的位置显示着（例如按热键再呼出）：就地展开。
+            // 但如果它当前在另一块屏幕上，就不要横跨两个屏幕滑过去——直接在新屏幕上重新滑出。
+            if (current.Width > 0 && current.Height > 0
+                && DpiLayout.IsWithinWorkArea(monitor, current))
+            {
+                start = current;
+            }
         }
         else
         {
@@ -228,7 +261,8 @@ public sealed partial class MiniWindow : Window
 
         _statsTimer.Stop();
 
-        _targetRect = DpiLayout.ComputeBottomRight(_appWindow, DesignWidth, DesignHeight, MarginRight, MarginBottom);
+        // 收起跟随窗口自身所在屏幕：此时光标可能已经移走，动画不该跨屏跳。
+        UpdateTargetRect(IntPtr.Zero);
         var hiddenRect = SlideMath.Hidden(_targetRect, SlideDirection.BottomUp);
 
         var current = DpiLayout.GetCurrentRect(_hwnd);

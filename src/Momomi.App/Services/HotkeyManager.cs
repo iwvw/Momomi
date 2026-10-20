@@ -129,7 +129,8 @@ public sealed partial class HotkeyManager : IDisposable
         HotkeyAction.ShowWindow => () => _window.DispatcherQueue.TryEnqueue(_window.ShowAndActivate),
         HotkeyAction.ToggleSystemProxy => () => _window.DispatcherQueue.TryEnqueue(_window.HotkeyToggleSystemProxy),
         HotkeyAction.ToggleTun => () => _window.DispatcherQueue.TryEnqueue(_window.HotkeyToggleTun),
-        HotkeyAction.ToggleMiniPanel => () => _window.DispatcherQueue.TryEnqueue(_window.ToggleMiniWindow),
+        HotkeyAction.ToggleMiniPanel => () => _window.DispatcherQueue.TryEnqueue(
+            () => _window.ToggleMiniWindow(Mini.DpiLayout.MonitorForForegroundWindow())),
         HotkeyAction.ModeRule => () => _window.DispatcherQueue.TryEnqueue(() => _ = _window.HotkeySelectModeAsync(0)),
         HotkeyAction.ModeGlobal => () => _window.DispatcherQueue.TryEnqueue(() => _ = _window.HotkeySelectModeAsync(1)),
         HotkeyAction.ModeDirect => () => _window.DispatcherQueue.TryEnqueue(() => _ = _window.HotkeySelectModeAsync(2)),

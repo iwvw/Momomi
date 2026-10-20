@@ -325,7 +325,11 @@ public partial class App : Application
             await Task.Delay(800).ConfigureAwait(false);
             var main = Main;
             if (main is not null)
-                main.DispatcherQueue.TryEnqueue(() => main.ShowMiniPanel());
+            {
+                // 开机只显示迷你面板时没有托盘点击事件，用主任务栏所在屏幕作为落点。
+                var monitor = Mini.DpiLayout.MonitorForTrayTaskbar();
+                main.DispatcherQueue.TryEnqueue(() => main.ShowMiniPanel(monitor));
+            }
         }
         catch (Exception ex)
         {
