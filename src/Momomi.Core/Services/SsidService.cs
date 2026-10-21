@@ -94,12 +94,17 @@ public sealed class SsidService : IDisposable
             {
                 _host.SystemProxy.Disable();
                 _proxyPausedBySsid = true;
+                // 注意：这里不改写 ui.systemProxyDesired —— 暂停是临时策略，
+                // 用户的「希望开启」意图应保持为 true，离开该网络后要能恢复。
             }
         }
         else if (_proxyPausedBySsid)
         {
             // 离开暂停网络：恢复之前由本服务关闭的系统代理。
-            _host.SystemProxy.Enable("127.0.0.1:" + EffectiveProxyPort(), DefaultBypass);
+            // 端口必须用混合端口（core.mixedPort），不能用 DownloadProxy.EffectivePort：
+            // 后者是「下载内核/订阅时用的代理」，可能被用户设成别的客户端端口。
+            var port = await _host.Settings.GetIntAsync("core.mixedPort", 7890).ConfigureAwait(false);
+            _host.SystemProxy.Enable($"127.0.0.1:{port}", SystemProxyState.Bypass);
             _proxyPausedBySsid = false;
         }
 
@@ -125,18 +130,4 @@ public sealed class SsidService : IDisposable
             }
         }
     }
-
-    private static int EffectiveProxyPort()
-    {
-        try
-        {
-            return DownloadProxy.EffectivePort;
-        }
-        catch
-        {
-            return 7890;
-        }
-    }
-
-    private const string DefaultBypass = "localhost;127.*;10.*;172.16.*;192.168.*;<local>";
 }

@@ -688,7 +688,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             if (enabled)
             {
                 var port = await _host.Settings.GetIntAsync("core.mixedPort", 7890);
-                _host.SystemProxy.Enable($"127.0.0.1:{port}", "localhost;127.*;10.*;172.16.*;192.168.*");
+                _host.SystemProxy.Enable($"127.0.0.1:{port}", SystemProxyState.Bypass);
                 StatusText = $"系统代理已开启（127.0.0.1:{port}）";
             }
             else
@@ -696,6 +696,9 @@ public sealed partial class SettingsViewModel : ObservableObject
                 _host.SystemProxy.Disable();
                 StatusText = "系统代理已关闭";
             }
+
+            // 与 ModeSelector 路径一致：记录意图，供下次启动恢复。
+            await SystemProxyState.SetDesiredAsync(_host.Settings, enabled);
         }
         catch (Exception ex)
         {

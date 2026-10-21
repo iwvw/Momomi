@@ -452,13 +452,9 @@ public sealed class CoreManager : ICoreManager
         try
         {
             var port = _settings.GetIntAsync("core.mixedPort", 7890).GetAwaiter().GetResult();
-            var expected = $"127.0.0.1:{port}";
-            if (_systemProxy.IsEnabled()
-                && string.Equals(_systemProxy.CurrentServer(), expected, StringComparison.OrdinalIgnoreCase))
-            {
-                _systemProxy.Disable();
-                return true;
-            }
+            // 交给 SystemProxyService 判断：同时兼容 "127.0.0.1:port"、
+            // 分协议写法（http=...;https=...）与 PAC 回环地址。
+            return _systemProxy.ClearOwnProxy(port);
         }
         catch
         {
@@ -473,7 +469,14 @@ public sealed class CoreManager : ICoreManager
         try
         {
             var port = _settings.GetIntAsync("core.mixedPort", 7890).GetAwaiter().GetResult();
-            _systemProxy.Enable($"127.0.0.1:{port}", "localhost;127.*;10.*;172.16.*;192.168.*");
+            // 内核重启（同一进程内）的恢复：无条件写回手动代理。
+            // PAC 模式由 PacServer 常驻监听，AutoConfigURL 在 StopAsync 时被清掉，
+            // 这里统一回到手动代理即可；App 层随后会按真实开关状态同步界面。
+            _systemProxy.Enable($"127.0.0.1:{port}", SystemProxyState.Bypass);
+
+            // 这一步是"重启内核后把代理开回来"，属于用户意图为开启的情况，
+            // 同步意图，避免下次启动时按旧值判断。
+            _ = SystemProxyState.SetDesiredAsync(_settings, true);
         }
         catch
         {

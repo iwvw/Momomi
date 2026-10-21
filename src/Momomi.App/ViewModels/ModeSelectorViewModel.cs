@@ -223,6 +223,9 @@ public sealed partial class ModeSelectorViewModel : ObservableObject, IDisposabl
             {
                 _host.SystemProxy.Disable();
             }
+
+            // 记录用户意图，供下次启动恢复（与 core.tun 对称）。
+            await SystemProxyState.SetDesiredAsync(_host.Settings, enabled).ConfigureAwait(false);
         }
         catch
         {

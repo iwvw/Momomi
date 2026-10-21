@@ -489,11 +489,80 @@ public partial class App : Application
             // 先应用当前订阅生成运行时配置，再启动内核。
             await host.ApplyActiveProfileAsync().ConfigureAwait(false);
             await EnsureKernelInstalledAsync(host).ConfigureAwait(false);
-            await host.Core.StartAsync().ConfigureAwait(false);
+
+            // 内核还没起来时，注册表里若残留着指向本应用端口的代理，等于断网
+            // （崩溃/强杀后常见）。必须在启动内核之前处理：此时"指向自己"基本可判定为残留。
+            await PrepareSystemProxyBeforeStartAsync(host).ConfigureAwait(false);
+
+            var started = await host.Core.StartAsync().ConfigureAwait(false);
+
+            // 内核就绪后按「用户意图」恢复系统代理（含上次崩溃/升级重启前的状态）。
+            if (started) await RestoreSystemProxyAsync(host).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             WriteLog($"自动启动内核失败：{ex}");
+        }
+    }
+
+    /// <summary>
+    /// 启动内核之前处理系统代理：补记意图 + 清理崩溃残留。
+    /// 这两件事都必须在「内核未运行」的窗口期完成，否则无法区分
+    /// 「上次崩溃遗留的坏代理」和「用户本来开着的正常代理」。
+    /// </summary>
+    private static async Task PrepareSystemProxyBeforeStartAsync(MomomiHost host)
+    {
+        try
+        {
+            var port = await host.Settings.GetIntAsync("core.mixedPort", 7890).ConfigureAwait(false);
+
+            // 顺序很重要：先按现状补记意图（首次升级时没有记录），再清理残留。
+            // 反过来会导致清掉之后无从判断用户本来是不是开着。
+            if (await SystemProxyState.BootstrapDesiredIfMissingAsync(host.Settings, host.SystemProxy, port)
+                    .ConfigureAwait(false))
+            {
+                WriteLog("首次记录系统代理意图（依据升级前的注册表状态）");
+            }
+
+            if (SystemProxyState.ClearStaleProxy(host.SystemProxy, port))
+                WriteLog($"已清理上次异常退出遗留的系统代理（127.0.0.1:{port}）——内核此前未运行，该代理只会导致断网");
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"启动前处理系统代理失败：{ex}");
+        }
+    }
+
+    /// <summary>
+    /// 按持久化的用户意图恢复系统代理（内核已就绪后调用）。
+    ///
+    /// 退出时一律会关掉自己的代理（避免指向已关闭的端口），因此「上次开着」这个状态
+    /// 必须靠 <c>ui.systemProxyDesired</c> 记录并在启动时重放，否则每次重启都要手动再开一次。
+    /// </summary>
+    private static async Task RestoreSystemProxyAsync(MomomiHost host)
+    {
+        try
+        {
+            var port = await host.Settings.GetIntAsync("core.mixedPort", 7890).ConfigureAwait(false);
+
+            var restored = await SystemProxyState.RestoreAsync(
+                host.Settings, host.SystemProxy, port,
+                applyPac: () =>
+                {
+                    // PAC 模式：本地服务器监听随机端口，脚本指向混合端口。
+                    if (!host.Pac.Start(port)) return false;
+                    return host.SystemProxy.EnablePac(host.Pac.PacUrl ?? $"http://127.0.0.1:{port}/proxy.pac");
+                }).ConfigureAwait(false);
+
+            if (restored)
+                WriteLog("已按上次状态恢复系统代理");
+
+            // 通知界面刷新开关与托盘图标。
+            ViewModels.AppSignals.RaiseSwitchesChanged();
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"恢复系统代理失败：{ex}");
         }
     }
 
