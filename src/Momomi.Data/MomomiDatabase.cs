@@ -16,7 +16,11 @@ public sealed class MomomiDatabase
         {
             DataSource = databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
+            // 不要用 SqliteCacheMode.Shared：共享缓存是表级锁，并发读写下会立刻返回
+            // SQLITE_LOCKED（"database table is locked"），而 busy_timeout 对它无效
+            // （只对 SQLITE_BUSY 生效）。本应用并发很真实：窗口尺寸防抖写、各开关写设置、
+            // 覆写挂载批量写，同时各页在读——用默认的私有缓存 + WAL 才是正确组合。
+            Cache = SqliteCacheMode.Default,
         }.ToString();
     }
 
@@ -112,17 +116,33 @@ public sealed class MomomiDatabase
 
     public async Task<T> ExecuteWriteAsync<T>(Func<SqliteConnection, Task<T>> action)
     {
+        // 进程内串行化写操作，再对偶发的 SQLITE_BUSY（外部进程/检查点抢占）做有限重试。
         await _writeLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var conn = await OpenAsync().ConfigureAwait(false);
-            return await action(conn).ConfigureAwait(false);
+            const int maxAttempts = 3;
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    await using var conn = await OpenAsync().ConfigureAwait(false);
+                    return await action(conn).ConfigureAwait(false);
+                }
+                catch (SqliteException ex) when (attempt < maxAttempts && IsTransient(ex))
+                {
+                    await Task.Delay(50 * attempt).ConfigureAwait(false);
+                }
+            }
         }
         finally
         {
             _writeLock.Release();
         }
     }
+
+    /// <summary>是否属于"稍后重试就能成功"的 SQLite 错误（BUSY / LOCKED）。</summary>
+    private static bool IsTransient(SqliteException ex)
+        => ex.SqliteErrorCode is 5 or 6; // SQLITE_BUSY / SQLITE_LOCKED
 
     public async Task<T> ExecuteReadAsync<T>(Func<SqliteConnection, Task<T>> action)
     {

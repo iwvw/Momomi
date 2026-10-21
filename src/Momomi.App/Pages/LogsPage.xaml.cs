@@ -4,7 +4,7 @@ using Momomi.App.ViewModels;
 
 namespace Momomi.App.Pages;
 
-public sealed partial class LogsPage : Page
+public sealed partial class LogsPage : Page, IPageLifecycle
 {
     public LogsViewModel ViewModel { get; }
 
@@ -34,6 +34,9 @@ public sealed partial class LogsPage : Page
         base.OnNavigatedFrom(e);
         ViewModel.Detach();
     }
+
+    /// <inheritdoc />
+    public void DetachFromHost() => ViewModel.Detach();
 
     private void Level_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {

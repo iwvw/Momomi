@@ -297,16 +297,46 @@ public sealed partial class OverridesViewModel : ObservableObject
 
             // GenerateRuntimeYamlAsync 已经把配置规范化（emoji 不转义），
             // 拿它当基线即可与合并结果直接对比，不会出现纯格式的假改动。
-            var baseYaml = await _host.GenerateRuntimeYamlAsync(options);
+            //
+            // 注意：这两步都会解析订阅原文。订阅若是被用户在编辑器里存成了非法 YAML，
+            // 这里会抛 YamlOverrideException，而调用方 OverridesPage.EditorTabs_SelectionChanged
+            // 是 async void —— 异常逃出去就是进程级崩溃。所以整段都要兜住。
+            string baseYaml;
+            try
+            {
+                baseYaml = await _host.GenerateRuntimeYamlAsync(options);
+            }
+            catch (Exception ex)
+            {
+                _diff = Array.Empty<DiffLine>();
+                DiffLines.Clear();
+                DiffSummary = "";
+                HasDiff = false;
+                SetEditorError($"无法生成预览：{ex.Message}");
+                return;
+            }
 
             // 除当前这条之外的其它生效覆写（全局 + 挂载）。
             var others = (await _host.Overrides.ResolveActiveDocumentsAsync(active?.Id))
                 .Where(d => d.Name != _editing?.Name)
                 .ToList();
 
-            var withOthers = others.Count == 0
-                ? baseYaml
-                : YamlOverrideMerger.Apply(baseYaml, others);
+            string withOthers;
+            try
+            {
+                withOthers = others.Count == 0
+                    ? baseYaml
+                    : YamlOverrideMerger.Apply(baseYaml, others);
+            }
+            catch (Exception ex)
+            {
+                _diff = Array.Empty<DiffLine>();
+                DiffLines.Clear();
+                DiffSummary = "";
+                HasDiff = false;
+                SetEditorError($"其它覆写合并失败：{ex.Message}");
+                return;
+            }
 
             OtherOverridesHint = others.Count == 0
                 ? ""
@@ -392,7 +422,7 @@ public sealed partial class OverridesViewModel : ObservableObject
         };
         var box = new Microsoft.UI.Xaml.Controls.TextBox { Text = row.Name };
         dialog.Content = box;
-        if (await dialog.ShowAsync() != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) return;
+        if (await Momomi.App.Pages.DialogGuard.ShowAsync(dialog) != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) return;
 
         var name = box.Text?.Trim();
         if (string.IsNullOrEmpty(name)) return;
@@ -416,7 +446,7 @@ public sealed partial class OverridesViewModel : ObservableObject
             DefaultButton = Microsoft.UI.Xaml.Controls.ContentDialogButton.Close,
             XamlRoot = global::Momomi.App.App.Main?.Content?.XamlRoot,
         };
-        if (await dialog.ShowAsync() != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) return;
+        if (await Momomi.App.Pages.DialogGuard.ShowAsync(dialog) != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) return;
 
         await _host.Overrides.DeleteAsync(row.Id);
         StatusText = $"已删除 {row.Name}";

@@ -88,9 +88,9 @@ public sealed partial class ProfileRowViewModel : ObservableObject
             UsageText = "";
         }
 
-        ExpireText = info is null || info.Expire <= 0
-            ? (info is null ? "" : "长期有效")
-            : $"到期 {DateTimeOffset.FromUnixTimeSeconds(info.Expire).LocalDateTime:yyyy-MM-dd}";
+        ExpireText = info is null
+            ? ""
+            : SubscriptionUsage.FormatExpire(info.Expire);
     }
 
     private static string FormatSubscriptionInfo(string? raw)
@@ -408,7 +408,7 @@ public sealed partial class ProfilesViewModel : ObservableObject
         };
         var box = new Microsoft.UI.Xaml.Controls.TextBox { Text = row.Name };
         dialog.Content = box;
-        var result = await dialog.ShowAsync();
+        var result = await Momomi.App.Pages.DialogGuard.ShowAsync(dialog);
         if (result != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) return;
 
         var name = box.Text?.Trim();
@@ -463,26 +463,37 @@ public sealed partial class ProfilesViewModel : ObservableObject
         if (_editorRow is null) return;
         var row = _editorRow;
 
-        var ok = await _host.Profiles.SaveContentAsync(row.Id, ToStorageText(EditorText));
-        if (!ok)
+        try
         {
-            StatusText = "保存失败";
-            return;
-        }
+            var ok = await _host.Profiles.SaveContentAsync(row.Id, ToStorageText(EditorText));
+            if (!ok)
+            {
+                StatusText = "保存失败";
+                return;
+            }
 
-        if (row.IsActive)
+            if (row.IsActive)
+            {
+                // 应用失败（内核起不来、配置被拒）不应让整个保存流程炸掉，
+                // 至少要把「已保存但没生效」说清楚。
+                var applied = await _host.ApplyActiveProfileAsync();
+                StatusText = applied ? "已保存并热重载" : "已保存，但内核未能应用新配置（详见 core.log）";
+            }
+            else
+            {
+                StatusText = "已保存";
+            }
+
+            await LoadAsync();
+
+            if (row.IsActive && EditorTabIndex == 1) await RefreshRuntimePreviewAsync();
+        }
+        catch (Exception ex)
         {
-            await _host.ApplyActiveProfileAsync();
-            StatusText = "已保存并热重载";
+            // SaveContentAsync 现在会对非法 YAML 抛 InvalidOperationException；
+            // 其余（磁盘写失败等）也一并在这里落地，不让异常冒到 async void 的调用方。
+            StatusText = $"保存失败：{ex.Message}";
         }
-        else
-        {
-            StatusText = "已保存";
-        }
-
-        await LoadAsync();
-
-        if (row.IsActive && EditorTabIndex == 1) await RefreshRuntimePreviewAsync();
     }
 
     /// <summary>生成运行时配置文本：订阅原始内容叠加全局注入项（端口/DNS/TUN 等）。</summary>

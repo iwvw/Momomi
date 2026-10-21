@@ -152,13 +152,48 @@ public static class MihomoConfigBuilder
     /// <summary>
     /// 从运行时配置读取 proxy-groups 的声明顺序。
     /// mihomo 的 /proxies 返回 JSON 对象，键顺序不可靠，需要以此还原配置顺序。
+    ///
+    /// 结果按「路径 + 最后写入时间 + 文件长度」缓存：这个方法在代理页/首页/迷你面板
+    /// 每次重建列表时都会被调用，而它要读并解析整份 runtime.yaml（可能上千行）。
+    /// 配置重写后时间戳变化，缓存自然失效，不需要额外的失效通知。
     /// </summary>
     public static IReadOnlyList<string> ReadProxyGroupOrder(string yamlPath)
     {
         try
         {
-            if (!File.Exists(yamlPath)) return Array.Empty<string>();
+            var info = new FileInfo(yamlPath);
+            if (!info.Exists) return Array.Empty<string>();
 
+            var key = (yamlPath, info.LastWriteTimeUtc, info.Length);
+            lock (GroupOrderCacheGate)
+            {
+                if (GroupOrderCacheKey == key && GroupOrderCache is not null)
+                    return GroupOrderCache;
+            }
+
+            var order = ParseProxyGroupOrder(yamlPath);
+
+            lock (GroupOrderCacheGate)
+            {
+                GroupOrderCacheKey = key;
+                GroupOrderCache = order;
+            }
+            return order;
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    private static readonly object GroupOrderCacheGate = new();
+    private static (string Path, DateTime WriteTime, long Length) GroupOrderCacheKey = default;
+    private static IReadOnlyList<string>? GroupOrderCache;
+
+    private static IReadOnlyList<string> ParseProxyGroupOrder(string yamlPath)
+    {
+        try
+        {
             var yaml = new YamlStream();
             using var reader = new StreamReader(yamlPath);
             yaml.Load(reader);

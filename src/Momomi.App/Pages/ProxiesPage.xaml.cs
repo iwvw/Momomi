@@ -5,7 +5,7 @@ using Momomi.App.ViewModels;
 
 namespace Momomi.App.Pages;
 
-public sealed partial class ProxiesPage : Page
+public sealed partial class ProxiesPage : Page, IPageLifecycle
 {
     public ProxiesViewModel ViewModel { get; }
 
@@ -29,6 +29,9 @@ public sealed partial class ProxiesPage : Page
         base.OnNavigatedFrom(e);
         ViewModel.Detach();
     }
+
+    /// <inheritdoc />
+    public void DetachFromHost() => ViewModel.Detach();
 
     private void Node_Click(object sender, RoutedEventArgs e)
     {

@@ -22,7 +22,34 @@ internal static class WindowChrome
 
     private const uint WM_NCCALCSIZE = 0x0083;
 
-    private static SUBCLASSPROC? _subclassProc;
+    /// <summary>
+    /// 每个窗口自己的子类化委托。
+    ///
+    /// 原来是 static 字段：迷你窗口是「收起后关闭、下次重建」的，
+    /// 新窗口 SetWindowSubclass 时会覆盖掉旧委托，而旧窗口若尚未真正销毁，
+    /// 其子类化入口仍指向那个已可回收的委托——原生回调打到已释放的 thunk 就是进程崩溃。
+    /// 改成按窗口句柄各存一份，窗口销毁后再移除。
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, SUBCLASSPROC> SubclassProcs = new();
+
+    public static void RemoveNonClientFrame(IntPtr hwnd)
+    {
+        var proc = new SUBCLASSPROC(SubclassProc);
+        SubclassProcs[hwnd] = proc;
+        if (!SetWindowSubclass(hwnd, proc, 1, IntPtr.Zero))
+        {
+            SubclassProcs.TryRemove(hwnd, out _);
+        }
+    }
+
+    /// <summary>窗口关闭前解挂子类化，释放对应委托。</summary>
+    public static void RemoveSubclass(IntPtr hwnd)
+    {
+        if (SubclassProcs.TryRemove(hwnd, out var proc))
+        {
+            try { _ = RemoveWindowSubclass(hwnd, proc, 1); } catch { }
+        }
+    }
 
     public static void SetToolWindow(IntPtr hwnd)
     {
@@ -102,12 +129,6 @@ internal static class WindowChrome
         return alpha;
     }
 
-    public static void RemoveNonClientFrame(IntPtr hwnd)
-    {
-        _subclassProc = SubclassProc;
-        _ = SetWindowSubclass(hwnd, _subclassProc, 1, IntPtr.Zero);
-    }
-
     private static IntPtr SubclassProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint id, IntPtr data)
     {
         if (msg == WM_NCCALCSIZE && wParam != IntPtr.Zero)
@@ -159,6 +180,9 @@ internal static class WindowChrome
 
     [DllImport("comctl32.dll", SetLastError = true)]
     private static extern bool SetWindowSubclass(IntPtr hWnd, SUBCLASSPROC pfnSubclass, uint uIdSubclass, IntPtr dwRefData);
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    private static extern bool RemoveWindowSubclass(IntPtr hWnd, SUBCLASSPROC pfnSubclass, uint uIdSubclass);
 
     [DllImport("comctl32.dll")]
     private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);

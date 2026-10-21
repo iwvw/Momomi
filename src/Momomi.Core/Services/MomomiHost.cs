@@ -150,25 +150,52 @@ public sealed class MomomiHost : IDisposable
 
         var documents = await Overrides.ResolveActiveDocumentsAsync(active?.Id, ct).ConfigureAwait(false);
 
-        // 无论有没有覆写，输出都走同一条规范化路径：
-        // 这样 runtime.yaml 的格式始终一致（emoji 不转义、不出现 ... 结束标记），
-        // 差异视图的基线也才能和合并结果直接对比。
-        return documents.Count == 0
-            ? YamlOverrideMerger.Normalize(baseYaml)
-            : YamlOverrideMerger.Apply(baseYaml, documents);
+        // 无论有没有覆写，输出都必须走 "Apply" 这条规范化路径。
+        //
+        // 这里曾经用 Normalize 处理"没有覆写"的分支，而 Normalize 特意保留 YAML 的
+        // 文档结束标记 `...`（那是给差异视图做基线用的）。但这份文本是要写进
+        // runtime.yaml 交给内核的：mihomo 会把 `...` 当成"配置到此为止"，
+        // 结果是内核既不报错也没有任何代理（0.8.1 之前正是靠这条触发过一长串
+        // 「配置重载失败 400」）。Apply 即使传入空集合也会剥掉结束标记，
+        // 所以统一走它。
+        return YamlOverrideMerger.Apply(baseYaml, documents);
     }
 
     /// <summary>
     /// 仅基于设置重写 runtime.yaml（不触发内核 reload）。用于 TUN 等设置热切换时
     /// 先把文件落盘，之后由 PATCH 让内核即时生效，避免全量重载。
+    ///
+    /// 必须与 <see cref="ApplyActiveProfileAsync"/> 共用同一把门：两者都会整份重写
+    /// runtime.yaml，TUN 开关与订阅刷新/SSID 切换并发时，两份 WriteAllTextAsync
+    /// 交错写入会让内核读到半截文件（表现为配置加载失败、节点列表回退）。
     /// </summary>
     public async Task RewriteRuntimeConfigAsync(CancellationToken ct = default)
     {
-        var active = await Profiles.GetActiveAsync(ct).ConfigureAwait(false);
-        if (active is null) return;
-        var options = await BuildRuntimeOptionsAsync(ct).ConfigureAwait(false);
-        var yaml = await GenerateRuntimeYamlAsync(options, ct).ConfigureAwait(false);
-        await File.WriteAllTextAsync(Core.Paths.RuntimeConfigPath, yaml, ct).ConfigureAwait(false);
+        await _applyGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var active = await Profiles.GetActiveAsync(ct).ConfigureAwait(false);
+            if (active is null) return;
+            var options = await BuildRuntimeOptionsAsync(ct).ConfigureAwait(false);
+            var yaml = await GenerateRuntimeYamlAsync(options, ct).ConfigureAwait(false);
+            await WriteRuntimeConfigAtomicAsync(yaml, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _applyGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 原子写 runtime.yaml：先写同目录临时文件再替换。
+    /// 直接 WriteAllText 会在写的过程中让内核看到一个被截断的配置。
+    /// </summary>
+    private async Task WriteRuntimeConfigAtomicAsync(string yaml, CancellationToken ct)
+    {
+        var path = Core.Paths.RuntimeConfigPath;
+        var temp = path + ".tmp";
+        await File.WriteAllTextAsync(temp, yaml, ct).ConfigureAwait(false);
+        File.Move(temp, path, overwrite: true);
     }
 
     public async Task<bool> ApplyActiveProfileAsync(CancellationToken ct = default)
@@ -183,7 +210,7 @@ public sealed class MomomiHost : IDisposable
 
             var options = await BuildRuntimeOptionsAsync(ct).ConfigureAwait(false);
             var yaml = await GenerateRuntimeYamlAsync(options, ct).ConfigureAwait(false);
-            await File.WriteAllTextAsync(Core.Paths.RuntimeConfigPath, yaml, ct).ConfigureAwait(false);
+            await WriteRuntimeConfigAtomicAsync(yaml, ct).ConfigureAwait(false);
 
             // 热重载失败时内核会保留旧配置继续跑；ApplyConfigAsync 会自动重启兜底，
             // 否则节点列表会一直停在上一次的配置上（“更新了但没变化”）。
@@ -258,7 +285,8 @@ public sealed class MomomiHost : IDisposable
     }
 
     public void Dispose()
-    {        _profileRefreshTimer.Dispose();
+    {
+        _profileRefreshTimer.Dispose();
         Ssid.Dispose();
         Pac.Dispose();
         Core.Dispose();
@@ -268,12 +296,17 @@ public sealed class MomomiHost : IDisposable
     /// <summary>
     /// 退出前停内核并清理会阻断主机上网的痕迹。系统代理的关闭已内聚在 Core.StopAsync 中，
     /// 这里只需保证内核确实停下（内核退出会自动移除 TUN 适配器与路由）。
+    ///
+    /// 带超时：这是在 UI 线程上同步等待，如果内核正卡在启动流程里（例如 WaitForReady
+    /// 等 API 上线的 120 秒），无超时会让「退出」看起来像死机，只能强制结束进程，
+    /// 结果系统代理/TUN 残留、下次开机断网。超时后不再阻塞界面。
     /// </summary>
-    public void ShutdownNetwork()
+    public void ShutdownNetwork(TimeSpan? timeout = null)
     {
         try
         {
-            Core.StopAsync().GetAwaiter().GetResult();
+            var limit = timeout ?? TimeSpan.FromSeconds(8);
+            _ = Core.StopAsync().Wait(limit);
         }
         catch
         {

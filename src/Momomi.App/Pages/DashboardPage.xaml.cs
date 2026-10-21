@@ -5,7 +5,7 @@ using Momomi.App.ViewModels;
 
 namespace Momomi.App.Pages;
 
-public sealed partial class DashboardPage : Page
+public sealed partial class DashboardPage : Page, IPageLifecycle
 {
     public DashboardViewModel ViewModel { get; }
 
@@ -29,6 +29,9 @@ public sealed partial class DashboardPage : Page
         base.OnNavigatedFrom(e);
         ViewModel.Detach();
     }
+
+    /// <inheritdoc />
+    public void DetachFromHost() => ViewModel.Detach();
 
     private void GoProfiles_Click(object sender, RoutedEventArgs e) =>
         global::Momomi.App.App.Main?.NavigateToTag("profiles");

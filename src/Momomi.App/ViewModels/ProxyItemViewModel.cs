@@ -47,11 +47,18 @@ public sealed partial class ProxyItemViewModel : ObservableObject
     /// <summary>去掉开头图标后的名称。</summary>
     public string DisplayName => SplitIcon(Name).Text;
 
+    /// <summary>
+    /// 把「开头的图标」和「真正的名字」分开。
+    ///
+    /// 只有两种情况算图标：成对区域指示符（国旗）或 emoji（星平面符号）。
+    /// 普通字母/数字/汉字一律<b>不能</b>被当成图标剥离——历史上这里对任何名字都
+    /// 无条件把第一个字素簇切给 Icon，于是 "DIRECT" 显示成图标 "D" + 名字 "IRECT"，
+    /// 中文名节点也会丢掉首字。
+    /// </summary>
     private static (string Icon, string Text) SplitIcon(string name)
     {
         if (string.IsNullOrEmpty(name)) return ("", name ?? "");
 
-        var i = 0;
         var elements = System.Globalization.StringInfo.ParseCombiningCharacters(name);
         if (elements.Length == 0) return ("", name);
 
@@ -64,11 +71,24 @@ public sealed partial class ProxyItemViewModel : ObservableObject
             && char.IsSurrogatePair(first, 0)
             && char.ConvertToUtf32(first, 0) is >= 0x1F1E6 and <= 0x1F1FF;
 
-        i = firstEnd;
+        // 星平面 emoji（含 🚀 之类的常见组名前缀）。只认代理节点名里真实出现过的范围，
+        // 避免把普通字符误判成图标。
+        var isEmoji = first.Length >= 2
+            && char.IsSurrogatePair(first, 0)
+            && char.ConvertToUtf32(first, 0) is >= 0x1F300 and <= 0x1FAFF;
+
+        if (!isFlag && !isEmoji) return ("", name);
+
+        var i = firstEnd;
         if (isFlag && elements.Length > 2)
         {
             // 合并第二个区域指示符（同一字素簇通常已包含，但部分输入是分开的）。
-            var secondEnd = elements.Length > 2 ? elements[3] : name.Length;
+            //
+            // 这里必须用 Length > 3 判断：名字恰好只有三个字素簇时（例如「🇺🇸 1」
+            // —— 旗帜、空格、数字），下标 3 根本不存在，直接用会抛
+            // IndexOutOfRangeException。而节点名来自订阅、完全不可控，
+            // 等于打开代理页就崩。
+            var secondEnd = elements.Length > 3 ? elements[3] : name.Length;
             var second = name[firstEnd..secondEnd];
             if (second.Length >= 2 && char.IsSurrogatePair(second, 0)
                 && char.ConvertToUtf32(second, 0) is >= 0x1F1E6 and <= 0x1F1FF)

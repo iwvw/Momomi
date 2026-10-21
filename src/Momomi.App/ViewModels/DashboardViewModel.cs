@@ -500,9 +500,7 @@ public sealed partial class DashboardViewModel : ObservableObject
                 : $"↑ {Format.Bytes(info.Upload)}  ↓ {Format.Bytes(info.Download)}";
             ProfileUsagePercent = info.Total > 0 ? Math.Clamp(info.Used * 100.0 / info.Total, 0, 100) : 0;
             HasProfileUsage = info.Total > 0;
-            ProfileExpireText = info.Expire <= 0
-                ? "长期有效"
-                : $"到期 {DateTimeOffset.FromUnixTimeSeconds(info.Expire).LocalDateTime:yyyy-MM-dd}";
+            ProfileExpireText = SubscriptionUsage.FormatExpire(info.Expire);
         }
         catch
         {

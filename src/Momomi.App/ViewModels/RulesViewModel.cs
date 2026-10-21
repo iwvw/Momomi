@@ -59,7 +59,8 @@ public sealed partial class RulesViewModel : ObservableObject
         _onStateChanged = (_, e) =>
         {
             if (e.State != CoreState.Running) _all = Array.Empty<RuleItem>();
-            else _ = AutoReloadAsync();
+            // 同 Proxies：StateChanged 常在线程池上触发，LoadAsync 会写绑定属性。
+            else _dispatcher.TryEnqueue(() => _ = AutoReloadAsync());
         };
     }
 
@@ -89,12 +90,12 @@ public sealed partial class RulesViewModel : ObservableObject
     {
         if (_core.Api is null || _core.State != CoreState.Running)
         {
-            StatusText = "内核未运行";
+            _dispatcher.TryEnqueue(() => StatusText = "内核未运行");
             return;
         }
         if (_all.Count > 0 && !force) return;
 
-        IsBusy = true;
+        _dispatcher.TryEnqueue(() => IsBusy = true);
         try
         {
             _all = await _core.Api.GetRulesAsync().ConfigureAwait(false);
@@ -102,15 +103,16 @@ public sealed partial class RulesViewModel : ObservableObject
             {
                 Apply();
                 StatusText = $"共 {_all.Count} 条规则";
+                IsBusy = false;
             });
         }
         catch (Exception ex)
         {
-            StatusText = $"加载失败：{ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
+            _dispatcher.TryEnqueue(() =>
+            {
+                StatusText = $"加载失败：{ex.Message}";
+                IsBusy = false;
+            });
         }
     }
 

@@ -713,7 +713,7 @@ public sealed partial class MainWindow : Window
     {
         if (NavFrame.Content is not null) return;
         _lastPageType ??= typeof(DashboardPage);
-        NavFrame.Navigate(_lastPageType);
+        NavigateKeepingNoBackStack(_lastPageType);
     }
 
     /// <summary>隐藏到托盘时释放当前页面内容（保留页面类型），降低常驻内存。</summary>
@@ -722,7 +722,18 @@ public sealed partial class MainWindow : Window
         try
         {
             if (NavFrame.Content is not null)
+            {
                 _lastPageType = NavFrame.Content.GetType();
+
+                // Frame.Content = null 不触发导航事件，必须显式解绑，
+                // 否则页面的 ViewModel 会一直订阅 Core/AppSignals 的事件（详见 IPageLifecycle）。
+                if (NavFrame.Content is IPageLifecycle lifecycle)
+                {
+                    try { lifecycle.DetachFromHost(); }
+                    catch (Exception ex) { global::Momomi.App.App.WriteLog($"页面解绑失败：{ex}"); }
+                }
+            }
+
             NavFrame.Content = null;
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, blocking: false);
         }
@@ -967,21 +978,43 @@ public sealed partial class MainWindow : Window
     {
         if (args.IsSettingsSelected)
         {
-            NavFrame.Navigate(typeof(SettingsPage));
+            NavigateKeepingNoBackStack(typeof(SettingsPage));
             return;
         }
         if (args.SelectedItem is not NavigationViewItem item) return;
         switch (item.Tag)
         {
-            case "dashboard": NavFrame.Navigate(typeof(DashboardPage)); break;
-            case "proxies": NavFrame.Navigate(typeof(ProxiesPage)); break;
-            case "connections": NavFrame.Navigate(typeof(ConnectionsPage)); break;
-            case "rules": NavFrame.Navigate(typeof(RulesPage)); break;
-            case "profiles": NavFrame.Navigate(typeof(ProfilesPage)); break;
-            case "overrides": NavFrame.Navigate(typeof(OverridesPage)); break;
-            case "traffic": NavFrame.Navigate(typeof(TrafficPage)); break;
-            case "network": NavFrame.Navigate(typeof(NetworkPage)); break;
-            case "logs": NavFrame.Navigate(typeof(LogsPage)); break;
+            case "dashboard": NavigateKeepingNoBackStack(typeof(DashboardPage)); break;
+            case "proxies": NavigateKeepingNoBackStack(typeof(ProxiesPage)); break;
+            case "connections": NavigateKeepingNoBackStack(typeof(ConnectionsPage)); break;
+            case "rules": NavigateKeepingNoBackStack(typeof(RulesPage)); break;
+            case "profiles": NavigateKeepingNoBackStack(typeof(ProfilesPage)); break;
+            case "overrides": NavigateKeepingNoBackStack(typeof(OverridesPage)); break;
+            case "traffic": NavigateKeepingNoBackStack(typeof(TrafficPage)); break;
+            case "network": NavigateKeepingNoBackStack(typeof(NetworkPage)); break;
+            case "logs": NavigateKeepingNoBackStack(typeof(LogsPage)); break;
+        }
+    }
+
+    /// <summary>
+    /// 导航并清空后退栈。
+    ///
+    /// 界面上没有后退按钮（IsBackButtonVisible=Collapsed），但 Frame 默认会把每一个
+    /// 访问过的 Page 都放进 BackStack 强引用着——连接页/日志页这类重页面来回切几十次，
+    /// 就是几十 MB 常驻，且永远不会被回收。
+    /// </summary>
+    private void NavigateKeepingNoBackStack(Type pageType)
+    {
+        try
+        {
+            NavFrame.Navigate(pageType);
+            // Navigate 会把当前页压入 BackStack，这里立刻清掉，只保留正在显示的页。
+            NavFrame.BackStack.Clear();
+            NavFrame.ForwardStack.Clear();
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"导航到 {pageType.Name} 失败：{ex}");
         }
     }
 

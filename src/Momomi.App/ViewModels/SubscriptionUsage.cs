@@ -4,6 +4,28 @@ public sealed record SubscriptionUsage(long Upload, long Download, long Total, l
 {
     public long Used => Upload + Download;
 
+    /// <summary>
+    /// <see cref="DateTimeOffset.FromUnixTimeSeconds"/> 允许的最大值（9999-12-31）。
+    /// 订阅头里的 expire 是外部数据，越界会抛 ArgumentOutOfRangeException。
+    /// </summary>
+    private const long MaxUnixSeconds = 253402300799;
+
+    /// <summary>把 expire 转成本地日期文本。越界/非法值一律按「长期有效」处理，绝不抛出。</summary>
+    public static string FormatExpire(long expire)
+    {
+        if (expire <= 0) return "长期有效";
+        if (expire > MaxUnixSeconds) return "长期有效";
+
+        try
+        {
+            return $"到期 {DateTimeOffset.FromUnixTimeSeconds(expire).LocalDateTime:yyyy-MM-dd}";
+        }
+        catch
+        {
+            return "长期有效";
+        }
+    }
+
     public static SubscriptionUsage? Parse(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;

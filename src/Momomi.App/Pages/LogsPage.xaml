@@ -21,6 +21,7 @@
             <controls:PageHeader.Actions>
                 <StackPanel Orientation="Horizontal" Spacing="12">
                     <ComboBox x:Name="LevelBox" Width="140" VerticalAlignment="Center"
+                              SelectedValuePath="Content"
                               SelectionChanged="Level_SelectionChanged">
                         <ComboBoxItem Content="debug" />
                         <ComboBoxItem Content="info" />

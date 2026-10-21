@@ -369,6 +369,9 @@ public sealed record TrafficRepository(MomomiDatabase Database)
         return await Database.ExecuteReadAsync(async conn =>
         {
             await using var cmd = conn.CreateCommand();
+            // bucket 里存的是 "yyyy-MM-ddTHH:mm"（分钟精度）。这里下界也必须用同样的格式：
+            // 之前用 ToString("O")（"...T10:00:00.0000000+08:00"），按字符串比较时
+            // "2026-10-21T10:00" < "2026-10-21T10:00:00..."，区间第一分钟会被整分钟漏掉。
             cmd.CommandText = """
                 SELECT id, bucket, up, down, memory, connections
                 FROM traffic_minute
@@ -376,7 +379,7 @@ public sealed record TrafficRepository(MomomiDatabase Database)
                 ORDER BY bucket DESC
                 LIMIT $limit;
                 """;
-            cmd.Parameters.AddWithValue("$from", from.ToString("O"));
+            cmd.Parameters.AddWithValue("$from", from.ToString("yyyy-MM-ddTHH:mm"));
             cmd.Parameters.AddWithValue("$limit", limit);
 
             var list = new List<TrafficMinute>();
@@ -400,8 +403,10 @@ public sealed record TrafficRepository(MomomiDatabase Database)
         await Database.ExecuteWriteAsync(async conn =>
         {
             await using var cmd = conn.CreateCommand();
+            // 同上：与写入格式（分钟精度）保持一致，否则每行都会因 "T10:00" vs
+            // "T10:00:00.0000000+08:00" 的字符串差异被判成"更早"，把整张表删光。
             cmd.CommandText = "DELETE FROM traffic_minute WHERE bucket < $before;";
-            cmd.Parameters.AddWithValue("$before", before.ToString("O"));
+            cmd.Parameters.AddWithValue("$before", before.ToString("yyyy-MM-ddTHH:mm"));
             await cmd.ExecuteNonQueryAsync();
             return 0;
         }).ConfigureAwait(false);

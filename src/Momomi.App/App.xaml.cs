@@ -74,6 +74,32 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// 数据层初始化失败时的兜底提示：弹一个原生消息框说明原因与日志位置，然后退出。
+    /// 比静默崩溃好排查得多。
+    /// </summary>
+    private static void ShowStartupFailure()
+    {
+        try
+        {
+            MessageBoxW(IntPtr.Zero,
+                "Momomi 初始化失败，无法读取数据目录。\n\n" +
+                $"数据目录：{Momomi.Data.MomomiAppData.ResolveDirectory()}\n" +
+                $"诊断日志：{LogPath}\n\n" +
+                "常见原因：程序目录不可写、数据库被另一个实例占用、磁盘空间不足。",
+                "Momomi 启动失败",
+                0x00000010 /* MB_ICONERROR */);
+        }
+        catch
+        {
+        }
+
+        Current.Exit();
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
     /// <summary>尝试成为唯一实例。返回 false 表示已有实例在运行。</summary>
     private static bool TryAcquireSingleInstance()
     {
@@ -247,6 +273,15 @@ public partial class App : Application
             WriteLog($"MomomiHost 初始化失败：{ex}");
         }
 
+        // 初始化失败时 AppHost.Host 会抛异常，而 MainWindow 构造函数第一件事就是取它。
+        // 之前只记日志就继续 new MainWindow()，结果是启动即崩且没有任何提示
+        // （数据目录只读、数据库被其它实例占用、磁盘写满都会走到这里）。
+        if (!AppHost.IsReady)
+        {
+            ShowStartupFailure();
+            return;
+        }
+
         // 修复历史版本用 schtasks 默认参数创建的自启任务：其电源/空闲/超时设置会在
         // 笔记本拔电源、系统空闲或连续运行 72 小时后被任务计划程序终止（表现为程序自己退出）。
         _ = Task.Run(() =>
@@ -386,7 +421,18 @@ public partial class App : Application
         try
         {
             var theme = await AppHost.Host.Settings.GetAsync("theme").ConfigureAwait(false) ?? "default";
-            ApplyTheme(theme);
+            // ApplyTheme 会访问 Window.Content / AppWindow.TitleBar，只能在 UI 线程执行。
+            // 之前直接在这里调用，续体落在线程池上，异常被外层 catch 吞掉，
+            // 表现为「启动时读到的主题设置从未生效，只有从设置页切换才管用」。
+            var queue = Main?.DispatcherQueue;
+            if (queue is null)
+            {
+                ApplyTheme(theme);
+                return;
+            }
+
+            if (queue.HasThreadAccess) ApplyTheme(theme);
+            else queue.TryEnqueue(() => ApplyTheme(theme));
         }
         catch (Exception ex)
         {

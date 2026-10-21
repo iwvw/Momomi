@@ -309,8 +309,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _loading = true;
         try
         {
-            AutoStartCore = await _host.Settings.GetBoolAsync("core.autoStart", true);
-            Theme = await _host.Settings.GetAsync("theme") ?? "default";
+            AutoStartCore = await _host.Settings.GetBoolAsync("core.autoStart", true);            Theme = await _host.Settings.GetAsync("theme") ?? "default";
             NavigationStyle = await _host.Settings.GetIntAsync("ui.navigationStyle", 0);
             BackdropStyle = await _host.Settings.GetIntAsync("ui.backdropStyle", 0);
             MixedPort = (await _host.Settings.GetIntAsync("core.mixedPort", 7890)).ToString();
@@ -375,6 +374,14 @@ public sealed partial class SettingsViewModel : ObservableObject
             SsidProfileMap = await _host.Settings.GetAsync("ui.ssidProfileMap") ?? "";
 
             await RefreshLoopbackStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            // 这里必须吞掉异常：调用方 SettingsPage.OnNavigatedTo 是 async void，
+            // 异常逃出去就是进程级崩溃（数据库被占用、磁盘满、注册表读取失败都会走到）。
+            // 状态栏给出可读原因，其余项保留默认值，页面仍然可用。
+            StatusText = $"读取设置失败：{ex.Message}";
+            global::Momomi.App.App.WriteLog($"读取设置失败：{ex}");
         }
         finally
         {

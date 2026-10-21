@@ -5,7 +5,7 @@ using Momomi.App.ViewModels;
 
 namespace Momomi.App.Pages;
 
-public sealed partial class RulesPage : Page
+public sealed partial class RulesPage : Page, IPageLifecycle
 {
     public RulesViewModel ViewModel { get; }
 
@@ -29,6 +29,9 @@ public sealed partial class RulesPage : Page
         base.OnNavigatedFrom(e);
         ViewModel.Detach();
     }
+
+    /// <inheritdoc />
+    public void DetachFromHost() => ViewModel.Detach();
 
     private void Disable_Click(object sender, RoutedEventArgs e)
     {

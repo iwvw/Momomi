@@ -65,12 +65,20 @@ public static class ProcessIconProvider
         {
             using var icon = System.Drawing.Icon.FromHandle(info.hIcon);
             using var bitmap = icon.ToBitmap();
-            using var stream = new MemoryStream();
+            var stream = new MemoryStream();
             bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
             stream.Position = 0;
 
+            // SetSourceAsync 是异步的，不能在这里用 using 释放流：
+            // 之前是 `using var stream` + fire-and-forget，using 退出时流已被释放，
+            // 解码失败就得到空白图标；而且包装出来的 IRandomAccessStream 从未释放，
+            // 每遇到一个新进程路径就留一份原生对象。
+            // 现在把流的所有权交给 BitmapImage：ImageOpened/ImageFailed 里统一收尾，
+            // 两条路径都释放，不会泄漏。
             var image = new BitmapImage();
             var ras = stream.AsRandomAccessStream();
+            image.ImageOpened += (_, _) => { try { ras.Dispose(); } catch { } };
+            image.ImageFailed += (_, _) => { try { ras.Dispose(); } catch { } };
             _ = image.SetSourceAsync(ras);
             return image;
         }

@@ -145,17 +145,27 @@ public sealed partial class ModeSelectorViewModel : ObservableObject, IDisposabl
         if (_loading || index < 0 || index >= Modes.Length) return;
 
         var mode = Modes[index];
-        await _host.Settings.SetAsync("core.mode", mode);
 
-        if (_host.Core.Api is not null && _host.Core.State == CoreState.Running)
+        // 全程兜住：调用方 MainWindow.ModeSegmented_SelectionChanged /
+        // MiniPanelView.ModeButton_Click 都是 async void，异常逃出去就是进程崩溃。
+        try
         {
-            try
+            await _host.Settings.SetAsync("core.mode", mode);
+
+            if (_host.Core.Api is not null && _host.Core.State == CoreState.Running)
             {
-                await _host.Core.Api.PatchConfigsAsync(new { mode });
+                try
+                {
+                    await _host.Core.Api.PatchConfigsAsync(new { mode });
+                }
+                catch
+                {
+                }
             }
-            catch
-            {
-            }
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"切换模式失败：{ex}");
         }
 
         ApplyMode(mode);

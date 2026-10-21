@@ -87,6 +87,7 @@ internal sealed class WindowSlider : IDisposable
     {
         lock (_gate)
         {
+            if (_disposed) return;
             _generation++;
             _from = from;
             _to = to;
@@ -97,14 +98,47 @@ internal sealed class WindowSlider : IDisposable
             _onCompleted = onCompleted;
             _hasRequest = true;
         }
-        _signal.Set();
+
+        try
+        {
+            _signal.Set();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
+    /// <summary>
+    /// 停止工作线程。
+    ///
+    /// 必须幂等：托盘退出（ForceClose）与拖拽收起的动画完成回调可能都会调一次，
+    /// 重复 Set/Dispose 会抛 ObjectDisposedException。
+    /// 另外 Join 超时时<b>不能</b>释放信号量——工作线程可能正卡在 WaitOne 上，
+    /// 释放后它会在后台线程抛 ObjectDisposedException，那是未处理异常，直接把进程带走。
+    /// </summary>
     public void Dispose()
     {
-        _disposed = true;
-        _signal.Set();
-        _worker.Join(500);
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+        }
+
+        try
+        {
+            _signal.Set();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        var joined = _worker.Join(500);
+        if (!joined)
+        {
+            // 线程还活着：信号量留给它，交给进程退出时回收，绝不在这里 Dispose。
+            return;
+        }
+
         _signal.Dispose();
     }
 
@@ -113,11 +147,19 @@ internal sealed class WindowSlider : IDisposable
     {
         lock (_gate)
         {
+            if (_disposed) return;
             _generation++;
             _hasRequest = false;
             _onCompleted = null;
         }
-        _signal.Set();
+
+        try
+        {
+            _signal.Set();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     private void WorkerLoop()
@@ -129,7 +171,15 @@ internal sealed class WindowSlider : IDisposable
             {
                 if (!_hasRequest)
                 {
-                    _signal.WaitOne(250);
+                    try
+                    {
+                        _signal.WaitOne(250);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Dispose 与等待竞态时可能已被释放；直接退出即可。
+                        return;
+                    }
                     continue;
                 }
 

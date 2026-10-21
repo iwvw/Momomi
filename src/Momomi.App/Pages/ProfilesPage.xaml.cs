@@ -177,7 +177,7 @@ public sealed partial class ProfilesPage : Page
             XamlRoot = XamlRoot,
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (await DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
 
         // 先记下原有的挂载顺序，保存时保持相对顺序不变。
         var selectedIds = checkBoxes

@@ -203,8 +203,13 @@ public sealed class CoreManager : ICoreManager
             var version = await WaitForReadyAsync(ct).ConfigureAwait(false);
             if (version is null)
             {
-                SetState(CoreState.Error, null, "内核启动后无法连接 API");
-                await StopAsync(ct).ConfigureAwait(false);
+                // 注意：这里已经在持有 _gate，不能再调 StopAsync（SemaphoreSlim 不可重入，
+                // 会永久等待自己持有的锁，导致 _state 卡在 Starting、之后再也起不来、
+                // 退出时 ShutdownNetwork 也卡在同一把锁上关不掉程序）。
+                // 因此走不取锁的清理，并且只发一次状态（Stopped 带原因），
+                // 避免先 Error 再 Stopped 让自动退出倒计时短暂启动。
+                await CleanupLockedAsync(ct).ConfigureAwait(false);
+                SetState(CoreState.Stopped, null, "内核启动后无法连接 API");
                 return false;
             }
 
@@ -388,16 +393,32 @@ public sealed class CoreManager : ICoreManager
         {
             if (_state == CoreState.Stopped) return;
             SetState(CoreState.Stopping, _version, null);
+            await CleanupLockedAsync(ct).ConfigureAwait(false);
+            SetState(CoreState.Stopped, null, null);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
-            // 内核一停，指向本机混合端口的系统代理就会让主机断网，因此同步关闭。
-            // 记录原状态，供随后的 StartAsync（重启场景）恢复。
-            _restoreSystemProxyAfterStart = TryDisableOwnSystemProxy();
+    /// <summary>
+    /// 停内核并清理相关资源。<b>调用方必须已持有 <see cref="_gate"/></b>，
+    /// 这样 StartAsync 的失败分支可以复用它而不重入锁。
+    /// </summary>
+    private async Task CleanupLockedAsync(CancellationToken ct)
+    {
+        // 内核一停，指向本机混合端口的系统代理就会让主机断网，因此同步关闭。
+        // 记录原状态，供随后的 StartAsync（重启场景）恢复。
+        _restoreSystemProxyAfterStart = TryDisableOwnSystemProxy();
 
-            lock (_streamGate) StopStreamsLocked();
+        lock (_streamGate) StopStreamsLocked();
 
-            _api?.Dispose();
-            _api = null;
+        _api?.Dispose();
+        _api = null;
 
+        try
+        {
             if (IsElevatedMode)
             {
                 try
@@ -413,15 +434,12 @@ public sealed class CoreManager : ICoreManager
             {
                 await _process.StopAsync(ct).ConfigureAwait(false);
             }
-
-            _version = null;
-            SetState(CoreState.Stopped, null, null);
-            // 内核已停，下载改回直连（代理端口不再可用）。
-            DownloadProxy.SetCorePort(0);
         }
         finally
         {
-            _gate.Release();
+            _version = null;
+            // 内核已停，下载改回直连（代理端口不再可用）。
+            DownloadProxy.SetCorePort(0);
         }
     }
 

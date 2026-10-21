@@ -7,7 +7,7 @@ using Momomi.App.ViewModels;
 
 namespace Momomi.App.Pages;
 
-public sealed partial class ConnectionsPage : Page
+public sealed partial class ConnectionsPage : Page, IPageLifecycle
 {
     public ConnectionsViewModel ViewModel { get; }
     private bool _syncingSort;
@@ -34,6 +34,9 @@ public sealed partial class ConnectionsPage : Page
         base.OnNavigatedFrom(e);
         ViewModel.Detach();
     }
+
+    /// <inheritdoc />
+    public void DetachFromHost() => ViewModel.Detach();
 
     private void SyncSortBox()
     {
@@ -143,7 +146,7 @@ public sealed partial class ConnectionsPage : Page
             CloseButtonText = "关闭",
             DefaultButton = ContentDialogButton.Primary,
         };
-        var result = await dialog.ShowAsync();
+        var result = await DialogGuard.ShowAsync(dialog);
         if (result == ContentDialogResult.Primary)
             CopyRule(row);
     }

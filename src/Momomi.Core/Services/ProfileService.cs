@@ -368,6 +368,14 @@ public sealed class ProfileService : IProfileService
         var item = (await ListAsync(ct).ConfigureAwait(false)).FirstOrDefault(p => p.Id == id);
         if (item is null) return false;
 
+        // 保存前先确认这份内容能被 YAML 解析成 mapping。
+        //
+        // 订阅文件是后面 GenerateRuntimeYamlAsync / 覆写预览的共同输入，
+        // 一旦存进非法 YAML，之后任何一次「应用配置」都会抛异常；而部分调用方
+        // （覆写页的标签切换、设置页的导航回调）是 async void，异常会直接掀掉进程。
+        // 在这里拦住，失败原因直接回给编辑器。
+        if (!TryValidate(content, out var error)) throw new InvalidOperationException(error);
+
         try
         {
             await File.WriteAllTextAsync(item.FilePath, content, ct).ConfigureAwait(false);
@@ -376,6 +384,32 @@ public sealed class ProfileService : IProfileService
         }
         catch
         {
+            return false;
+        }
+    }
+
+    /// <summary>校验订阅内容是可解析的 YAML 映射。空内容视为合法（等同 fallback 配置）。</summary>
+    private static bool TryValidate(string content, out string error)
+    {
+        error = "";
+        if (string.IsNullOrWhiteSpace(content)) return true;
+
+        try
+        {
+            var stream = new YamlDotNet.RepresentationModel.YamlStream();
+            using var reader = new StringReader(content);
+            stream.Load(reader);
+            if (stream.Documents.Count == 0) return true;
+            if (stream.Documents[0].RootNode is not YamlDotNet.RepresentationModel.YamlMappingNode)
+            {
+                error = "顶层必须是键值映射（mapping），不能是列表或标量";
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = $"YAML 语法错误：{ex.Message}";
             return false;
         }
     }

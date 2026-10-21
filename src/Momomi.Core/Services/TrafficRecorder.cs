@@ -14,6 +14,14 @@ public sealed class TrafficRecorder : IDisposable
     private long _memory;
     private int _connections;
     private bool _dirty;
+    private DateTime _lastPrune = DateTime.MinValue;
+
+    /// <summary>
+    /// 历史保留天数。这张表每分钟一行（1440 行/天，约 43k 行/月），
+    /// 之前只有用户手动「清空历史」才会删除，等于无界增长。
+    /// 保留 30 天足够覆盖「6 小时 / 1 天 / 7 天 / 30 天」四档视图。
+    /// </summary>
+    private const int RetentionDays = 30;
 
     public TrafficRecorder(TrafficRepository repo)
     {
@@ -60,6 +68,13 @@ public sealed class TrafficRecorder : IDisposable
             {
                 var bucket = DateTimeOffset.Now.ToString("yyyy-MM-ddTHH:mm");
                 await _repo.InsertAsync(bucket, up, down, memory, conns).ConfigureAwait(false);
+
+                // 每天清理一次过期历史（首次 flush 也会执行一次，顺手收掉历史遗留数据）。
+                if ((DateTime.UtcNow - _lastPrune).TotalHours >= 24)
+                {
+                    _lastPrune = DateTime.UtcNow;
+                    await _repo.PruneAsync(DateTimeOffset.Now.AddDays(-RetentionDays)).ConfigureAwait(false);
+                }
             }
             catch
             {

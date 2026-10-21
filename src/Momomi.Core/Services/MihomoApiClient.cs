@@ -61,13 +61,13 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
 
     public async Task<string?> GetVersionAsync(CancellationToken ct = default)
     {
-        var doc = await GetJsonAsync("version", ct).ConfigureAwait(false);
+        using var doc = await GetJsonAsync("version", ct).ConfigureAwait(false);
         return doc?.RootElement.TryGetProperty("version", out var v) == true ? v.GetString() : null;
     }
 
     public async Task<RuntimeConfig?> GetConfigsAsync(CancellationToken ct = default)
     {
-        var doc = await GetJsonAsync("configs", ct).ConfigureAwait(false);
+        using var doc = await GetJsonAsync("configs", ct).ConfigureAwait(false);
         if (doc is null) return null;
         var root = doc.RootElement;
         return new RuntimeConfig(
@@ -123,7 +123,9 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
 
     public async Task<IReadOnlyDictionary<string, ProxyItem>> GetProxiesAsync(CancellationToken ct = default)
     {
-        var doc = await GetJsonAsync("proxies", ct).ConfigureAwait(false);
+        // using：JsonDocument 持有从 ArrayPool 租来的缓冲，不 Dispose 就不会归还池
+        // （本方法在被 ProxiesChanged 触发时可能被多份实例并发调用，GC 压力会明显上升）。
+        using var doc = await GetJsonAsync("proxies", ct).ConfigureAwait(false);
         var result = new Dictionary<string, ProxyItem>();
         if (doc is null) return result;
         if (!doc.RootElement.TryGetProperty("proxies", out var proxies)) return result;
@@ -171,7 +173,7 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
     public async Task<Dictionary<string, int>> GroupDelayAsync(string group, string url, int timeoutMs, CancellationToken ct = default)
     {
         var path = $"group/{Uri.EscapeDataString(group)}/delay?url={Uri.EscapeDataString(url)}&timeout={timeoutMs}";
-        var doc = await GetJsonAsync(path, ct).ConfigureAwait(false);
+        using var doc = await GetJsonAsync(path, ct).ConfigureAwait(false);
         var result = new Dictionary<string, int>();
         if (doc is null) return result;
         foreach (var entry in doc.RootElement.EnumerateObject())
@@ -185,7 +187,7 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
     public async Task<int> ProxyDelayAsync(string name, string url, int timeoutMs, CancellationToken ct = default)
     {
         var path = $"proxies/{Uri.EscapeDataString(name)}/delay?url={Uri.EscapeDataString(url)}&timeout={timeoutMs}";
-        var doc = await GetJsonAsync(path, ct).ConfigureAwait(false);
+        using var doc = await GetJsonAsync(path, ct).ConfigureAwait(false);
         if (doc?.RootElement.TryGetProperty("delay", out var d) == true && d.ValueKind == JsonValueKind.Number)
             return d.GetInt32();
         return -1;
@@ -193,7 +195,7 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
 
     public async Task<IReadOnlyList<RuleItem>> GetRulesAsync(CancellationToken ct = default)
     {
-        var doc = await GetJsonAsync("rules", ct).ConfigureAwait(false);
+        using var doc = await GetJsonAsync("rules", ct).ConfigureAwait(false);
         var list = new List<RuleItem>();
         if (doc?.RootElement.TryGetProperty("rules", out var rules) != true) return list;
         foreach (var r in rules.EnumerateArray())
@@ -217,7 +219,9 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
 
     public async Task<ConnectionsSnapshot?> GetConnectionsAsync(CancellationToken ct = default)
     {
-        var doc = await GetJsonAsync("connections", ct).ConfigureAwait(false);
+        // 这个方法是每秒一次的轮询（CoreManager.PollConnectionsAsync），
+        // 不释放 JsonDocument 等于每秒丢弃一份从 ArrayPool 租出的缓冲区。
+        using var doc = await GetJsonAsync("connections", ct).ConfigureAwait(false);
         return doc is null ? null : ParseConnections(doc.RootElement);
     }
 

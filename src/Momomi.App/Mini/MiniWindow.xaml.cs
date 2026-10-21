@@ -175,6 +175,8 @@ public sealed partial class MiniWindow : Window
         _statsTimer.Stop();
         Panel.ViewModel.Dispose();
         _slider.Dispose();
+        // 解挂子类化，避免窗口销毁后仍留着指向托管委托的原生入口。
+        try { WindowChrome.RemoveSubclass(_hwnd); } catch { }
         Close();
     }
 
@@ -351,6 +353,7 @@ public sealed partial class MiniWindow : Window
             Dismissed?.Invoke(this, EventArgs.Empty);
             Panel.ViewModel.Dispose();
             _slider.Dispose();
+            try { WindowChrome.RemoveSubclass(_hwnd); } catch { }
             Close();
         });
     }

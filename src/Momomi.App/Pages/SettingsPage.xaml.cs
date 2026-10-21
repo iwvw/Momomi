@@ -6,7 +6,7 @@ using Momomi.App.ViewModels;
 
 namespace Momomi.App.Pages;
 
-public sealed partial class SettingsPage : Page
+public sealed partial class SettingsPage : Page, IPageLifecycle
 {
     public SettingsViewModel ViewModel { get; }
     private bool _syncing;
@@ -31,6 +31,9 @@ public sealed partial class SettingsPage : Page
         Detach();
     }
 
+    /// <inheritdoc />
+    public void DetachFromHost() => Detach();
+
     private void Attach()
     {
         if (_attached) return;
@@ -54,16 +57,30 @@ public sealed partial class SettingsPage : Page
 
     private void OnCoreStateChanged(object? sender, Momomi.Core.Services.CoreStateChanged e) => DispatchReload();
 
+    /// <summary>
+    /// <b>整段</b> ReloadAsync 都必须在 UI 线程上执行。
+    ///
+    /// 只在入口处判断 HasThreadAccess 是不够的：ReloadAsync 第一件事是 await
+    /// ViewModel.LoadAsync()，而 LoadAsync 内部大量 ConfigureAwait(false)，
+    /// 续体极可能落在线程池上，随后那些 ThemeBox.SelectedIndex / ToggleSwitch.IsOn
+    /// 赋值就变成跨线程改控件 —— 工作机的 app-crash.log 里记着 6 次
+    /// COMException 0x8001010E（RPC_E_WRONG_THREAD），栈顶正是这里。
+    /// 因此统一改为「总是 enqueue」，让整个方法体跑在 UI 线程的同步上下文里。
+    /// </summary>
     private void DispatchReload()
     {
-        if (DispatcherQueue.HasThreadAccess)
-            _ = ReloadAsync();
-        else
-            DispatcherQueue.TryEnqueue(() => _ = ReloadAsync());
+        DispatcherQueue.TryEnqueue(() => _ = ReloadAsync());
     }
 
     private async Task ReloadAsync()
     {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            // 兜底：万一有别处直接调用了 ReloadAsync 而当前不在 UI 线程。
+            DispatcherQueue.TryEnqueue(() => _ = ReloadAsync());
+            return;
+        }
+
         await ViewModel.LoadAsync();
 
         _syncing = true;
@@ -264,7 +281,7 @@ public sealed partial class SettingsPage : Page
                     DefaultButton = ContentDialogButton.Primary,
                     XamlRoot = XamlRoot,
                 };
-                if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+                if (await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary)
                 {
                     var ok = await ViewModel.ResolveHotkeyConflictAsync(action, text, result.Conflict.Value.ToString());
                     if (ok && box is not null) box.Text = text;
@@ -367,7 +384,7 @@ public sealed partial class SettingsPage : Page
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = XamlRoot,
         };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        if (await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary)
             await ViewModel.ClearLoopbackCommand.ExecuteAsync(null);
     }
 }

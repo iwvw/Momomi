@@ -239,8 +239,11 @@ public sealed partial class ProxiesViewModel : ObservableObject
         _onModeChanged = (_, mode) => ApplyMode(mode);
         _onStateChanged = (_, e) =>
         {
+            // StateChanged 多数来自线程池（StartAsync 全程 ConfigureAwait(false)、
+            // watchdog、Process.Exited 回调）。AutoReloadAsync → LoadAsync 会直接写
+            // StatusText/IsBusy 这些被 x:Bind 绑定的属性，不回到 UI 线程就是跨线程改控件。
             if (e.State != CoreState.Running) _loaded = false;
-            else _ = AutoReloadAsync();
+            else _dispatcher.TryEnqueue(() => _ = AutoReloadAsync());
         };
         _onSignals = (_, _) =>
         {
@@ -337,37 +340,41 @@ public sealed partial class ProxiesViewModel : ObservableObject
     {
         if (_core.Api is null || _core.State != CoreState.Running)
         {
-            StatusText = "内核未运行";
+            _dispatcher.TryEnqueue(() => StatusText = "内核未运行");
             return;
         }
         if (_loaded && !force) return;
 
-        IsBusy = true;
+        _dispatcher.TryEnqueue(() => IsBusy = true);
         try
         {
             _proxies = await _core.Api.GetProxiesAsync().ConfigureAwait(false);
 
+            // 组顺序要读并解析 runtime.yaml，放到后台取，避免在 UI 线程上做这件事。
+            var order = await Task.Run(
+                () => MihomoConfigBuilder.ReadProxyGroupOrder(_core.Paths.RuntimeConfigPath))
+                .ConfigureAwait(false);
+
             _dispatcher.TryEnqueue(() =>
             {
-                Rebuild();
+                Rebuild(order);
                 _loaded = true;
+                IsBusy = false;
             });
         }
         catch (Exception ex)
         {
-            StatusText = $"加载失败：{ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
+            _dispatcher.TryEnqueue(() => StatusText = $"加载失败：{ex.Message}");
+            _dispatcher.TryEnqueue(() => IsBusy = false);
         }
     }
 
-    private void Rebuild()
+    private void Rebuild(IReadOnlyList<string>? declaredOrder = null)
     {
         Groups.Clear();
 
-        var declared = MihomoConfigBuilder.ReadProxyGroupOrder(_core.Paths.RuntimeConfigPath);
+        var declared = declaredOrder
+            ?? MihomoConfigBuilder.ReadProxyGroupOrder(_core.Paths.RuntimeConfigPath);
         var rank = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var i = 0; i < declared.Count; i++) rank[declared[i]] = i;
 
