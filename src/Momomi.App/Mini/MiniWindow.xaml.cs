@@ -145,11 +145,59 @@ public sealed partial class MiniWindow : Window
         }
     }
 
-    /// <summary>替换背景材质并释放旧实例，避免切换材质时泄漏控制器。</summary>
+    /// <summary>
+    /// 替换背景材质并释放旧实例，避免切换材质时泄漏控制器。
+    ///
+    /// 与主窗口同理：Window.SystemBackdrop 赋值时框架会内部订阅
+    /// Content.ActualThemeChanged，Content 未就绪时会 E_INVALIDARG → RoFailFast
+    /// （0xc000027b，托管侧接不到）。所以先确认 Panel 已加载再赋值。
+    /// </summary>
     private void SetBackdrop(SystemBackdrop? next)
     {
+        if (!Panel.IsLoaded)
+        {
+            // 面板还没 Loaded：记下目标材质，Loaded 后补上（MiniWindow.InitializeAsync
+            // 是在构造后异步跑的，正常会先走到这里）。
+            _pendingBackdrop = next;
+            _hasPendingBackdrop = true;
+            if (!_backdropHookInstalled)
+            {
+                _backdropHookInstalled = true;
+                void OnPanelLoaded(object? sender, RoutedEventArgs e)
+                {
+                    Panel.Loaded -= OnPanelLoaded;
+                    _backdropHookInstalled = false;
+                    if (!_hasPendingBackdrop) return;
+                    var pending = _pendingBackdrop;
+                    _pendingBackdrop = null;
+                    _hasPendingBackdrop = false;
+                    ApplyBackdropNow(pending);
+                }
+                Panel.Loaded += OnPanelLoaded;
+            }
+            return;
+        }
+
+        ApplyBackdropNow(next);
+    }
+
+    private bool _backdropHookInstalled;
+    private bool _hasPendingBackdrop;
+    private SystemBackdrop? _pendingBackdrop;
+
+    private void ApplyBackdropNow(SystemBackdrop? next)
+    {
         var previous = SystemBackdrop;
-        SystemBackdrop = next;
+        try
+        {
+            SystemBackdrop = next;
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"迷你面板设置背景材质失败：{ex}");
+            return;
+        }
+
         if (!ReferenceEquals(previous, next) && previous is IDisposable disposable)
         {
             try

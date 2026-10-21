@@ -89,6 +89,9 @@ public sealed partial class MainWindow : Window
         {
             EnsureInitialPageLoaded();
             _ = ModeSelector.RefreshSwitchesAsync();
+            // 兜底：内容就绪之前被推迟的背景材质，在这里补一次。
+            // （正常会被根元素 Loaded 先触发，这条只是防止 Content 分支没覆盖到。）
+            RetryPendingBackdrop();
         };
 
         CreateTray();
@@ -275,25 +278,103 @@ public sealed partial class MainWindow : Window
     }
 
     private bool _navigationOnTop;
-    public void ApplyBackdrop()
+
+    /// <summary>
+    /// 构造函数期的默认背景材质。
+    ///
+    /// 已合并到 <see cref="ApplyBackdropStyle"/>：之前这里直接赋值一次、
+    /// `InitializeBackdropStyleAsync` 又按设置赋值一次，同一个窗口会连续 attach
+    /// 两次 backdrop target。现在统一走 ApplyBackdropStyle（默认样式即 0=亚克力）。
+    /// </summary>
+    public void ApplyBackdrop() => ApplyBackdropStyle(_appliedBackdropStyle < 0 ? 0 : _appliedBackdropStyle);
+
+    /// <summary>当前已应用的背景材质样式（-1 表示还没设过）。</summary>
+    private int _appliedBackdropStyle = -1;
+
+    /// <summary>该样式是否已经真正赋值成功（false 表示因内容未就绪被推迟）。</summary>
+    private bool _appliedBackdropStyleApplied;
+
+    /// <summary>
+    /// 替换系统背景材质。<b>返回是否真的完成了赋值</b>（false 表示被推迟）。
+    ///
+    /// 这里必须防住一个 WinUI 的硬崩溃：给 Window.SystemBackdrop 赋值时，框架内部会去
+    /// 订阅 Content.ActualThemeChanged；如果此刻 Content 还不是 FrameworkElement
+    /// （构造函数里、窗口 Activate 之前就是这种状态），内部抛 E_INVALIDARG 并直接
+    /// RoFailFast 结束进程——异常码 0xc000027b，且是 stowed exception，
+    /// 托管侧的 UnhandledException 完全接不到，日志里一个字都不会留下。
+    ///
+    /// 本机 10-19（0.8.0）与 10-22（0.8.2）两次崩溃的 WER 报告都是
+    /// combase.dll / 偏移 0x5cf34，与 microsoft-ui-xaml#8364 描述的调用链一致。
+    ///
+    /// 因此：内容未就绪时推迟，等根元素 Loaded 后按当前样式重放。
+    /// 旧实例在赋值成功之后再释放（顺序对齐官方 Gallery 示例）。
+    /// </summary>
+    private bool SetBackdrop(SystemBackdrop? next)
     {
-        try
+        // 内容未就绪：推迟。赋值必须发生在 Content 已是 FrameworkElement 且已加载之后。
+        if (Content is not FrameworkElement root)
         {
-            if (DesktopAcrylicController.IsSupported())
-                SetBackdrop(new Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop());
-            else if (MicaController.IsSupported())
-                SetBackdrop(new MicaBackdrop { Kind = MicaKind.Base });
+            // 连根元素都还没有：内容加载后会由 Activated 兜底重试（见构造函数里的订阅）。
+            _backdropNeedsRetry = true;
+            return false;
         }
-        catch
+
+        if (!root.IsLoaded)
         {
+            _backdropNeedsRetry = true;
+            if (!_backdropHookInstalled)
+            {
+                _backdropHookInstalled = true;
+                root.Loaded += OnBackdropRootLoaded;
+            }
+            return false;
         }
+
+        _backdropNeedsRetry = false;
+        return ApplyBackdropNow(next);
     }
 
-    /// <summary>替换系统背景材质。</summary>
-    private void SetBackdrop(SystemBackdrop? next)
+    private bool _backdropHookInstalled;
+
+    /// <summary>是否还有未落实的背景材质（内容未就绪时被推迟）。</summary>
+    private bool _backdropNeedsRetry;
+
+    /// <summary>根元素首次加载完成：把构造函数期推迟的材质补上。</summary>
+    private void OnBackdropRootLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement root)
+            root.Loaded -= OnBackdropRootLoaded;
+        _backdropHookInstalled = false;
+
+        RetryPendingBackdrop();
+    }
+
+    /// <summary>
+    /// 按「当前样式」重放被推迟的材质，而不是重放某个被记下来的实例：
+    /// 期间设置页可能已经改过样式，重放旧实例会覆盖用户设置。
+    /// </summary>
+    private void RetryPendingBackdrop()
+    {
+        if (!_backdropNeedsRetry) return;
+        if (_appliedBackdropStyle < 0) return;
+        ApplyBackdropStyle(_appliedBackdropStyle);
+    }
+
+    /// <summary>真正执行赋值。调用点保证 Content 已是可用且已加载的 FrameworkElement。</summary>
+    private bool ApplyBackdropNow(SystemBackdrop? next)
     {
         var previous = SystemBackdrop;
-        SystemBackdrop = next;
+        try
+        {
+            SystemBackdrop = next;
+        }
+        catch (Exception ex)
+        {
+            // 兜底：即便判断失误，也不能让异常冒到 UI 线程。
+            global::Momomi.App.App.WriteLog($"设置背景材质失败：{ex}");
+            return false;
+        }
+
         if (!ReferenceEquals(previous, next) && previous is IDisposable disposable)
         {
             try
@@ -304,28 +385,37 @@ public sealed partial class MainWindow : Window
             {
             }
         }
+
+        return true;
     }
 
     /// <summary>背景材质：0=亚克力(透出下方窗口)，1=Mica，2=纯色。不支持的会回退。</summary>
     public void ApplyBackdropStyle(int style)
     {
+        // 同一样式不重复创建 controller：设置页与启动流程都会调用，
+        // 重复赋值会让框架反复 attach/detach backdrop target。
+        // 但上次若是「推迟」状态（内容还没就绪），必须重试，否则背景永远不生效。
+        if (style == _appliedBackdropStyle && _appliedBackdropStyleApplied) return;
+        _appliedBackdropStyle = style;
+
+        SystemBackdrop? target = null;
         try
         {
             switch (style)
             {
                 case 1 when MicaController.IsSupported():
-                    SetBackdrop(new MicaBackdrop { Kind = MicaKind.Base });
+                    target = new MicaBackdrop { Kind = MicaKind.Base };
                     break;
                 case 2:
-                    SetBackdrop(null);
+                    target = null;
                     break;
                 default:
                     if (DesktopAcrylicController.IsSupported())
-                        SetBackdrop(new Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop());
+                        target = new Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop();
                     else if (MicaController.IsSupported())
-                        SetBackdrop(new MicaBackdrop { Kind = MicaKind.Base });
+                        target = new MicaBackdrop { Kind = MicaKind.Base };
                     else
-                        SetBackdrop(null);
+                        target = null;
                     break;
             }
         }
@@ -333,6 +423,8 @@ public sealed partial class MainWindow : Window
         {
         }
 
+        // 只有真正完成赋值才算「已应用」；被推迟时保持未应用，等 Loaded 重试。
+        _appliedBackdropStyleApplied = SetBackdrop(target);
         _miniWindow?.ApplyBackdropStyle(style);
     }
 
@@ -909,7 +1001,6 @@ public sealed partial class MainWindow : Window
         }
         ApplyBackdropStyle(style);
     }
-
     private void ApplyPaneWidth()
     {
         NavView.OpenPaneLength = _paneWidth;
