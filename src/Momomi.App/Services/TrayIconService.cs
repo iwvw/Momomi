@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using H.NotifyIcon;
 using H.NotifyIcon.Core;
 using Microsoft.UI.Xaml;
@@ -43,6 +44,22 @@ internal sealed class TrayIconService : IDisposable
 
     private string _lastIconFile = "TrayDefault.ico";
 
+    // ---- 任务栏重建看门狗 ----
+    //
+    // explorer 重启后托盘图标会消失。H.NotifyIcon 自身靠 TaskbarCreated 广播来重建，
+    // 但那条路径有两个不确定因素：
+    //   1) 主程序是 requireAdministrator（High 完整性），explorer 是中完整性，
+    //      UIPI 对低→高的自定义注册消息是否放行没有保证（本机无法构造 Medium 进程验证，
+    //      因为内置 Administrator + ConsentPromptBehaviorAdmin=0 下所有进程都是 High）；
+    //   2) 即便消息送达，也要依赖 H.NotifyIcon 内部状态机正确重建。
+    // 所以这里再加一道与消息无关的兜底：启动时按 Shell_TrayWnd 的宿主 PID 记下任务栏身份，
+    // 之后定时比对，发现 explorer/任务栏换了就主动重建图标。
+    // 只在进程真的换了才重建，平时零开销、也不会造成图标闪烁。
+    private Timer? _taskbarWatchdog;
+    private uint _trayOwnerPid;
+    private Microsoft.UI.Dispatching.DispatcherQueue? _ownerDispatcherQueue;
+    private TrayState? _lastState;
+
     public void Show(bool visible)
     {
         if (_icon is null)
@@ -75,6 +92,8 @@ internal sealed class TrayIconService : IDisposable
     private TaskbarIcon CreateIcon()
     {
         var icon = (TaskbarIcon)Application.Current.Resources["MomomiTrayIcon"];
+        // 记住创建线程的 DispatcherQueue：看门狗在线程池回调，重建图标必须回到 UI 线程。
+        _ownerDispatcherQueue = icon.DispatcherQueue;
         icon.RequestedTheme = _theme;
         icon.ContextMenuMode = ContextMenuMode.SecondWindow;
         // 菜单主题按应用主题显式映射（TaskbarIcon 不在可视树，ActualTheme 不可靠）。
@@ -111,8 +130,133 @@ internal sealed class TrayIconService : IDisposable
         }
 
         icon.ForceCreate(enablesEfficiencyMode: false);
+        AllowTaskbarCreatedMessage(icon);
+        StartTaskbarWatchdog(icon);
         return icon;
     }
+
+    /// <summary>
+    /// 定时检查任务栏（Shell_TrayWnd）的宿主进程是否还活着、是否变了。
+    /// explorer 重启后句柄和 PID 都会变，此时重建图标——不依赖 TaskbarCreated 能否送达。
+    /// </summary>
+    private void StartTaskbarWatchdog(TaskbarIcon icon)
+    {
+        _trayOwnerPid = GetShellTrayOwnerPid();
+
+        _taskbarWatchdog?.Dispose();
+        _taskbarWatchdog = new Timer(_ =>
+        {
+            try
+            {
+                var pid = GetShellTrayOwnerPid();
+                // 0 = 任务栏暂时不可用（explorer 正在重启），不算变化，等下一轮。
+                if (pid == 0) return;
+                if (pid == _trayOwnerPid) return;
+
+                _trayOwnerPid = pid;
+
+                // Timer 在线程池：WinUI 对象只能在创建它的线程上操作。
+                var queue = _ownerDispatcherQueue;
+                if (queue is null) return;
+                queue.TryEnqueue(() => Recreate(icon));
+            }
+            catch
+            {
+            }
+        }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+    }
+
+    /// <summary>重建托盘图标（等价于 H.NotifyIcon 收到 TaskbarCreated 时的处理）。</summary>
+    private void Recreate(TaskbarIcon icon)
+    {
+        try
+        {
+            if (!ReferenceEquals(icon, _icon)) return;
+            if (icon.TrayIcon.IsCreated) _ = icon.TrayIcon.TryRemove();
+            icon.ForceCreate(enablesEfficiencyMode: false);
+            ApplyStateAfterRecreate();
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"重建托盘图标失败：{ex}");
+        }
+    }
+
+    /// <summary>重建后把图标、ToolTip、菜单状态按当前快照再刷一遍。</summary>
+    private void ApplyStateAfterRecreate()
+    {
+        // 新图标的 IconSource 是空的；清掉缓存标记才能让 UpdateState → UpdateIcon 真正写一次。
+        _lastIconFile = "";
+        _icon!.Visibility = Visibility.Visible;
+        if (_lastState is not null) UpdateState(_lastState);
+    }
+
+    /// <summary>取 Shell_TrayWnd 的宿主进程 PID；任务栏不存在（explorer 重启中）返回 0。</summary>
+    private static uint GetShellTrayOwnerPid()
+    {
+        try
+        {
+            var hwnd = FindWindow("Shell_TrayWnd", null);
+            if (hwnd == IntPtr.Zero) return 0;
+            _ = GetWindowThreadProcessId(hwnd, out var pid);
+            return pid;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// 放行 explorer 广播的 TaskbarCreated，让 H.NotifyIcon 自身的重建逻辑也能生效。
+    ///
+    /// 主程序是 requireAdministrator（见 app.manifest），进程处于 High 完整性级别，
+    /// explorer 是中完整性。UIPI 默认拦截"低完整性 → 高完整性"的窗口消息，
+    /// TaskbarCreated 是 RegisterWindowMessage 注册的自定义消息、不在放行白名单里，
+    /// 因此不能指望它一定能送达（实测本机无法构造 Medium 进程验证，见看门狗处的说明）。
+    ///
+    /// H.NotifyIcon 2.5.0-beta.3 内部没有调用 ChangeWindowMessageFilterEx，
+    /// 这里显式放行，与下面的 PID 看门狗互为兜底：任一条生效图标都能恢复。
+    /// </summary>
+    private static void AllowTaskbarCreatedMessage(TaskbarIcon icon)
+    {
+        try
+        {
+            var hwnd = icon.TrayIcon.MessageWindow.Handle;
+            if (hwnd == IntPtr.Zero) return;
+
+            var message = RegisterWindowMessage("TaskbarCreated");
+            if (message == 0) return;
+
+            if (!ChangeWindowMessageFilterEx(hwnd, message, MSGFLT_ALLOW, IntPtr.Zero))
+            {
+                // 老系统（Win7 之前）没有 Ex 版本；降级为全局放行，仅影响本进程。
+                _ = ChangeWindowMessageFilter(message, MSGFLT_ALLOW);
+            }
+        }
+        catch
+        {
+            // 放行失败只是回到旧行为（explorer 重启后图标消失），不能影响托盘创建。
+        }
+    }
+
+    private const uint MSGFLT_ALLOW = 1;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint RegisterWindowMessage(string lpString);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool ChangeWindowMessageFilterEx(
+        IntPtr hwnd, uint message, uint action, IntPtr pChangeFilterStruct);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool ChangeWindowMessageFilter(uint message, uint dwFlag);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     /// <summary>按 x:Name 在菜单里查找项（含子菜单递归）。</summary>
     private static T? FindItem<T>(MenuFlyout menu, string name) where T : MenuFlyoutItemBase
@@ -147,6 +291,9 @@ internal sealed class TrayIconService : IDisposable
     public void UpdateState(TrayState state)
     {
         if (_icon is null) return;
+
+        // 记住最新快照：任务栏重建后要按这份状态把图标/ToolTip/菜单再刷一遍。
+        _lastState = state;
 
         if (_statusItem is not null)
         {
@@ -192,6 +339,8 @@ internal sealed class TrayIconService : IDisposable
 
     public void Dispose()
     {
+        _taskbarWatchdog?.Dispose();
+        _taskbarWatchdog = null;
         if (_icon is null) return;
         _icon.Visibility = Visibility.Collapsed;
         _icon.Dispose();
