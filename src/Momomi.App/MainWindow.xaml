@@ -42,6 +42,33 @@
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    Text="v-" />
                     </Border>
+
+                    <!-- 可更新胶囊：仅在有新版本时显示。
+                         TitleBar 整体是拖拽区，交互控件必须标 IsDragRegion="False"，
+                         否则点击会被当成拖窗口（见下方 UpdatePill 的附加属性）。 -->
+                    <Button x:Name="UpdatePill"
+                            TitleBar.IsDragRegion="False"
+                            VerticalAlignment="Center"
+                            Padding="8,2"
+                            MinHeight="0"
+                            MinWidth="0"
+                            Height="22"
+                            Visibility="Collapsed"
+                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                            BorderThickness="0"
+                            CornerRadius="11"
+                            Click="UpdatePill_Click"
+                            ToolTipService.ToolTip="发现新版本，点击更新">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <Ellipse Width="6" Height="6" VerticalAlignment="Center"
+                                     Fill="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                            <TextBlock x:Name="UpdatePillText"
+                                       VerticalAlignment="Center"
+                                       FontSize="11"
+                                       Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                       Text="可更新" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </TitleBar.LeftHeader>
             <TitleBar.RightHeader>

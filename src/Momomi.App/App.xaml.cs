@@ -372,22 +372,82 @@ public partial class App : Application
         }
     }
 
-    /// <summary>启动时后台静默检查应用更新（不打扰，结果供设置页展示）。</summary>
+    /// <summary>
+    /// 后台检查应用更新：启动后查一次，之后每 6 小时一次。
+    ///
+    /// 之前只在启动时查一次，结果也只有设置页能读到——一直开着不关的用户永远
+    /// 看不到有新版本。现在把结果广播给顶栏胶囊标签，并按固定间隔复查。
+    /// 失败不打扰用户（错误只写进 LastResult 与日志）。
+    /// </summary>
     private static async Task AutoCheckUpdateAsync()
     {
         try
         {
             var enabled = await AppHost.Host.Settings.GetBoolAsync("ui.autoCheckAppUpdate", true).ConfigureAwait(false);
             if (!enabled) return;
+
             // 延迟到内核启动后，避免与启动流量抢带宽。
             await Task.Delay(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
-            _ = AppHost.Host.AppUpdate.CheckAsync();
+
+            while (true)
+            {
+                await CheckAppUpdateOnceAsync().ConfigureAwait(false);
+
+                // 复查间隔。用设置项便于以后调整，默认 6 小时。
+                var hours = await AppHost.Host.Settings.GetIntAsync("ui.checkAppUpdateIntervalHours", 6).ConfigureAwait(false);
+                if (hours is < 1 or > 168) hours = 6;
+                await Task.Delay(TimeSpan.FromHours(hours)).ConfigureAwait(false);
+
+                // 每次复查前重新读开关，用户中途关掉了就停。
+                if (!await AppHost.Host.Settings.GetBoolAsync("ui.autoCheckAppUpdate", true).ConfigureAwait(false))
+                    return;
+            }
         }
         catch (Exception ex)
         {
             WriteLog($"自动检查更新失败：{ex}");
         }
     }
+
+    /// <summary>执行一次检查并把结果广播给界面（顶栏胶囊标签）。</summary>
+    private static async Task CheckAppUpdateOnceAsync()
+    {
+        try
+        {
+            var info = await AppHost.Host.AppUpdate.CheckAsync().ConfigureAwait(false);
+
+            // 有更新就广播；MSIX 形态不支持应用内自更新，不提示。
+            var updatable = info.HasUpdate
+                            && !string.IsNullOrEmpty(info.LatestVersion)
+                            && !IsMsixPackaged();
+            ViewModels.AppSignals.RaiseAppUpdateNotice(
+                updatable ? new ViewModels.AppUpdateNotice(info.LatestVersion!) : null);
+
+            if (info.Error is not null) WriteLog($"检查应用更新失败：{info.Error}");
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"检查应用更新异常：{ex}");
+        }
+    }
+
+    /// <summary>是否运行在 MSIX 包身份下（该形态不支持应用内覆盖式自更新）。</summary>
+    private static bool IsMsixPackaged()
+    {
+        try
+        {
+            // 非打包进程返回 APPMODEL_ERROR_NO_PACKAGE(15700)。
+            uint length = 0;
+            return GetCurrentPackageFullName(ref length, null) != 15700;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetCurrentPackageFullName(ref uint packageFullNameLength, System.Text.StringBuilder? packageFullName);
 
     private static async Task NavigateFromCommandLineAsync()
     {

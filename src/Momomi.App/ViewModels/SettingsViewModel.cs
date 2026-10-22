@@ -1030,7 +1030,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         if (_loading) return;
         _ = _host.Settings.SetBoolAsync("ui.autoCheckAppUpdate", value);
-        StatusText = value ? "已开启启动时自动检查更新" : "已关闭启动时自动检查更新";
+        StatusText = value ? "已开启自动检查更新（启动时 + 每 6 小时）" : "已关闭自动检查更新";
+
+        // 关掉自动检查时清掉顶栏胶囊：否则会一直挂着一个不再复查的旧结果。
+        if (!value) AppSignals.RaiseAppUpdateNotice(null);
     }
 
     [RelayCommand]
@@ -1045,6 +1048,12 @@ public sealed partial class SettingsViewModel : ObservableObject
             AppStatusText = info.Error is not null
                 ? $"检查失败：{info.Error}"
                 : info.HasUpdate ? "发现新版本" : "已是最新";
+
+            // 手动检查的结果也要反映到顶栏胶囊，否则两处显示会不一致。
+            AppSignals.RaiseAppUpdateNotice(
+                info.HasUpdate && !string.IsNullOrEmpty(info.LatestVersion)
+                    ? new AppUpdateNotice(info.LatestVersion)
+                    : null);
         }
         catch (Exception ex)
         {

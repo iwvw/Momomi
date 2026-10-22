@@ -24,6 +24,12 @@ public static class AppSignals
     /// <summary>当前内核安装状态；未在安装时为 null。</summary>
     public static KernelInstallProgress? KernelInstall { get; private set; }
 
+    /// <summary>应用有新版本可用（null 表示没有更新）。</summary>
+    public static event EventHandler<AppUpdateNotice?>? AppUpdateAvailableChanged;
+
+    /// <summary>最近一次检查到的应用更新；无更新或未检查时为 null。</summary>
+    public static AppUpdateNotice? AppUpdateAvailable { get; private set; }
+
     public static void RaiseProxiesChanged() => ProxiesChanged?.Invoke(null, EventArgs.Empty);
 
     public static void RaiseSwitchesChanged() => SwitchesChanged?.Invoke(null, EventArgs.Empty);
@@ -35,5 +41,15 @@ public static class AppSignals
         KernelInstall = progress;
         KernelInstallProgressChanged?.Invoke(null, progress ?? new KernelInstallProgress("", null));
     }
+
+    /// <summary>广播「有新版本」状态，供顶栏胶囊标签显示/隐藏。</summary>
+    public static void RaiseAppUpdateNotice(AppUpdateNotice? notice)
+    {
+        AppUpdateAvailable = notice;
+        AppUpdateAvailableChanged?.Invoke(null, notice);
+    }
 }
+
+/// <summary>可更新版本的通知信息（顶栏展示用）。</summary>
+public sealed record AppUpdateNotice(string Version);
 

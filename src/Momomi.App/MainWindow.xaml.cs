@@ -54,6 +54,7 @@ public sealed partial class MainWindow : Window
 
         // 默认窗口尺寸（用户调整后持久化，重启恢复；无记录时用较小的默认值）。
         RestoreWindowSize();
+        HookUpdatePill();
         _sizeSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
         _sizeSaveTimer.Tick += async (_, _) =>
         {
@@ -107,6 +108,120 @@ public sealed partial class MainWindow : Window
 
         _ = Hotkeys.LoadAsync();
         _ = WarmupMiniWindowAsync();
+    }
+
+    // ---- 顶栏「可更新」胶囊 ----
+
+    /// <summary>订阅更新状态广播，并按需显示顶栏胶囊。</summary>
+    private void HookUpdatePill()
+    {
+        ViewModels.AppSignals.AppUpdateAvailableChanged += (_, notice) =>
+            DispatcherQueue.TryEnqueue(() => ApplyUpdateNotice(notice));
+
+        // 首次打开窗口时补一次当前状态（检查可能早于本窗口创建完成）。
+        ApplyUpdateNotice(ViewModels.AppSignals.AppUpdateAvailable);
+    }
+
+    private void ApplyUpdateNotice(ViewModels.AppUpdateNotice? notice)
+    {
+        try
+        {
+            if (notice is null)
+            {
+                UpdatePill.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            UpdatePillText.Text = $"v{notice.Version} 可更新";
+            UpdatePill.Visibility = Visibility.Visible;
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"更新胶囊显示失败：{ex}");
+        }
+    }
+
+    private async void UpdatePill_Click(object sender, RoutedEventArgs e)
+    {
+        var notice = ViewModels.AppSignals.AppUpdateAvailable;
+        if (notice is null) return;
+
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "发现新版本",
+                Content = $"当前版本 v{Momomi.Core.Services.AppUpdateService.GetCurrentVersion()}，"
+                          + $"最新版本 v{notice.Version}。\n\n"
+                          + "更新会下载安装包并重启 Momomi，期间代理会短暂中断。是否现在更新？",
+                PrimaryButtonText = "立即更新",
+                CloseButtonText = "稍后",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = Content.XamlRoot,
+            };
+
+            if (await Pages.DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
+
+            await RunAppUpdateAsync();
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"一键更新失败：{ex}");
+        }
+    }
+
+    /// <summary>
+    /// 一键更新：下载 → 生成脚本 → 停内核并退出，由脚本接管安装与重启。
+    /// 与设置页的实现同源，这里补一个下载进度提示（顶栏点击时用户会盯着看）。
+    /// </summary>
+    private async Task RunAppUpdateAsync()
+    {
+        var host = AppHost.Host;
+        UpdatePillText.Text = "准备更新…";
+        UpdatePill.IsEnabled = false;
+
+        try
+        {
+            var progress = new Progress<double>(p =>
+                UpdatePillText.Text = $"下载 {p * 100:0}%");
+
+            var info = await host.AppUpdate.PrepareUpdateAsync(progress);
+            if (info.Error is not null)
+            {
+                UpdatePillText.Text = $"v{ViewModels.AppSignals.AppUpdateAvailable?.Version} 可更新";
+                UpdatePill.IsEnabled = true;
+                await ShowUpdateErrorAsync(info.Error);
+                return;
+            }
+
+            UpdatePillText.Text = "正在重启…";
+            ExitForUpdate();
+        }
+        catch (Exception ex)
+        {
+            UpdatePillText.Text = "更新失败";
+            UpdatePill.IsEnabled = true;
+            global::Momomi.App.App.WriteLog($"一键更新失败：{ex}");
+            await ShowUpdateErrorAsync(ex.Message);
+        }
+    }
+
+    private async Task ShowUpdateErrorAsync(string message)
+    {
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "更新失败",
+                Content = message,
+                CloseButtonText = "知道了",
+                XamlRoot = Content.XamlRoot,
+            };
+            await Pages.DialogGuard.ShowAsync(dialog);
+        }
+        catch
+        {
+        }
     }
 
     /// <summary>
