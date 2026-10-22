@@ -279,6 +279,12 @@ public sealed partial class OverridesViewModel : ObservableObject
         }
 
         await LoadAsync();
+
+        // 保存成功后收起编辑器。
+        // 之前这里只改 StatusText，而 StatusText 显示在页头副标题上、被编辑弹窗盖住，
+        // 用户看到的就是「点了保存但什么都没发生」。
+        // 应用失败（内核重载失败）不算保存失败，仍然关闭，原因写进 StatusText。
+        CloseEditor();
     }
 
     /// <summary>

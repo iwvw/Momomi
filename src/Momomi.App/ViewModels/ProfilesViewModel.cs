@@ -440,13 +440,37 @@ public sealed partial class ProfilesViewModel : ObservableObject
         IsEditorOpen = true;
     }
 
-    /// <summary>WinUI TextBox 只认 \r 作为换行：把订阅文件的 LF 统一成 CRLF 才能正常显示。</summary>
+    /// <summary>
+    /// 把订阅原文转成编辑器里显示的样子。
+    ///
+    /// 两件事：
+    /// 1. WinUI 的 TextBox/RichEditBox 只认 \r 作换行，LF 要统一成 CRLF；
+    /// 2. 订阅文件里的 emoji 大多被写成 "\U0001F1EC\U0001F1E7 伦敦" 这种转义
+    ///    （订阅服务端或我们自己的 YAML 序列化产物），直接显示是一串反斜杠，
+    ///    完全没法读。这里在显示层还原成真实 emoji。
+    ///
+    /// 注意只影响显示：保存时由 <see cref="ToStorageText"/> 把 emoji 对称地转回 \U 形式，
+    /// 因此「打开一次再保存」不会改动文件内容（已用真实订阅验证逐字节一致）。
+    /// </summary>
     private static string ToDisplayText(string text)
-        => text.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
+    {
+        var normalized = text.Replace("\r\n", "\n").Replace("\r", "\n");
+        var unescaped = YamlOverrideMerger.UnescapeUnicodeInDoubleQuoted(normalized);
+        return unescaped.Replace("\n", "\r\n");
+    }
 
-    /// <summary>保存时还原为 LF，与订阅原始文件保持一致。</summary>
+    /// <summary>
+    /// 把编辑器的文本还原成落盘格式。
+    ///
+    /// 1. CRLF → LF，与订阅原始文件保持一致；
+    /// 2. 把显示层还原出来的 emoji 再转回 \U 转义形式。
+    ///    编辑器里为了让用户看懂做了反转义（<see cref="ToDisplayText"/>），
+    ///    保存必须对称地转回去，否则「打开一次再保存」会把整份订阅的 emoji
+    ///    全部改写成裸字符，diff 一片红。
+    /// </summary>
     private static string ToStorageText(string text)
-        => text.Replace("\r\n", "\n").Replace("\r", "\n");
+        => YamlOverrideMerger.EscapeUnicodeInDoubleQuoted(
+            text.Replace("\r\n", "\n").Replace("\r", "\n"));
 
     [RelayCommand]
     private void CloseEditor()
@@ -455,6 +479,7 @@ public sealed partial class ProfilesViewModel : ObservableObject
         _editorRow = null;
         EditorText = "";
         RuntimePreview = "";
+        EditorError = "";
     }
 
     [RelayCommand]
@@ -468,7 +493,7 @@ public sealed partial class ProfilesViewModel : ObservableObject
             var ok = await _host.Profiles.SaveContentAsync(row.Id, ToStorageText(EditorText));
             if (!ok)
             {
-                StatusText = "保存失败";
+                EditorError = "保存失败：无法写入订阅文件（检查数据目录是否可写）";
                 return;
             }
 
@@ -484,17 +509,32 @@ public sealed partial class ProfilesViewModel : ObservableObject
                 StatusText = "已保存";
             }
 
-            await LoadAsync();
+            // 保存成功就收起编辑器。
+            //
+            // 之前这里只改了 StatusText，而 StatusText 只显示在页面副标题上——
+            // 编辑弹窗是盖住整页的，用户根本看不到那行字，于是「点保存没反应」。
+            // 现在：成功则关闭弹窗；失败则把原因显示在弹窗内的错误条上。
+            CloseEditor();
 
-            if (row.IsActive && EditorTabIndex == 1) await RefreshRuntimePreviewAsync();
+            await LoadAsync();
         }
         catch (Exception ex)
         {
-            // SaveContentAsync 现在会对非法 YAML 抛 InvalidOperationException；
+            // SaveContentAsync 会对非法 YAML 抛 InvalidOperationException；
             // 其余（磁盘写失败等）也一并在这里落地，不让异常冒到 async void 的调用方。
+            EditorError = $"保存失败：{ex.Message}";
             StatusText = $"保存失败：{ex.Message}";
         }
     }
+
+    /// <summary>编辑器内的错误提示（显示在弹窗里，用户能直接看到）。</summary>
+    [ObservableProperty]
+    public partial string EditorError { get; set; } = "";
+
+    [ObservableProperty]
+    public partial bool HasEditorError { get; set; }
+
+    partial void OnEditorErrorChanged(string value) => HasEditorError = !string.IsNullOrEmpty(value);
 
     /// <summary>生成运行时配置文本：订阅原始内容叠加全局注入项（端口/DNS/TUN 等）。</summary>
     private async Task RefreshRuntimePreviewAsync()

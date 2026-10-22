@@ -108,15 +108,17 @@ public static class YamlOverrideMerger
     }
 
     /// <summary>
+    /// 把双引号字符串内的 \U / \u 转义还原成真实字符。
+    ///
     /// YamlDotNet 的 emitter 会把星平面字符（> U+FFFF，即绝大多数 emoji）写成
     /// \U0001F680 这样的转义，而中文、日文等 BMP 字符原样保留。
     /// 结果是订阅里的 emoji 组名变成「\U0001F680 手动」，在编辑器里几乎没法读，
     /// 差异视图也会把每条带 emoji 的规则都标成改动。
     ///
-    /// 这里把双引号字符串内的 \U / \u 转义还原成字符。只处理双引号内的内容：
-    /// 裸标量或单引号里的反斜杠是用户的字面量，不能动。
+    /// 只处理双引号内的内容：裸标量或单引号里的反斜杠是用户的字面量，不能动。
+    /// 公开以便编辑器显示层复用（订阅文件本身正是被这样转义过的）。
     /// </summary>
-    private static string UnescapeUnicodeInDoubleQuoted(string yaml)
+    public static string UnescapeUnicodeInDoubleQuoted(string yaml)
     {
         if (yaml.IndexOf("\\U", StringComparison.Ordinal) < 0
             && yaml.IndexOf("\\u", StringComparison.Ordinal) < 0)
@@ -162,6 +164,64 @@ public static class YamlOverrideMerger
 
                 // 其它转义原样保留（\" \\ \n 等交给 YAML 语义处理）。
                 sb.Append(ch).Append(next);
+                i++;
+                continue;
+            }
+
+            sb.Append(ch);
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// <see cref="UnescapeUnicodeInDoubleQuoted"/> 的反向操作：把双引号内的星平面字符
+    /// （> U+FFFF 的 emoji）转回 <c>\U0001F1EC</c> 形式。
+    ///
+    /// 用途：编辑器把 \U 转义显示成真实 emoji 让用户看得懂，但保存时要写回原来的形式，
+    /// 否则「打开一次再保存」会把整份订阅的 emoji 全部改写成另一种写法，
+    /// 文件 diff 一片红、也容易让人误以为改动了很多内容。
+    ///
+    /// 只处理双引号内且只处理星平面字符：BMP 内的字符（中文等）YamlDotNet 本来就不转义，
+    /// 保持原样才能与既有文件一致。
+    /// </summary>
+    public static string EscapeUnicodeInDoubleQuoted(string yaml)
+    {
+        if (yaml.Length == 0) return yaml;
+
+        var sb = new System.Text.StringBuilder(yaml.Length);
+        var inDoubleQuote = false;
+
+        for (var i = 0; i < yaml.Length; i++)
+        {
+            var ch = yaml[i];
+
+            if (!inDoubleQuote)
+            {
+                if (ch == '"') inDoubleQuote = true;
+                sb.Append(ch);
+                continue;
+            }
+
+            if (ch == '\\' && i + 1 < yaml.Length)
+            {
+                // 已有的转义序列原样保留（含 \" 与已经是 \U 的写法）。
+                sb.Append(ch).Append(yaml[i + 1]);
+                i++;
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                inDoubleQuote = false;
+                sb.Append(ch);
+                continue;
+            }
+
+            if (char.IsHighSurrogate(ch) && i + 1 < yaml.Length && char.IsLowSurrogate(yaml[i + 1]))
+            {
+                var code = char.ConvertToUtf32(ch, yaml[i + 1]);
+                sb.Append("\\U").Append(code.ToString("X8"));
                 i++;
                 continue;
             }

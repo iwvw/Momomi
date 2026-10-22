@@ -219,6 +219,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <Grid Grid.Row="0" ColumnSpacing="12" Margin="0,0,0,12">
@@ -275,7 +276,16 @@
                                       Visibility="{x:Bind ViewModel.IsEditorBusy, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                     </Grid>
 
-                    <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+                    <!-- 保存失败的原因显示在弹窗里：StatusText 只出现在页面副标题上，
+                         被弹窗盖住后用户根本看不到（这正是「点保存没反应」的成因之一）。 -->
+                    <InfoBar Grid.Row="3"
+                             IsOpen="{x:Bind ViewModel.HasEditorError, Mode=OneWay}"
+                             Severity="Error"
+                             IsClosable="False"
+                             Margin="0,8,0,0"
+                             Message="{x:Bind ViewModel.EditorError, Mode=OneWay}" />
+
+                    <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
                         <Button Style="{StaticResource AccentButtonStyle}"
                                 Click="SaveEditor_Click"
                                 Content="保存并应用" />
