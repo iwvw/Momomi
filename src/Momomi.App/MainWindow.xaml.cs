@@ -132,7 +132,8 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            UpdatePillText.Text = $"v{notice.Version} 可更新";
+            // 下载进行中不要覆盖进度文案（此时广播可能因为复查再次触发）。
+            if (!_updateInFlight) UpdatePillText.Text = $"v{notice.Version} 可更新";
             UpdatePill.Visibility = Visibility.Visible;
         }
         catch (Exception ex)
@@ -140,6 +141,9 @@ public sealed partial class MainWindow : Window
             global::Momomi.App.App.WriteLog($"更新胶囊显示失败：{ex}");
         }
     }
+
+    /// <summary>下载中/重启中：防止重复点击。不用 IsEnabled——禁用态会让模板改掉胶囊配色。</summary>
+    private bool _updateInFlight;
 
     private async void UpdatePill_Click(object sender, RoutedEventArgs e)
     {
@@ -176,9 +180,11 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private async Task RunAppUpdateAsync()
     {
+        if (_updateInFlight) return;
+        _updateInFlight = true;
+
         var host = AppHost.Host;
         UpdatePillText.Text = "准备更新…";
-        UpdatePill.IsEnabled = false;
 
         try
         {
@@ -188,8 +194,8 @@ public sealed partial class MainWindow : Window
             var info = await host.AppUpdate.PrepareUpdateAsync(progress);
             if (info.Error is not null)
             {
-                UpdatePillText.Text = $"v{ViewModels.AppSignals.AppUpdateAvailable?.Version} 可更新";
-                UpdatePill.IsEnabled = true;
+                RestoreUpdatePillText();
+                _updateInFlight = false;
                 await ShowUpdateErrorAsync(info.Error);
                 return;
             }
@@ -200,10 +206,18 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             UpdatePillText.Text = "更新失败";
-            UpdatePill.IsEnabled = true;
+            _updateInFlight = false;
             global::Momomi.App.App.WriteLog($"一键更新失败：{ex}");
             await ShowUpdateErrorAsync(ex.Message);
         }
+    }
+
+    /// <summary>把胶囊文案恢复成「vX.Y.Z 可更新」。</summary>
+    private void RestoreUpdatePillText()
+    {
+        var notice = ViewModels.AppSignals.AppUpdateAvailable;
+        if (notice is not null)
+            UpdatePillText.Text = $"v{notice.Version} 可更新";
     }
 
     private async Task ShowUpdateErrorAsync(string message)

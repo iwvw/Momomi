@@ -45,29 +45,50 @@
 
                     <!-- 可更新胶囊：仅在有新版本时显示。
                          TitleBar 整体是拖拽区，交互控件必须标 IsDragRegion="False"，
-                         否则点击会被当成拖窗口（见下方 UpdatePill 的附加属性）。 -->
+                         否则点击会被当成拖窗口。
+
+                         外观用「单 visual」的做法：Button 自身透明无边框，圆角背景由内部
+                         一个 Grid 承载。原因见 App.xaml 的 CardStyle 注释——Border 同时带
+                         Background + BorderThickness + CornerRadius 时会被拆成两个 visual，
+                         圆角处出现接缝/锯齿（microsoft-ui-xaml#9454）。
+
+                         另外不要用 IsEnabled=false 表示「正在下载」：禁用态会由模板覆盖
+                         Background 与文字色，胶囊会变成灰底暗字（看起来就像样式坏了）。
+                         重复点击用代码里的 _updateInFlight 拦截，文案改为进度即可。 -->
                     <Button x:Name="UpdatePill"
                             TitleBar.IsDragRegion="False"
                             VerticalAlignment="Center"
-                            Padding="8,2"
+                            Padding="0"
                             MinHeight="0"
                             MinWidth="0"
                             Height="22"
                             Visibility="Collapsed"
-                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                            Background="Transparent"
                             BorderThickness="0"
-                            CornerRadius="11"
+                            HorizontalAlignment="Left"
+                            HorizontalContentAlignment="Left"
+                            VerticalContentAlignment="Center"
                             Click="UpdatePill_Click"
                             ToolTipService.ToolTip="发现新版本，点击更新">
-                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                            <Ellipse Width="6" Height="6" VerticalAlignment="Center"
-                                     Fill="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
-                            <TextBlock x:Name="UpdatePillText"
-                                       VerticalAlignment="Center"
-                                       FontSize="11"
-                                       Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
-                                       Text="可更新" />
-                        </StackPanel>
+                        <Grid Height="22" CornerRadius="11"
+                              Padding="9,0"
+                              HorizontalAlignment="Left"
+                              VerticalAlignment="Center"
+                              Background="{ThemeResource AccentFillColorDefaultBrush}">
+                            <StackPanel Orientation="Horizontal" Spacing="6"
+                                        VerticalAlignment="Center">
+                                <!-- 前景色写死白色：胶囊底色恒为 AccentFillColorDefaultBrush，
+                                     TextOnAccentFillColorPrimaryBrush 在部分主题组合下会解析成黑色，
+                                     深色底 + 黑字完全看不清。白字在浅/深两种 accent 上都可读。 -->
+                                <Ellipse Width="6" Height="6" VerticalAlignment="Center"
+                                         Fill="White" />
+                                <TextBlock x:Name="UpdatePillText"
+                                           VerticalAlignment="Center"
+                                           FontSize="11"
+                                           Foreground="White"
+                                           Text="可更新" />
+                            </StackPanel>
+                        </Grid>
                     </Button>
                 </StackPanel>
             </TitleBar.LeftHeader>
