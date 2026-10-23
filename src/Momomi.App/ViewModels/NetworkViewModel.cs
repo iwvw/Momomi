@@ -169,12 +169,13 @@ public sealed partial class NetworkViewModel : ObservableObject
             foreach (var target in Targets)
                 target.IsTesting = true;
 
-            // 与节点测速同策略：并发受控 + 每目标多次取最小。
+            // 与节点测速同策略：并发受控 + 每目标单次测量。
+            // 目标只有几个，直接全部并发，不必排队等前一个。
             await DelayTester.MeasureAllHttpAsync(
                 Targets,
                 t => t.Url,
                 MakeLatencyClient,
-                concurrency: 4,
+                concurrency: Math.Max(1, Targets.Count),
                 timeoutMs: 6000,
                 (target, ms) =>
                 {

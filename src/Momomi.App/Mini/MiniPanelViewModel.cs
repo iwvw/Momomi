@@ -317,21 +317,30 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
     {
         if (_core.Api is null || group.IsTesting) return;
         _dispatcher.TryEnqueue(() => group.IsTesting = true);
-        // 统一走 DelayTester：并发受控 + 每节点多次取最小，与主面板测速逻辑一致。
+        // 统一走 DelayTester：并发受控 + 每节点单次测量，与主面板测速逻辑一致。
+        // 结果边测边刷（每 200ms 合批），节点多的组不用等到全部测完才看到数字。
+        // 只就地更新、不广播：广播会让主面板整页重载，整组测完再发一次就够。
         var names = group.Nodes.Select(n => n.Name).ToList();
-        var delays = new Dictionary<string, int>(StringComparer.Ordinal);
-        await DelayTester.MeasureAllAsync(
-            _core.Api, names, _delayTestUrl, _delayTestTimeoutMs, _delayTestConcurrency,
-            (name, delay) =>
-            {
-                lock (delays) delays[name] = delay;
-                return Task.CompletedTask;
-            }).ConfigureAwait(false);
+        var batch = new DelayBatch(_dispatcher, group.ApplyMeasuredDelays);
+        try
+        {
+            await DelayTester.MeasureAllAsync(
+                _core.Api, names, _delayTestUrl, _delayTestTimeoutMs, _delayTestConcurrency,
+                (name, delay) =>
+                {
+                    batch.Report(name, delay);
+                    return Task.CompletedTask;
+                }).ConfigureAwait(false);
+        }
+        finally
+        {
+            batch.Close();
+        }
 
         _dispatcher.TryEnqueue(() =>
         {
-            group.ApplyDelays(delays);
             group.IsTesting = false;
+            group.SortByDelay();
             // 广播让主面板等其他视图同步延迟；自己已就地更新，跳过重载。
             _suppressSelfReload = true;
             try

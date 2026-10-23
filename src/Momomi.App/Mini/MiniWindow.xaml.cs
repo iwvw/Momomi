@@ -3,6 +3,7 @@ using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
+using Momomi.Core.Services;
 using WinRT.Interop;
 
 namespace Momomi.App.Mini;
@@ -221,6 +222,12 @@ public sealed partial class MiniWindow : Window
     {
         _forceClose = true;
         _statsTimer.Stop();
+
+        // 窗口即将销毁，必须摘掉活动标记：
+        // 如果它是在显示状态下被销毁的（退出程序、渲染出错后重建），
+        // 标记就会永远留着，导致工作集回收彻底失效。
+        WorkingSetTrimmer.EndActivity(ActivitySources.MiniWindow);
+
         Panel.ViewModel.Dispose();
         _slider.Dispose();
         // 解挂子类化，避免窗口销毁后仍留着指向托管委托的原生入口。
@@ -263,6 +270,9 @@ public sealed partial class MiniWindow : Window
     {
         bool wasHidden = _state is VisState.Hidden;
         _state = VisState.Showing;
+
+        // 马上要开始渲染动画，登记活动来源，避免这时被清工作集。
+        WorkingSetTrimmer.BeginActivity(ActivitySources.MiniWindow);
 
         // 每次呼出都重新定位：托盘图标可能已经换到另一块屏幕（改缩放后同样需要）。
         UpdateTargetRect(monitor);
@@ -331,6 +341,15 @@ public sealed partial class MiniWindow : Window
         _appWindow.Hide();
         _appWindow.MoveAndResize(_targetRect);
         _state = VisState.Hidden;
+
+        // 面板已收起、不再渲染，把工作集交还系统。
+        // 这是最频繁开合的窗口，每次收起都会留下一些 D3D/字形缓存，
+        // 不主动剥出去就会一直驻留——托盘常驻场景下这是内存的主要来源。
+        WorkingSetTrimmer.EndActivity(ActivitySources.MiniWindow);
+
+        // 延后一拍：现在还在 WindowSlider 的动画回调里，
+        // 立刻清工作集会和它紧接着的收尾操作抢同一批页。
+        _ = DispatcherQueue.TryEnqueue(() => WorkingSetTrimmer.TryTrim("迷你面板收起"));
     }
 
     private void OpenFullPanel()

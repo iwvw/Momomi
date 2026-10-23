@@ -10,8 +10,14 @@ public static class DelayTestSettings
 {
     public const string DefaultUrl = "https://www.gstatic.com/generate_204";
     public const int DefaultTimeoutMs = 3000;
-    // 并发过高时节点间会互相争抢带宽/连接，批量测速读数被抬高；默认降到 8 更接近单点测速。
-    public const int DefaultConcurrency = 8;
+
+    // 对齐 clash-party：每个节点只测一次，省下的时间用来拉高并发。
+    // 50 对内核来说不算多（mihomo 自己测整组时是不限并发的），
+    // 过低会变成排队等结果，反而比节点本身的延迟更耗时。
+    public const int DefaultConcurrency = 50;
+
+    /// <summary>并发上限，防止手滑填出离谱的值把内核/网络打满。</summary>
+    public const int MaxConcurrency = 128;
 
     public static async Task<(string Url, int TimeoutMs, int Concurrency)> ReadAsync(ISettingsService settings)
     {
@@ -22,6 +28,7 @@ public static class DelayTestSettings
         if (string.IsNullOrWhiteSpace(url)) url = DefaultUrl;
         if (timeout <= 0) timeout = DefaultTimeoutMs;
         if (concurrency <= 0) concurrency = DefaultConcurrency;
+        if (concurrency > MaxConcurrency) concurrency = MaxConcurrency;
 
         return (url!, timeout, concurrency);
     }

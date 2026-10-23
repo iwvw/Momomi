@@ -43,7 +43,7 @@ public static class MihomoConfigBuilder
         {
             "external-controller", "secret", "port", "socks-port", "mixed-port",
             "allow-lan", "mode", "log-level", "ipv6", "tun", "external-controller-cors",
-            "dns",
+            "dns", "unified-delay",
         };
         foreach (var key in keysToStrip)
             root.Children.Remove(new YamlScalarNode(key));
@@ -55,6 +55,11 @@ public static class MihomoConfigBuilder
         root.Children[new YamlScalarNode("ipv6")] = new YamlScalarNode(options.Ipv6 ? "true" : "false");
         root.Children[new YamlScalarNode("external-controller")] = new YamlScalarNode($"127.0.0.1:{options.ControllerPort}");
         root.Children[new YamlScalarNode("secret")] = new YamlScalarNode(options.Secret);
+
+        // 统一延迟：内核测速时扣掉 TLS/TCP 握手耗时，只报真实往返时间。
+        // 不开的话同一个节点在测速接口里会凭空多出一次握手的开销（几十到几百毫秒），
+        // 数字比实际使用时的体验大得多。clash-party 也默认打开这一项。
+        root.Children[new YamlScalarNode("unified-delay")] = new YamlScalarNode("true");
 
         root.Children[new YamlScalarNode("dns")] = BuildDnsNode(options.TunEnabled);
 

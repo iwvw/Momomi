@@ -93,7 +93,21 @@ public sealed partial class MainWindow : Window
             // 兜底：内容就绪之前被推迟的背景材质，在这里补一次。
             // （正常会被根元素 Loaded 先触发，这条只是防止 Content 分支没覆盖到。）
             RetryPendingBackdrop();
+
+            // 用户回来了，刷新活跃时间戳，避免这时被回收工作集造成卡顿。
+            WorkingSetTrimmer.Touch(ActivitySources.MainWindow);
         };
+
+        // 任何指针活动都说明界面在动，刷新活跃时间戳。
+        // 只挂一次在根元素上：XAML 的指针事件会从命中的子元素冒泡上来。
+        if (Content is UIElement root)
+        {
+            root.AddHandler(
+                UIElement.PointerMovedEvent,
+                new Microsoft.UI.Xaml.Input.PointerEventHandler(
+                    (_, _) => WorkingSetTrimmer.Touch(ActivitySources.MainWindow)),
+                handledEventsToo: true);
+        }
 
         CreateTray();
         HookThemeChange();
@@ -796,8 +810,26 @@ public sealed partial class MainWindow : Window
     {
         AppWindow.Hide();
         ViewModels.AppSignals.RaiseMainWindowVisibility(false);
-        // 释放主界面页面的可视化树并压缩工作集：托盘/仅迷你模式下常驻内存显著下降。
+
+        // 释放主界面页面的可视化树，然后把工作集交还系统。
+        //
+        // 这里必须调 EmptyWorkingSet：ReleasePageContent 后面的 GC.Collect
+        // 只回收托管对象，而常驻内存的大头是 WinUI/D3D 的原生页
+        // （交换链、着色器缓存、字形纹理），GC 完全碰不到它们。
+        // 不主动剥出去，任务管理器里那几十上百兆会一直挂着。
+        WorkingSetTrimmer.EndActivity(ActivitySources.MainWindow);
         ReleasePageContent();
+
+        // 稍等一拍再修剪：Hide() 之后 XAML 还要跑完收起动画、释放交换链，
+        // 立刻清工作集会和那批释放操作抢同一批页。
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            await Task.Delay(1200).ConfigureAwait(true);
+
+            // 页面树已置空、窗口已隐藏，此时压缩托管堆不会造成可见停顿，
+            // 还能把 ReleasePageContent 掉下的页面一起还回去。
+            WorkingSetTrimmer.CompactAndTrim("主窗口隐藏");
+        });
     }
 
     /// <summary>隐藏主窗口到托盘（用于静默启动）。</summary>
@@ -922,6 +954,11 @@ public sealed partial class MainWindow : Window
     public void ShowAndActivate()
     {
         EnsureInitialPageLoaded();
+
+        // 窗口要开始渲染了，登记活动来源，
+        // 否则空闲看门狗可能在用户刚点开的瞬间清工作集，造成首帧卡顿。
+        WorkingSetTrimmer.BeginActivity(ActivitySources.MainWindow);
+
         AppWindow.Show();
         ViewModels.AppSignals.RaiseMainWindowVisibility(true);
         SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));

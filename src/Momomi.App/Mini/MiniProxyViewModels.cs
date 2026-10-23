@@ -85,7 +85,7 @@ public sealed partial class MiniProxyGroupViewModel : ObservableObject
         }
 
         // 以 API 的当前选中项为准同步选择（跨面板切换节点时生效）；
-        // now 无效时保留已有选择，避免重排/刷新把选择清空。测速走 ApplyDelays，不经过这里。
+        // now 无效时保留已有选择，避免重排/刷新把选择清空。测速走 ApplyMeasuredDelays，不经过这里。
         var target = now is null ? null : Nodes.FirstOrDefault(n => n.Name == now);
         if (target is not null)
             Selected = target;
@@ -128,11 +128,17 @@ public sealed partial class MiniProxyGroupViewModel : ObservableObject
         OnPropertyChanged(nameof(Selected));
     }
 
-    public void ApplyDelays(IReadOnlyDictionary<string, int> delays)
+    /// <summary>
+    /// 增量写入一批测速结果：只更新本批出现的节点，不把还没测到的节点清成超时。
+    /// 不排序——测速过程中每 200ms 就重排一次列表会让节点在选择器里跳来跳去，
+    /// 等整组测完再统一 <see cref="SortByDelay"/>。
+    /// </summary>
+    public void ApplyMeasuredDelays(IReadOnlyDictionary<string, int> delays)
     {
         foreach (var node in Nodes)
-            node.Delay = delays.TryGetValue(node.Name, out var d) && d > 0 ? d : 0;
-
-        SortByDelay();
+        {
+            if (delays.TryGetValue(node.Name, out var d))
+                node.Delay = d > 0 ? d : 0;
+        }
     }
 }

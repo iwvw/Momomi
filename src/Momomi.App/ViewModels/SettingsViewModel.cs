@@ -143,10 +143,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial string DelayTestUrl { get; set; } = DelayTestSettings.DefaultUrl;
 
     [ObservableProperty]
-    public partial string DelayTestTimeout { get; set; } = "3000";
+    public partial string DelayTestTimeout { get; set; } = DelayTestSettings.DefaultTimeoutMs.ToString();
 
     [ObservableProperty]
-    public partial string DelayTestConcurrency { get; set; } = "16";
+    public partial string DelayTestConcurrency { get; set; } = DelayTestSettings.DefaultConcurrency.ToString();
 
     [ObservableProperty]
     public partial string SubscriptionUserAgent { get; set; } = "";
@@ -518,8 +518,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     partial void OnDelayTestConcurrencyChanged(string value)
     {
         if (_loading) return;
-        if (int.TryParse(value, out var n) && n > 0)
-            _ = _host.Settings.SetIntAsync("core.delayTestConcurrency", n);
+        if (!int.TryParse(value, out var n) || n <= 0) return;
+        n = Math.Min(n, DelayTestSettings.MaxConcurrency);
+        _ = _host.Settings.SetIntAsync("core.delayTestConcurrency", n);
+
+        // 超出上限时把输入框改回钳制后的值；赋值会再进一次本方法，
+        // 那一轮 n.ToString() 与 value 相等，不会继续递归。
+        if (n.ToString() != value) DelayTestConcurrency = n.ToString();
     }
 
     partial void OnSubscriptionUserAgentChanged(string value)

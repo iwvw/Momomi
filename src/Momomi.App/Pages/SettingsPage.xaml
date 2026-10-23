@@ -267,13 +267,13 @@
                                  LostFocus="TextField_LostFocus" KeyDown="TextField_KeyDown" />
                     </controls:SettingsCard>
 
-                    <controls:SettingsCard Description="单次测速超时（毫秒）" Header="超时">
+                    <controls:SettingsCard Description="单次测速超时（毫秒），超过即判为超时" Header="超时">
                         <TextBox Width="120" Tag="DelayTestTimeout"
                                  Text="{x:Bind ViewModel.DelayTestTimeout, Mode=TwoWay}"
                                  LostFocus="TextField_LostFocus" KeyDown="TextField_KeyDown" />
                     </controls:SettingsCard>
 
-                    <controls:SettingsCard Description="全部测速时的并发数" Header="并发数">
+                    <controls:SettingsCard Description="同时测多少个节点，每个节点只测一次；默认 50，上限 128" Header="并发数">
                         <TextBox Width="120" Tag="DelayTestConcurrency"
                                  Text="{x:Bind ViewModel.DelayTestConcurrency, Mode=TwoWay}"
                                  LostFocus="TextField_LostFocus" KeyDown="TextField_KeyDown" />

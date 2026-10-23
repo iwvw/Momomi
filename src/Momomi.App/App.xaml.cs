@@ -10,6 +10,9 @@ public partial class App : Application
 
     public static MainWindow? Main { get; private set; }
 
+    /// <summary>工作集回收看门狗，只在界面长时间不渲染时生效。</summary>
+    private static IDisposable? _memoryWatchdog;
+
     // 单实例互斥：防止开机自启计划任务、托盘重复点击、用户多次双击等导致多开。
     private static Mutex? _instanceMutex;
     private const string MutexName = "Momomi.SingleInstance.v2";
@@ -343,8 +346,15 @@ public partial class App : Application
         }
         else
         {
+            WorkingSetTrimmer.BeginActivity(ActivitySources.MainWindow);
             _window.Activate();
         }
+
+        // 托盘常驻场景下，工作集不会因为窗口隐藏就自己降下来：
+        // WinUI/D3D 申请的原生页会一直留在进程里，直到系统因内存压力换出。
+        // 这里起一个低频看门狗兜底——界面长时间不渲染时把它交还系统，
+        // 免得用户看到任务管理器里挂着一百多兆觉得程序有问题。
+        _memoryWatchdog = WorkingSetTrimmer.StartIdleWatchdog(TimeSpan.FromSeconds(90));
 
         _ = ApplyThemeFromSettingsAsync();
         _ = AutoStartCoreAsync();

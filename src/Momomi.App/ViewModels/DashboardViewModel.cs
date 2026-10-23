@@ -357,12 +357,12 @@ public sealed partial class DashboardViewModel : ObservableObject
             foreach (var target in Targets)
                 _dispatcher.TryEnqueue(() => target.IsTesting = true);
 
-            // 与节点测速同策略：并发受控 + 每目标多次取最小。
+            // 与节点测速同策略：并发受控 + 每目标单次测量；目标很少，直接全部并发。
             await DelayTester.MeasureAllHttpAsync(
                 Targets,
                 t => t.Url,
                 MakeLatencyClient,
-                concurrency: 4,
+                concurrency: Math.Max(1, Targets.Count),
                 timeoutMs: 6000,
                 (target, ms) =>
                 {

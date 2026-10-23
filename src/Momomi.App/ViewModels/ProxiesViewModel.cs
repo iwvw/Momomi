@@ -113,23 +113,30 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
     [RelayCommand]
     private async Task TestAsync()
     {
-        if (_core.Api is null) return;
+        if (_core.Api is null || IsBusy) return;
         IsBusy = true;
         try
         {
-            // 统一走 DelayTester：并发受控 + 每节点多次取最小，与全部测速/单点测速一致。
+            // 统一走 DelayTester：并发受控 + 每节点单次测量，与全部测速/单点测速一致。
+            // 结果按 200ms 批量写回，避免 N 次跨线程调度把 UI 拖住。
             _owner.Dispatcher.TryEnqueue(() => { foreach (var n in _all) n.IsTesting = true; });
             var names = _all.Select(n => n.Name).ToList();
-            await DelayTester.MeasureAllAsync(
-                _core.Api, names, _owner.DelayTestUrl, _owner.DelayTestTimeoutMs, _owner.DelayTestConcurrency,
-                (name, delay) =>
-                {
-                    _owner.Dispatcher.TryEnqueue(() =>
+            var scope = new HashSet<ProxyItemViewModel>(_all);
+            var batch = new DelayBatch(_owner.Dispatcher, results => _owner.ApplyDelayBatch(results, scope));
+            try
+            {
+                await DelayTester.MeasureAllAsync(
+                    _core.Api, names, _owner.DelayTestUrl, _owner.DelayTestTimeoutMs, _owner.DelayTestConcurrency,
+                    (name, delay) =>
                     {
-                        _owner.SyncNodeDelay(name, delay, delay > 0);
-                    });
-                    return Task.CompletedTask;
-                }).ConfigureAwait(false);
+                        batch.Report(name, delay);
+                        return Task.CompletedTask;
+                    }).ConfigureAwait(false);
+            }
+            finally
+            {
+                batch.Close();
+            }
 
             _owner.Dispatcher.TryEnqueue(() =>
             {
@@ -457,62 +464,98 @@ public sealed partial class ProxiesViewModel : ObservableObject
     [RelayCommand]
     private async Task TestAllAsync()
     {
-        if (_core.Api is null) return;
+        if (_core.Api is null || IsBusy) return;
         IsBusy = true;
         try
         {
             // 按节点名去重：同一物理节点在多个组里只测一次，
             // 避免重复并发请求互相竞争导致结果不一致。
-            var byName = new Dictionary<string, List<ProxyItemViewModel>>(StringComparer.Ordinal);
+            var names = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var nodes = new List<ProxyItemViewModel>();
             foreach (var group in Groups)
             {
                 foreach (var node in group.AllNodes)
                 {
-                    if (!byName.TryGetValue(node.Name, out var list))
-                    {
-                        list = new List<ProxyItemViewModel>();
-                        byName[node.Name] = list;
-                    }
-                    list.Add(node);
+                    nodes.Add(node);
+                    if (seen.Add(node.Name)) names.Add(node.Name);
                 }
             }
 
-            var names = byName.Keys.ToList();
             foreach (var g in Groups) g.SetBusy(true);
             // 测速期间为每个待测节点点亮旋转动画（单点测速在 TestNodeAsync 里已处理）。
             _dispatcher.TryEnqueue(() =>
             {
-                foreach (var node in byName.Values.SelectMany(v => v))
-                    node.IsTesting = true;
+                foreach (var node in nodes) node.IsTesting = true;
             });
 
-            // 统一走 DelayTester：并发受控 + 每节点多次取最小，与单点/组测速一致。
-            await DelayTester.MeasureAllAsync(
-                _core.Api, names, DelayTestUrl, DelayTestTimeoutMs, DelayTestConcurrency,
-                (name, delay) =>
-                {
-                    _dispatcher.TryEnqueue(() =>
+            // 统一走 DelayTester：并发受控 + 每节点单次测量，与单点/组测速一致。
+            // 结果批量写回，节点多时才不会卡在界面更新上。
+            var batch = new DelayBatch(_dispatcher, results => ApplyDelayBatch(results));
+            try
+            {
+                await DelayTester.MeasureAllAsync(
+                    _core.Api, names, DelayTestUrl, DelayTestTimeoutMs, DelayTestConcurrency,
+                    (name, delay) =>
                     {
-                        foreach (var node in byName[name])
-                        {
-                            node.IsTesting = false;
-                            node.Delay = delay;
-                            node.IsAlive = delay > 0;
-                        }
-                    });
-                    return Task.CompletedTask;
-                }).ConfigureAwait(false);
+                        batch.Report(name, delay);
+                        return Task.CompletedTask;
+                    }).ConfigureAwait(false);
+            }
+            finally
+            {
+                batch.Close();
+            }
 
             _dispatcher.TryEnqueue(() =>
             {
-                foreach (var g in Groups) g.SetBusy(false);
-                foreach (var g in Groups) if (g.SortIndex == 1) g.ApplySort();
+                // 取消/异常时可能有节点没走到回调，统一收掉旋转动画。
+                foreach (var g in Groups)
+                {
+                    g.SetBusy(false);
+                    foreach (var n in g.AllNodes) n.IsTesting = false;
+                    if (g.SortIndex == 1) g.ApplySort();
+                }
                 StatusText = $"测速完成（{names.Count} 个节点）";
+                IsBusy = false;
             });
         }
-        finally
+        catch (Exception ex)
         {
-            IsBusy = false;
+            _dispatcher.TryEnqueue(() =>
+            {
+                foreach (var g in Groups)
+                {
+                    g.SetBusy(false);
+                    foreach (var n in g.AllNodes) n.IsTesting = false;
+                }
+                StatusText = $"测速失败：{ex.Message}";
+                IsBusy = false;
+            });
+        }
+    }
+
+    /// <summary>
+    /// 把一批测速结果写到界面：更新同名节点延迟（同一物理节点可能出现在多个组）。
+    /// 由 <see cref="DelayBatch"/> 合批后在 UI 线程调用；排序留到整批结束后统一做，
+    /// 免得每 200ms 就把列表重排一次。
+    /// </summary>
+    /// <param name="scope">
+    /// 本次测速覆盖的节点：只有这些节点会结束旋转动画。为空表示整页所有节点（全部测速）。
+    /// 组测速时传该组的节点，避免把另一个正在测速的组的进度环提前关掉。
+    /// </param>
+    internal void ApplyDelayBatch(
+        IReadOnlyDictionary<string, int> results, HashSet<ProxyItemViewModel>? scope = null)
+    {
+        foreach (var group in Groups)
+        {
+            foreach (var node in group.AllNodes)
+            {
+                if (!results.TryGetValue(node.Name, out var delay)) continue;
+                node.Delay = delay;
+                node.IsAlive = delay > 0;
+                if (scope is null || scope.Contains(node)) node.IsTesting = false;
+            }
         }
     }
 
