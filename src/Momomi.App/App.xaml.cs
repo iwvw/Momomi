@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
+using Momomi.App.ViewModels;
 using Momomi.Core.Services;
 
 namespace Momomi.App;
@@ -313,7 +314,7 @@ public partial class App : Application
             _ = ShowMiniOnlyAsync();
             _ = ApplyThemeFromSettingsAsync();
             _ = AutoStartCoreAsync();
-            _ = AutoCheckUpdateAsync();
+            StartUpdateCoordinator();
             return;
         }
 
@@ -359,7 +360,7 @@ public partial class App : Application
         _ = ApplyThemeFromSettingsAsync();
         _ = AutoStartCoreAsync();
         _ = NavigateFromCommandLineAsync();
-        _ = AutoCheckUpdateAsync();
+        StartUpdateCoordinator();
     }
 
     /// <summary>仅迷你面板模式：延迟等待就绪后只弹出迷你面板，不激活主窗口。</summary>
@@ -383,66 +384,75 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// 后台检查应用更新：启动后查一次，之后每 6 小时一次。
+    /// 后台检查应用更新：启动后查一次，之后按设置的间隔复查。
     ///
     /// 之前只在启动时查一次，结果也只有设置页能读到——一直开着不关的用户永远
-    /// 看不到有新版本。现在把结果广播给顶栏胶囊标签，并按固定间隔复查。
-    /// 失败不打扰用户（错误只写进 LastResult 与日志）。
+    /// 看不到有新版本。现在把「何时查、查到后做什么」交给 <see cref="UpdateCoordinator"/>，
+    /// 它负责跳过版本、检查间隔、通知开关与自动安装；这里只接上事件。
+    /// 失败不打扰用户（错误只写进日志）。
     /// </summary>
-    private static async Task AutoCheckUpdateAsync()
+    public static UpdateCoordinator? Updates { get; private set; }
+
+    private static void StartUpdateCoordinator()
     {
         try
         {
-            var enabled = await AppHost.Host.Settings.GetBoolAsync("ui.autoCheckAppUpdate", true).ConfigureAwait(false);
-            if (!enabled) return;
-
-            // 延迟到内核启动后，避免与启动流量抢带宽。
-            await Task.Delay(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
-
-            while (true)
+            var coordinator = new UpdateCoordinator(AppHost.Host.AppUpdate, AppHost.Host.Settings);
+            coordinator.UpdateAvailable += (info, notify) =>
             {
-                await CheckAppUpdateOnceAsync().ConfigureAwait(false);
-
-                // 复查间隔。用设置项便于以后调整，默认 6 小时。
-                var hours = await AppHost.Host.Settings.GetIntAsync("ui.checkAppUpdateIntervalHours", 6).ConfigureAwait(false);
-                if (hours is < 1 or > 168) hours = 6;
-                await Task.Delay(TimeSpan.FromHours(hours)).ConfigureAwait(false);
-
-                // 每次复查前重新读开关，用户中途关掉了就停。
-                if (!await AppHost.Host.Settings.GetBoolAsync("ui.autoCheckAppUpdate", true).ConfigureAwait(false))
+                if (Main is not null)
+                {
+                    Main.NotifyUpdateAvailable(info, notify);
                     return;
-            }
+                }
+
+                // 「仅迷你面板」或启动早期没有主窗口：托盘气泡无处可弹，
+                // 但状态必须留住，否则主窗口打开后胶囊永远不会出现。
+                // HookUpdatePill 会用 AppSignals.AppUpdateAvailable 补一次。
+                AppSignals.RaiseAppUpdateNotice(new AppUpdateNotice(
+                    info.LatestVersion!, info.Notes, info.ReleaseUrl));
+            };
+            coordinator.AutoInstallStarting += info => Main?.NotifyAutoUpdateStarting(info);
+            coordinator.AutoInstallFailed += info => Main?.NotifyAutoUpdateFailed(info);
+            Updates = coordinator;
+            coordinator.Start();
         }
         catch (Exception ex)
         {
-            WriteLog($"自动检查更新失败：{ex}");
+            WriteLog($"启动更新调度失败：{ex}");
         }
     }
 
-    /// <summary>执行一次检查并把结果广播给界面（顶栏胶囊标签）。</summary>
-    private static async Task CheckAppUpdateOnceAsync()
+    /// <summary>
+    /// 自动安装：下载并准备更新脚本，然后走与手动更新相同的退出流程。
+    /// 返回 false 表示准备阶段就失败了（调用方退化成「提示有更新」）。
+    /// </summary>
+    public static async Task<bool> TryAutoInstallUpdateAsync()
     {
         try
         {
-            var info = await AppHost.Host.AppUpdate.CheckAsync().ConfigureAwait(false);
+            var prepared = await AppHost.Host.AppUpdate.PrepareUpdateAsync().ConfigureAwait(false);
+            if (prepared.Error is not null)
+            {
+                WriteLog($"自动更新准备失败：{prepared.Error}");
+                return false;
+            }
 
-            // 有更新就广播；MSIX 形态不支持应用内自更新，不提示。
-            var updatable = info.HasUpdate
-                            && !string.IsNullOrEmpty(info.LatestVersion)
-                            && !IsMsixPackaged();
-            ViewModels.AppSignals.RaiseAppUpdateNotice(
-                updatable ? new ViewModels.AppUpdateNotice(info.LatestVersion!) : null);
-
-            if (info.Error is not null) WriteLog($"检查应用更新失败：{info.Error}");
+            // 退出与重启必须回 UI 线程（要停内核、系统代理，并操作窗口）。
+            var queue = Main?.DispatcherQueue;
+            if (queue is null) return false;
+            queue.TryEnqueue(() => Main?.ExitForUpdate());
+            return true;
         }
         catch (Exception ex)
         {
-            WriteLog($"检查应用更新异常：{ex}");
+            WriteLog($"自动更新异常：{ex}");
+            return false;
         }
     }
 
     /// <summary>是否运行在 MSIX 包身份下（该形态不支持应用内覆盖式自更新）。</summary>
-    private static bool IsMsixPackaged()
+    public static bool IsMsixPackaged()
     {
         try
         {

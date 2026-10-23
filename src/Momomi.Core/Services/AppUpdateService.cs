@@ -11,7 +11,8 @@ public sealed record AppUpdateInfo(
     bool HasUpdate,
     string? ReleaseUrl,
     string? DownloadUrl,
-    string? Error);
+    string? Error,
+    string? Notes = null);
 
 public interface IAppUpdateService
 {
@@ -21,6 +22,15 @@ public interface IAppUpdateService
     string CurrentVersion { get; }
 
     AppUpdateInfo? LastResult { get; }
+
+    /// <summary>上次检查时间的 UTC 时间戳（ISO 8601）；从未检查为 null。</summary>
+    Task<DateTimeOffset?> GetLastCheckedAsync();
+
+    /// <summary>用户选择「跳过此版本」时记下的版本号；无则为 null。</summary>
+    Task<string?> GetSkippedVersionAsync();
+
+    /// <summary>记下用户跳过的版本（传 null 清除）。</summary>
+    Task SetSkippedVersionAsync(string? version);
 
     Task<AppUpdateInfo> CheckAsync(CancellationToken ct = default);
 
@@ -58,6 +68,45 @@ public sealed class AppUpdateService : IAppUpdateService
 
     AppUpdateInfo? IAppUpdateService.LastResult => LastResult;
 
+    private const string LastCheckedKey = "ui.appUpdateLastCheckedUtc";
+    private const string SkippedVersionKey = "ui.appUpdateSkippedVersion";
+
+    public async Task<DateTimeOffset?> GetLastCheckedAsync()
+    {
+        if (_settings is null) return null;
+        var raw = await _settings.GetAsync(LastCheckedKey).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        return DateTimeOffset.TryParse(raw, null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    public async Task<string?> GetSkippedVersionAsync()
+    {
+        if (_settings is null) return null;
+        var raw = await _settings.GetAsync(SkippedVersionKey).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(raw) ? null : raw;
+    }
+
+    public async Task SetSkippedVersionAsync(string? version)
+    {
+        if (_settings is null) return;
+        await _settings.SetAsync(SkippedVersionKey, version ?? "").ConfigureAwait(false);
+    }
+
+    /// <summary>记下本次检查时间。无论有无新版本都记，避免频繁打 GitHub API。</summary>
+    private async Task MarkCheckedAsync()
+    {
+        if (_settings is null) return;
+        try
+        {
+            await _settings.SetAsync(LastCheckedKey, DateTimeOffset.UtcNow.ToString("O")).ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
     public static string GetCurrentVersion()
     {
         try
@@ -81,7 +130,8 @@ public sealed class AppUpdateService : IAppUpdateService
         try
         {
             var json = await FetchLatestAsync(ct).ConfigureAwait(false);
-            var (tag, htmlUrl, assets) = ParseLatest(json);
+            var (tag, htmlUrl, notes, assets) = ParseLatest(json);
+            await MarkCheckedAsync().ConfigureAwait(false);
 
             var latest = tag?.TrimStart('v');
             var hasUpdate = false;
@@ -92,7 +142,7 @@ public sealed class AppUpdateService : IAppUpdateService
 
             var downloadUrl = SelectAssetUrl(latest!, assets);
 
-            var result = new AppUpdateInfo(CurrentVersion, latest, hasUpdate, htmlUrl, downloadUrl, null);
+            var result = new AppUpdateInfo(CurrentVersion, latest, hasUpdate, htmlUrl, downloadUrl, null, notes);
             LastResult = result;
             return result;
         }
@@ -261,12 +311,13 @@ public sealed class AppUpdateService : IAppUpdateService
         throw last ?? new HttpRequestException("无法访问 GitHub Releases API");
     }
 
-    private static (string? Tag, string? HtmlUrl, IReadOnlyList<ReleaseAsset> Assets) ParseLatest(string json)
+    private static (string? Tag, string? HtmlUrl, string? Notes, IReadOnlyList<ReleaseAsset> Assets) ParseLatest(string json)
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
         var tag = root.TryGetProperty("tag_name", out var t) ? t.GetString() : null;
         var html = root.TryGetProperty("html_url", out var u) ? u.GetString() : null;
+        var notes = root.TryGetProperty("body", out var body) ? body.GetString() : null;
 
         var assets = new List<ReleaseAsset>();
         if (root.TryGetProperty("assets", out var arr) && arr.ValueKind == JsonValueKind.Array)
@@ -280,7 +331,7 @@ public sealed class AppUpdateService : IAppUpdateService
                 assets.Add(new ReleaseAsset(name, url, size));
             }
         }
-        return (tag, html, assets);
+        return (tag, html, notes, assets);
     }
 
     private async Task DownloadFileAsync(string url, string destination, IProgress<double>? progress, CancellationToken ct)

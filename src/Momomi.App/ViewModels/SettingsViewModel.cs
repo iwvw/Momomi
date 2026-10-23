@@ -99,6 +99,31 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial bool AutoCheckAppUpdate { get; set; } = true;
 
+    /// <summary>启动后立即检查一次（关掉则只在后台按间隔检查）。</summary>
+    [ObservableProperty]
+    public partial bool UpdateCheckOnStartup { get; set; } = true;
+
+    /// <summary>发现新版本后直接下载安装并重启，不再询问。</summary>
+    [ObservableProperty]
+    public partial bool UpdateAutoInstall { get; set; }
+
+    /// <summary>不弹托盘通知，只在顶栏胶囊与设置页显示。</summary>
+    [ObservableProperty]
+    public partial bool UpdateSuppressNotifications { get; set; }
+
+    /// <summary>检查间隔的可选项（小时）。0 表示不排期。</summary>
+    public IReadOnlyList<int> UpdateIntervalOptions { get; } = new[] { 1, 3, 6, 12, 24, 72 };
+
+    [ObservableProperty]
+    public partial int UpdateIntervalHours { get; set; } = 6;
+
+    /// <summary>被用户跳过、暂时不再提示的版本；空表示没有。</summary>
+    [ObservableProperty]
+    public partial string SkippedAppVersion { get; set; } = "";
+
+    [ObservableProperty]
+    public partial bool HasSkippedVersion { get; set; }
+
     [ObservableProperty]
     public partial string AppVersion { get; set; } = "未知";
 
@@ -332,6 +357,17 @@ public sealed partial class SettingsViewModel : ObservableObject
             AutoUpdateProfileOnStart = await _host.Settings.GetBoolAsync("profile.autoUpdate", true);
 
             AutoCheckAppUpdate = await _host.Settings.GetBoolAsync("ui.autoCheckAppUpdate", true);
+            UpdateCheckOnStartup = await _host.Settings.GetBoolAsync("ui.updateCheckOnStartup", true);
+            UpdateAutoInstall = await _host.Settings.GetBoolAsync("ui.updateAutoInstall");
+            UpdateSuppressNotifications = await _host.Settings.GetBoolAsync("ui.updateSuppressNotifications");
+
+            var interval = await _host.Settings.GetIntAsync("ui.checkAppUpdateIntervalHours", 6);
+            UpdateIntervalHours = UpdateIntervalOptions.Contains(interval) ? interval : 6;
+
+            var skipped = await _host.AppUpdate.GetSkippedVersionAsync();
+            SkippedAppVersion = skipped ?? "";
+            HasSkippedVersion = !string.IsNullOrEmpty(skipped);
+
             AppVersion = global::Momomi.Core.Services.AppUpdateService.GetCurrentVersion() + (
                 _host.AppUpdate.IsInstalled ? "" : "（便携版）");
             ApplyCachedAppUpdate();
@@ -1035,10 +1071,85 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         if (_loading) return;
         _ = _host.Settings.SetBoolAsync("ui.autoCheckAppUpdate", value);
-        StatusText = value ? "已开启自动检查更新（启动时 + 每 6 小时）" : "已关闭自动检查更新";
+        StatusText = value ? "已开启自动检查更新" : "已关闭自动检查更新";
 
         // 关掉自动检查时清掉顶栏胶囊：否则会一直挂着一个不再复查的旧结果。
         if (!value) AppSignals.RaiseAppUpdateNotice(null);
+
+        global::Momomi.App.App.Updates?.Refresh();
+    }
+
+    partial void OnUpdateCheckOnStartupChanged(bool value)
+    {
+        if (_loading) return;
+        _ = _host.Settings.SetBoolAsync("ui.updateCheckOnStartup", value);
+    }
+
+    partial void OnUpdateAutoInstallChanged(bool value)
+    {
+        if (_loading) return;
+        _ = _host.Settings.SetBoolAsync("ui.updateAutoInstall", value);
+    }
+
+    partial void OnUpdateSuppressNotificationsChanged(bool value)
+    {
+        if (_loading) return;
+        _ = _host.Settings.SetBoolAsync("ui.updateSuppressNotifications", value);
+    }
+
+    partial void OnUpdateIntervalHoursChanged(int value)
+    {
+        if (_loading) return;
+        _ = _host.Settings.SetIntAsync("ui.checkAppUpdateIntervalHours", value);
+        global::Momomi.App.App.Updates?.Refresh();
+    }
+
+    partial void OnHasSkippedVersionChanged(bool value)
+        => OnPropertyChanged(nameof(SkippedAppVersionText));
+
+    partial void OnSkippedAppVersionChanged(string value)
+        => OnPropertyChanged(nameof(SkippedAppVersionText));
+
+    public string SkippedAppVersionText
+        => HasSkippedVersion ? $"已跳过 v{SkippedAppVersion}" : "没有跳过任何版本";
+
+    /// <summary>清除「跳过此版本」，下次检查会重新提示。</summary>
+    [RelayCommand]
+    private async Task ClearSkippedVersionAsync()
+    {
+        try
+        {
+            await _host.AppUpdate.SetSkippedVersionAsync(null);
+            SkippedAppVersion = "";
+            HasSkippedVersion = false;
+            AppStatusText = "已恢复对已跳过版本的提示";
+        }
+        catch (Exception ex)
+        {
+            AppStatusText = $"操作失败：{ex.Message}";
+        }
+    }
+
+    /// <summary>跳过当前查到的新版本，不再提示（手动检查仍会显示）。</summary>
+    [RelayCommand]
+    private async Task SkipCurrentVersionAsync()
+    {
+        var info = global::Momomi.Core.Services.AppUpdateService.LastResult;
+        if (info?.LatestVersion is null || !info.HasUpdate) return;
+
+        try
+        {
+            await _host.AppUpdate.SetSkippedVersionAsync(info.LatestVersion);
+            SkippedAppVersion = info.LatestVersion;
+            HasSkippedVersion = true;
+            AppStatusText = $"已跳过 v{info.LatestVersion}";
+            // 顶栏胶囊一并收起，否则用户以为还能点。
+            AppSignals.RaiseAppUpdateNotice(null);
+        }
+        catch (Exception ex)
+        {
+            AppStatusText = $"操作失败：{ex.Message}";
+        }
     }
 
     [RelayCommand]
@@ -1048,16 +1159,28 @@ public sealed partial class SettingsViewModel : ObservableObject
         AppStatusText = "正在检查更新…";
         try
         {
-            var info = await _host.AppUpdate.CheckAsync();
+            // 手动检查走调度器：它会忽略检查间隔与「跳过此版本」。
+            // 结果不需要等事件回调——CheckAsync 返回时 LastResult 已经写好，
+            // 直接读它比「订阅事件 + 等一个超时」可靠得多。
+            var coordinator = global::Momomi.App.App.Updates;
+            if (coordinator is null)
+            {
+                AppStatusText = "检查失败：更新服务未就绪";
+                return;
+            }
+
+            await coordinator.CheckAsync(manual: true).ConfigureAwait(true);
+
             ApplyCachedAppUpdate();
-            AppStatusText = info.Error is not null
+            var info = global::Momomi.Core.Services.AppUpdateService.LastResult;
+            AppStatusText = info?.Error is not null
                 ? $"检查失败：{info.Error}"
-                : info.HasUpdate ? "发现新版本" : "已是最新";
+                : info?.HasUpdate == true ? "发现新版本" : "已是最新";
 
             // 手动检查的结果也要反映到顶栏胶囊，否则两处显示会不一致。
             AppSignals.RaiseAppUpdateNotice(
-                info.HasUpdate && !string.IsNullOrEmpty(info.LatestVersion)
-                    ? new AppUpdateNotice(info.LatestVersion)
+                info is { HasUpdate: true } && !string.IsNullOrEmpty(info.LatestVersion)
+                    ? new AppUpdateNotice(info.LatestVersion, info.Notes, info.ReleaseUrl)
                     : null);
         }
         catch (Exception ex)

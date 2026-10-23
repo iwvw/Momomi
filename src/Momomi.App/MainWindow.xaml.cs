@@ -136,6 +136,95 @@ public sealed partial class MainWindow : Window
         ApplyUpdateNotice(ViewModels.AppSignals.AppUpdateAvailable);
     }
 
+    /// <summary>
+    /// 后台检查到新版本时调用（由 UpdateCoordinator 触发）。
+    /// 顶栏胶囊是常驻入口，托盘通知只是附带提示——用户可能正开在别的窗口上，
+    /// 不给通知就完全不知道有新版本。
+    /// </summary>
+    public void NotifyUpdateAvailable(AppUpdateInfo info, bool notify)
+    {
+        if (!info.HasUpdate || string.IsNullOrEmpty(info.LatestVersion)) return;
+
+        ViewModels.AppSignals.RaiseAppUpdateNotice(new ViewModels.AppUpdateNotice(
+            info.LatestVersion, info.Notes, info.ReleaseUrl));
+
+        if (!notify) return;
+        NotifyTray(
+            "Momomi 有新版本",
+            $"v{info.LatestVersion} 已发布，点击顶栏胶囊即可更新。");
+    }
+
+    /// <summary>自动安装开始前的提示。用户可以借此知道程序为什么突然重启。</summary>
+    public void NotifyAutoUpdateStarting(AppUpdateInfo info)
+    {
+        if (string.IsNullOrEmpty(info.LatestVersion)) return;
+
+        _updateInFlight = true;
+        try
+        {
+            UpdatePillText.Text = $"正在更新到 v{info.LatestVersion}";
+            UpdatePill.Visibility = Visibility.Visible;
+        }
+        catch
+        {
+        }
+
+        NotifyTray(
+            "Momomi 正在更新",
+            $"正在安装 v{info.LatestVersion}，完成后会自动重启。");
+    }
+
+    /// <summary>
+    /// 自动安装失败：把胶囊从「正在更新」恢复成可点击状态。
+    ///
+    /// 不恢复的话 _updateInFlight 会一直为 true，ApplyUpdateNotice 之后
+    /// 再也不会更新文案，胶囊会永远停在「正在更新到 vX」，用户点它也没反应。
+    /// </summary>
+    public void NotifyAutoUpdateFailed(AppUpdateInfo info)
+    {
+        _updateInFlight = false;
+        RestoreUpdatePillText();
+
+        try
+        {
+            UpdatePill.Visibility = string.IsNullOrEmpty(info.LatestVersion)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
+        catch
+        {
+        }
+    }
+
+    /// <summary>设置项读出「不显示通知」；读不到时按显示处理。</summary>
+    private static bool GetSuppressUpdateNotify()
+    {
+        try
+        {
+            return !AppHost.Host.Settings
+                .GetBoolAsync("ui.updateSuppressNotifications")
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    /// <summary>弹一条托盘气泡。托盘未创建（隐藏到托盘前）时静默跳过。</summary>
+    private void NotifyTray(string title, string message)
+    {
+        try
+        {
+            _tray?.ShowNotification(title, message);
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"托盘更新通知失败：{ex}");
+        }
+    }
+
     private void ApplyUpdateNotice(ViewModels.AppUpdateNotice? notice)
     {
         try
@@ -166,19 +255,44 @@ public sealed partial class MainWindow : Window
 
         try
         {
+            // 有更新说明就展示更新说明（截断，避免超长 release notes 撑爆对话框）。
+            var notes = SummarizeNotes(notice.Notes);
+            var content = $"当前版本 v{Momomi.Core.Services.AppUpdateService.GetCurrentVersion()}，"
+                          + $"最新版本 v{notice.Version}。\n\n"
+                          + (notes is null ? "" : notes + "\n\n")
+                          + "更新会下载安装包并重启 Momomi，期间代理会短暂中断。是否现在更新？";
+
             var dialog = new ContentDialog
             {
                 Title = "发现新版本",
-                Content = $"当前版本 v{Momomi.Core.Services.AppUpdateService.GetCurrentVersion()}，"
-                          + $"最新版本 v{notice.Version}。\n\n"
-                          + "更新会下载安装包并重启 Momomi，期间代理会短暂中断。是否现在更新？",
+                Content = new ScrollViewer
+                {
+                    MaxHeight = 360,
+                    Content = new TextBlock
+                    {
+                        Text = content,
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                },
                 PrimaryButtonText = "立即更新",
+                SecondaryButtonText = "跳过此版本",
                 CloseButtonText = "稍后",
                 DefaultButton = ContentDialogButton.Primary,
                 XamlRoot = Content.XamlRoot,
             };
 
-            if (await Pages.DialogGuard.ShowAsync(dialog) != ContentDialogResult.Primary) return;
+            var result = await Pages.DialogGuard.ShowAsync(dialog);
+
+            if (result == ContentDialogResult.Secondary)
+            {
+                await (global::Momomi.App.App.Updates?.SkipVersionAsync(notice.Version)
+                       ?? Task.CompletedTask);
+                // 收起胶囊：用户已明确表示不要再提示这个版本。
+                ViewModels.AppSignals.RaiseAppUpdateNotice(null);
+                return;
+            }
+
+            if (result != ContentDialogResult.Primary) return;
 
             await RunAppUpdateAsync();
         }
@@ -186,6 +300,45 @@ public sealed partial class MainWindow : Window
         {
             global::Momomi.App.App.WriteLog($"一键更新失败：{ex}");
         }
+    }
+
+    /// <summary>
+    /// 把 release notes 压缩成适合对话框显示的摘要。
+    /// 原文是完整的 Markdown（含下载表格、安装说明），整段塞进对话框又长又乱，
+    /// 这里只保留开头的变更条目，超出部分用省略号收尾。
+    /// </summary>
+    private static string? SummarizeNotes(string? notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes)) return null;
+
+        var lines = notes.Replace("\r\n", "\n").Split('\n');
+        var kept = new List<string>();
+        var chars = 0;
+
+        foreach (var raw in lines)
+        {
+            var line = raw.TrimEnd();
+            // 遇到产物下载/安装说明就停：那部分对「要不要更新」这个决定没有帮助。
+            if (line.StartsWith("## 产物下载", StringComparison.Ordinal)
+                || line.StartsWith("### ", StringComparison.Ordinal)
+                || line.StartsWith("---", StringComparison.Ordinal))
+                break;
+
+            if (line.Length == 0 && kept.Count == 0) continue;
+
+            kept.Add(line);
+            chars += line.Length;
+
+            // 600 字足够说清这一版改了什么，再长用户也不会读。
+            if (chars > 600)
+            {
+                kept.Add("…");
+                break;
+            }
+        }
+
+        var text = string.Join("\n", kept).Trim();
+        return text.Length == 0 ? null : text;
     }
 
     /// <summary>

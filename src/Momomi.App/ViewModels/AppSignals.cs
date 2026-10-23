@@ -50,6 +50,9 @@ public static class AppSignals
     }
 }
 
-/// <summary>可更新版本的通知信息（顶栏展示用）。</summary>
-public sealed record AppUpdateNotice(string Version);
+/// <summary>可更新版本的通知信息（顶栏与设置页展示用）。</summary>
+public sealed record AppUpdateNotice(
+    string Version,
+    string? Notes = null,
+    string? ReleaseUrl = null);
 

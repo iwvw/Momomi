@@ -287,6 +287,33 @@ internal sealed class TrayIconService : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// 弹一条托盘气泡通知。
+    ///
+    /// 用 realtime=false + respectQuietTime=true：用户开着「专注助手」时不打扰。
+    /// 托盘还没创建（启动早期）时直接跳过——没有图标就没有宿主窗口，硬调会抛。
+    /// </summary>
+    public void ShowNotification(string title, string message)
+    {
+        try
+        {
+            _icon?.ShowNotification(
+                title,
+                message,
+                NotificationIcon.Info,
+                customIconHandle: null,
+                largeIcon: false,
+                sound: true,
+                respectQuietTime: true,
+                realtime: false,
+                timeout: null);
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"托盘通知失败：{ex}");
+        }
+    }
+
     /// <summary>同步菜单与图标的运行状态。</summary>
     public void UpdateState(TrayState state)
     {

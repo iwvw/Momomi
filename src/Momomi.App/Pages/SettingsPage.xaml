@@ -447,6 +447,51 @@
                                       IsOn="{x:Bind ViewModel.AutoCheckAppUpdate, Mode=TwoWay}" />
                     </controls:SettingsCard>
 
+                    <controls:SettingsCard Description="程序启动后立即检查一次；关掉则只在后台按间隔检查"
+                                           Header="启动时检查">
+                        <ToggleSwitch MinWidth="0"
+                                      OnContent="" OffContent=""
+                                      IsOn="{x:Bind ViewModel.UpdateCheckOnStartup, Mode=TwoWay}" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Description="发现新版本后直接下载安装并重启，不再询问。代理会短暂中断"
+                                           Header="自动下载并安装">
+                        <ToggleSwitch MinWidth="0"
+                                      OnContent="" OffContent=""
+                                      IsOn="{x:Bind ViewModel.UpdateAutoInstall, Mode=TwoWay}" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Description="只在顶栏胶囊与这里显示结果，不弹托盘通知"
+                                           Header="不显示通知">
+                        <ToggleSwitch MinWidth="0"
+                                      OnContent="" OffContent=""
+                                      IsOn="{x:Bind ViewModel.UpdateSuppressNotifications, Mode=TwoWay}" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Description="后台自动检查的间隔（小时）"
+                                           Header="检查频率">
+                        <ComboBox Width="120"
+                                  MinHeight="0"
+                                  VerticalAlignment="Center"
+                                  ItemsSource="{x:Bind ViewModel.UpdateIntervalOptions}"
+                                  SelectedItem="{x:Bind ViewModel.UpdateIntervalHours, Mode=TwoWay}" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Description="跳过后不再提示该版本；手动检查仍会显示"
+                                           Header="跳过此版本">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Text="{x:Bind ViewModel.SkippedAppVersionText, Mode=OneWay}" />
+                            <Button MinWidth="0" Padding="10,4"
+                                    Command="{x:Bind ViewModel.SkipCurrentVersionCommand}"
+                                    Content="跳过" />
+                            <Button MinWidth="0" Padding="10,4"
+                                    Command="{x:Bind ViewModel.ClearSkippedVersionCommand}"
+                                    Content="恢复提示" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+
                     <controls:SettingsCard Description="{x:Bind ViewModel.KernelStatusText, Mode=OneWay}" Header="内核版本">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <TextBlock VerticalAlignment="Center"
