@@ -53,7 +53,33 @@ public interface IProfileService
 
 public sealed class ProfileService : IProfileService
 {
-    private static readonly HttpClient Http = CreateClient();
+    private static readonly object ClientGate = new();
+    private static HttpClient? _http;
+    private static bool _httpUsesProxy = true;
+
+    /// <summary>
+    /// 取订阅用的 HttpClient，并在「是否经代理」开关变化时重建。
+    ///
+    /// 代理对象是在 HttpClientHandler 构造时绑定的，运行期改 DownloadProxy 的开关
+    /// 不会影响已经建好的 handler。不重建的话，用户切换开关后必须重启程序才生效——
+    /// 这类「改了设置没反应」的问题排查成本很高，这里直接换实例。
+    /// 旧实例不 Dispose：可能还有并发请求在用它，交给 GC 回收即可（切换是低频操作）。
+    /// </summary>
+    private static HttpClient Http
+    {
+        get
+        {
+            var useProxy = DownloadProxy.SubscriptionUseProxy;
+            lock (ClientGate)
+            {
+                if (_http is not null && _httpUsesProxy == useProxy) return _http;
+
+                _http = CreateClient(useProxy);
+                _httpUsesProxy = useProxy;
+                return _http;
+            }
+        }
+    }
 
     private readonly ProfileRepository _repo;
     private readonly ISettingsService _settings;
@@ -68,13 +94,15 @@ public sealed class ProfileService : IProfileService
         Directory.CreateDirectory(profilesDirectory);
     }
 
-    private static HttpClient CreateClient()
+    private static HttpClient CreateClient(bool useProxy)
     {
         var client = new HttpClient(new HttpClientHandler
         {
-            // 内核运行时经本机混合端口下载订阅（借力自身代理）。
-            Proxy = DownloadProxy.Create(),
-            UseProxy = true,
+            // 订阅是否经代理由设置项决定（默认经内核混合端口借力自身代理）。
+            // 用 CreateForSubscription 而不是 Create：后者会把系统代理也算进来，
+            // 而「订阅不走代理」的开关应当是完全直连。
+            Proxy = DownloadProxy.CreateForSubscription(),
+            UseProxy = useProxy,
         })
         {
             Timeout = Timeout.InfiniteTimeSpan,

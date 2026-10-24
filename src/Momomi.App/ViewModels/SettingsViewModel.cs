@@ -155,6 +155,36 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial bool StartMinimized { get; set; }
 
+    /// <summary>
+    /// 迷你面板「鼠标离开后自动收起」的秒数。0 表示不自动收起。
+    /// </summary>
+    [ObservableProperty]
+    public partial int MiniAutoHideSeconds { get; set; }
+
+    /// <summary>可选值，供下拉框绑定。0 单独显示为「不自动收起」。</summary>
+    public IReadOnlyList<int> MiniAutoHideOptions { get; } = new[] { 0, 5, 10, 15, 30, 60 };
+
+    /// <summary>下拉框显示的文本，与 <see cref="MiniAutoHideOptions"/> 一一对应。</summary>
+    public IReadOnlyList<string> MiniAutoHideLabels { get; } = new[]
+    {
+        "不自动收起", "5 秒", "10 秒", "15 秒", "30 秒", "60 秒",
+    };
+
+    /// <summary>下拉框选中索引，和秒数双向换算。</summary>
+    public int MiniAutoHideIndex
+    {
+        get
+        {
+            var i = MiniAutoHideOptions.ToList().IndexOf(MiniAutoHideSeconds);
+            return i < 0 ? 0 : i;
+        }
+        set
+        {
+            if (value < 0 || value >= MiniAutoHideOptions.Count) return;
+            MiniAutoHideSeconds = MiniAutoHideOptions[value];
+        }
+    }
+
     [ObservableProperty]
     public partial bool AutoQuitWithoutCore { get; set; }
 
@@ -173,11 +203,19 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial string DelayTestConcurrency { get; set; } = DelayTestSettings.DefaultConcurrency.ToString();
 
+    /// <summary>只测 TCP 握手，而不是走内核发 HTTP 请求。</summary>
+    [ObservableProperty]
+    public partial bool DelayTestTcpOnly { get; set; } = DelayTestSettings.DefaultTcpOnly;
+
     [ObservableProperty]
     public partial string SubscriptionUserAgent { get; set; } = "";
 
     [ObservableProperty]
     public partial string SubscriptionTimeout { get; set; } = "60";
+
+    /// <summary>拉取订阅时是否经代理（默认开启）。</summary>
+    [ObservableProperty]
+    public partial bool SubscriptionUseProxy { get; set; } = true;
 
     /// <summary>下载内核/geodata 时使用的代理端口（内核未运行时）；空表示不使用。</summary>
     [ObservableProperty]
@@ -352,6 +390,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
             SilentStart = await _host.Settings.GetBoolAsync("ui.silentStart");
             StartMinimized = await _host.Settings.GetBoolAsync("ui.startMinimized");
+
+            var miniAutoHide = await _host.Settings.GetIntAsync("ui.miniAutoHideSeconds", 0);
+            MiniAutoHideSeconds = MiniAutoHideOptions.Contains(miniAutoHide) ? miniAutoHide : 0;
             AutoQuitWithoutCore = await _host.Settings.GetBoolAsync("ui.autoQuitWithoutCore");
             AutoQuitWithoutCoreDelay = await _host.Settings.GetIntAsync("ui.autoQuitWithoutCoreDelay", 30);
             AutoUpdateProfileOnStart = await _host.Settings.GetBoolAsync("profile.autoUpdate", true);
@@ -372,13 +413,15 @@ public sealed partial class SettingsViewModel : ObservableObject
                 _host.AppUpdate.IsInstalled ? "" : "（便携版）");
             ApplyCachedAppUpdate();
 
-            var (dtUrl, dtTimeout, dtConc) = await DelayTestSettings.ReadAsync(_host.Settings);
+            var (dtUrl, dtTimeout, dtConc, dtTcpOnly) = await DelayTestSettings.ReadAsync(_host.Settings);
             DelayTestUrl = dtUrl;
             DelayTestTimeout = dtTimeout.ToString();
             DelayTestConcurrency = dtConc.ToString();
+            DelayTestTcpOnly = dtTcpOnly;
 
             SubscriptionUserAgent = await _host.Settings.GetAsync("core.subscriptionUserAgent") ?? "";
             SubscriptionTimeout = (await _host.Settings.GetIntAsync("core.subscriptionTimeout", 60)).ToString();
+            SubscriptionUseProxy = await _host.Settings.GetBoolAsync("core.subscriptionUseProxy", true);
 
             var dpp = await _host.Settings.GetIntAsync("core.downloadProxyPort", 0);
             DownloadProxyPort = dpp > 0 ? dpp.ToString() : "";
@@ -519,6 +562,18 @@ public sealed partial class SettingsViewModel : ObservableObject
         _ = _host.Settings.SetBoolAsync("ui.startMinimized", value);
     }
 
+    partial void OnMiniAutoHideSecondsChanged(int value)
+    {
+        // 下拉框绑的是索引，秒数变化时通知它重读。
+        OnPropertyChanged(nameof(MiniAutoHideIndex));
+
+        if (_loading) return;
+        _ = _host.Settings.SetIntAsync("ui.miniAutoHideSeconds", value);
+
+        // 立即生效：不用重启，下次迷你面板显示时按新值计时。
+        global::Momomi.App.App.Main?.ApplyMiniAutoHide(value);
+    }
+
     partial void OnAutoQuitWithoutCoreChanged(bool value)
     {
         if (_loading) return;
@@ -563,6 +618,15 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (n.ToString() != value) DelayTestConcurrency = n.ToString();
     }
 
+    partial void OnDelayTestTcpOnlyChanged(bool value)
+    {
+        if (_loading) return;
+        _ = _host.Settings.SetBoolAsync("core.delayTestTcpOnly", value);
+        StatusText = value
+            ? "已开启只测 TCP：延迟为到节点入口的握手耗时"
+            : "已关闭只测 TCP：延迟为经节点访问测试地址的耗时";
+    }
+
     partial void OnSubscriptionUserAgentChanged(string value)
     {
         if (_loading) return;
@@ -574,6 +638,17 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (_loading) return;
         if (int.TryParse(value, out var s) && s > 0)
             _ = _host.Settings.SetIntAsync("core.subscriptionTimeout", s);
+    }
+
+    partial void OnSubscriptionUseProxyChanged(bool value)
+    {
+        if (_loading) return;
+        _ = _host.Settings.SetBoolAsync("core.subscriptionUseProxy", value);
+        // 立即生效：ProfileService 会在下次取 HttpClient 时按新开关重建实例。
+        Momomi.Core.Services.DownloadProxy.SetSubscriptionUseProxy(value);
+        StatusText = value
+            ? "订阅拉取将经代理（内核端口优先）"
+            : "订阅拉取将直连，不经代理";
     }
 
     partial void OnDownloadProxyPortChanged(string value)

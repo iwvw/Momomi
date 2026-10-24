@@ -2,6 +2,9 @@ using YamlDotNet.RepresentationModel;
 
 namespace Momomi.Core.Services;
 
+/// <summary>节点的可直连地址，供 TCP 延迟探测使用。</summary>
+public sealed record ProxyEndpoint(string Server, int Port);
+
 public sealed record RuntimeYamlOptions(
     int MixedPort,
     int ControllerPort,
@@ -194,6 +197,99 @@ public static class MihomoConfigBuilder
     private static readonly object GroupOrderCacheGate = new();
     private static (string Path, DateTime WriteTime, long Length) GroupOrderCacheKey = default;
     private static IReadOnlyList<string>? GroupOrderCache;
+
+    private static readonly object ProxyEndpointCacheGate = new();
+    private static (string Path, DateTime WriteTime, long Length) ProxyEndpointCacheKey = default;
+    private static IReadOnlyDictionary<string, ProxyEndpoint>? ProxyEndpointCache;
+
+    /// <summary>
+    /// 从运行时配置读取每个节点可直连的 server/port，供 TCP 延迟探测使用。
+    ///
+    /// 为什么不能走 /proxies 接口：mihomo 的 API 只返回 name/type/alive/history 等字段，
+    /// 服务器地址与端口不在响应里。要做「只测 TCP 握手」就必须知道往哪连，
+    /// 只能从配置文件拿。
+    ///
+    /// 返回值只包含「本机可直连」的节点：hysteria2 等基于 QUIC 的协议没有可用的
+    /// TCP 端口，跳过后由调用方回退到内核测速。
+    /// </summary>
+    public static IReadOnlyDictionary<string, ProxyEndpoint> ReadProxyEndpoints(string yamlPath)
+    {
+        try
+        {
+            var info = new FileInfo(yamlPath);
+            if (!info.Exists) return new Dictionary<string, ProxyEndpoint>();
+
+            var key = (yamlPath, info.LastWriteTimeUtc, info.Length);
+            lock (ProxyEndpointCacheGate)
+            {
+                if (ProxyEndpointCacheKey == key && ProxyEndpointCache is not null)
+                    return ProxyEndpointCache;
+            }
+
+            var endpoints = ParseProxyEndpoints(yamlPath);
+
+            lock (ProxyEndpointCacheGate)
+            {
+                ProxyEndpointCacheKey = key;
+                ProxyEndpointCache = endpoints;
+            }
+            return endpoints;
+        }
+        catch
+        {
+            return new Dictionary<string, ProxyEndpoint>();
+        }
+    }
+
+    private static IReadOnlyDictionary<string, ProxyEndpoint> ParseProxyEndpoints(string yamlPath)
+    {
+        var result = new Dictionary<string, ProxyEndpoint>(StringComparer.Ordinal);
+        try
+        {
+            var yaml = new YamlStream();
+            using var reader = new StreamReader(yamlPath);
+            yaml.Load(reader);
+
+            if (yaml.Documents.Count == 0) return result;
+            if (yaml.Documents[0].RootNode is not YamlMappingNode root) return result;
+            if (!root.Children.TryGetValue(new YamlScalarNode("proxies"), out var node)) return result;
+            if (node is not YamlSequenceNode proxies) return result;
+
+            foreach (var item in proxies.Children)
+            {
+                if (item is not YamlMappingNode proxy) continue;
+
+                var name = GetScalar(proxy, "name");
+                var server = GetScalar(proxy, "server");
+                var type = GetScalar(proxy, "type");
+                var portText = GetScalar(proxy, "port");
+                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(server)) continue;
+                if (!int.TryParse(portText, out var port) || port is <= 0 or > 65535) continue;
+
+                // QUIC 类协议（hysteria/hysteria2/tuic）走 UDP，没有可测的 TCP 握手。
+                if (IsQuicOnly(type)) continue;
+
+                result[name] = new ProxyEndpoint(server, port);
+            }
+        }
+        catch
+        {
+        }
+        return result;
+    }
+
+    private static bool IsQuicOnly(string? type)
+        => type is not null
+           && (type.Equals("hysteria", StringComparison.OrdinalIgnoreCase)
+               || type.Equals("hysteria2", StringComparison.OrdinalIgnoreCase)
+               || type.Equals("tuic", StringComparison.OrdinalIgnoreCase));
+
+    private static string? GetScalar(YamlMappingNode mapping, string key)
+        => mapping.Children.TryGetValue(new YamlScalarNode(key), out var value)
+           && value is YamlScalarNode scalar
+           && scalar.Value is { Length: > 0 } text
+            ? text
+            : null;
 
     private static IReadOnlyList<string> ParseProxyGroupOrder(string yamlPath)
     {

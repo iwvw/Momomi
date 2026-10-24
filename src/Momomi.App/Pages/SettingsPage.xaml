@@ -88,6 +88,13 @@
                         <ToggleSwitch IsOn="{x:Bind ViewModel.StartMinimized, Mode=TwoWay}" />
                     </controls:SettingsCard>
 
+                    <controls:SettingsCard Description="迷你面板呼出后，鼠标离开面板超过该时间就自动收起。选「不自动收起」则一直保留，需要手动关闭"
+                                           Header="迷你面板自动收起">
+                        <ComboBox Width="140" MinHeight="0" VerticalAlignment="Center"
+                                  ItemsSource="{x:Bind ViewModel.MiniAutoHideLabels}"
+                                  SelectedIndex="{x:Bind ViewModel.MiniAutoHideIndex, Mode=TwoWay}" />
+                    </controls:SettingsCard>
+
                     <controls:SettingsCard Description="应用启动后自动拉起内核" Header="启动时自动运行内核">
                         <ToggleSwitch IsOn="{x:Bind ViewModel.AutoStartCore, Mode=TwoWay}" />
                     </controls:SettingsCard>
@@ -235,6 +242,13 @@
                                  LostFocus="TextField_LostFocus" KeyDown="TextField_KeyDown" />
                     </controls:SettingsCard>
 
+                    <controls:SettingsCard Description="开启时经代理拉取（内核运行时用混合端口，否则沿用系统代理）；关闭时完全直连，适用于订阅站被代理挡住、或代理本身连不上订阅站的情况"
+                                           Header="经代理拉取订阅">
+                        <ToggleSwitch MinWidth="0"
+                                      OnContent="" OffContent=""
+                                      IsOn="{x:Bind ViewModel.SubscriptionUseProxy, Mode=TwoWay}" />
+                    </controls:SettingsCard>
+
                     <controls:SettingsCard Description="下载内核与订阅时使用的 GitHub 加速源" Header="GitHub 代理">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <ComboBox x:Name="GithubProxyBox" Width="200" SelectionChanged="GithubProxy_SelectionChanged">
@@ -277,6 +291,13 @@
                         <TextBox Width="120" Tag="DelayTestConcurrency"
                                  Text="{x:Bind ViewModel.DelayTestConcurrency, Mode=TwoWay}"
                                  LostFocus="TextField_LostFocus" KeyDown="TextField_KeyDown" />
+                    </controls:SettingsCard>
+
+                    <controls:SettingsCard Description="直接对节点入口建 TCP 连接，只量握手耗时，不经过内核。数字比默认模式小，但量不到节点到目标站的链路；QUIC 类节点（hysteria/hysteria2/tuic）仍走默认测速"
+                                           Header="只测 TCP 延迟">
+                        <ToggleSwitch MinWidth="0"
+                                      OnContent="" OffContent=""
+                                      IsOn="{x:Bind ViewModel.DelayTestTcpOnly, Mode=TwoWay}" />
                     </controls:SettingsCard>
                     </controls:SettingsExpander.Items>
                 </controls:SettingsExpander>

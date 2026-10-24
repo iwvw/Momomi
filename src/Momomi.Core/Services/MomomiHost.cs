@@ -87,6 +87,9 @@ public sealed class MomomiHost : IDisposable
         await Core.InitializeAsync(ct).ConfigureAwait(false);
         // 载入手动下载代理端口（用于内核未运行时下载内核/geodata）。
         DownloadProxy.SetManualPort(await Settings.GetIntAsync("core.downloadProxyPort", 0).ConfigureAwait(false));
+        // 订阅拉取是否经代理（默认开启）。
+        DownloadProxy.SetSubscriptionUseProxy(
+            await Settings.GetBoolAsync("core.subscriptionUseProxy", true).ConfigureAwait(false));
         // SSID 感知：按 WiFi 自动切换订阅 / 暂停代理。
         Ssid.Start();
     }

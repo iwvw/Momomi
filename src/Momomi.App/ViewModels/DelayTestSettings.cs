@@ -19,17 +19,22 @@ public static class DelayTestSettings
     /// <summary>并发上限，防止手滑填出离谱的值把内核/网络打满。</summary>
     public const int MaxConcurrency = 128;
 
-    public static async Task<(string Url, int TimeoutMs, int Concurrency)> ReadAsync(ISettingsService settings)
+    /// <summary>默认只测 TCP 关闭：默认仍走内核的 URL 测速，读到的是实际可用延迟。</summary>
+    public const bool DefaultTcpOnly = false;
+
+    public static async Task<(string Url, int TimeoutMs, int Concurrency, bool TcpOnly)> ReadAsync(
+        ISettingsService settings)
     {
         var url = await settings.GetAsync("core.delayTestUrl").ConfigureAwait(false);
         var timeout = await settings.GetIntAsync("core.delayTestTimeout", DefaultTimeoutMs).ConfigureAwait(false);
         var concurrency = await settings.GetIntAsync("core.delayTestConcurrency", DefaultConcurrency).ConfigureAwait(false);
+        var tcpOnly = await settings.GetBoolAsync("core.delayTestTcpOnly", DefaultTcpOnly).ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(url)) url = DefaultUrl;
         if (timeout <= 0) timeout = DefaultTimeoutMs;
         if (concurrency <= 0) concurrency = DefaultConcurrency;
         if (concurrency > MaxConcurrency) concurrency = MaxConcurrency;
 
-        return (url!, timeout, concurrency);
+        return (url!, timeout, concurrency, tcpOnly);
     }
 }

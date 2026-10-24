@@ -1104,6 +1104,18 @@ public sealed partial class MainWindow : Window
 
     public void ApplyMiniPanelTheme(string theme) => _miniWindow?.ApplyTheme(theme);
 
+    /// <summary>
+    /// 把「迷你面板鼠标离开后自动收起」的秒数转给迷你窗口（0 = 关闭）。
+    /// 设置页改动后立即调用，不需要重启。
+    /// </summary>
+    public void ApplyMiniAutoHide(int seconds)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+            _miniWindow?.SetAutoHideSeconds(seconds);
+        else
+            DispatcherQueue.TryEnqueue(() => _miniWindow?.SetAutoHideSeconds(seconds));
+    }
+
     public void ShowAndActivate()
     {
         EnsureInitialPageLoaded();

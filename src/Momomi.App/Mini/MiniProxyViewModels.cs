@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Momomi.App.ViewModels;
 using Momomi.Core.Models;
 
 namespace Momomi.App.Mini;
@@ -81,7 +82,9 @@ public sealed partial class MiniProxyGroupViewModel : ObservableObject
 
         foreach (var node in Nodes)
         {
-            if (all.TryGetValue(node.Name, out var item)) node.Delay = item.Delay;
+            if (!all.TryGetValue(node.Name, out var item)) continue;
+            // 全局缓存优先：内核快照里的值可能是旧的，且策略组在快照里恒为 null。
+            node.Delay = DelayCache.Get(node.Name) ?? item.Delay;
         }
 
         // 以 API 的当前选中项为准同步选择（跨面板切换节点时生效）；

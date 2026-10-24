@@ -296,8 +296,8 @@
                                             <TextBlock Grid.Column="1"
                                                        VerticalAlignment="Center"
                                                        FontSize="12"
-                                                       Foreground="{x:Bind DelayKey, Converter={StaticResource DelayToBrush}}"
-                                                       Text="{x:Bind DelayText}" />
+                                                       Foreground="{x:Bind DelayKey, Mode=OneWay, Converter={StaticResource DelayToBrush}}"
+                                                       Text="{x:Bind DelayText, Mode=OneWay}" />
                                         </Grid>
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>

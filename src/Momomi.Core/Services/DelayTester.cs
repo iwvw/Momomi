@@ -2,6 +2,7 @@ namespace Momomi.Core.Services;
 
 using System.Diagnostics;
 using System.Net.Http;
+using System.Net.Sockets;
 
 /// <summary>
 /// 统一的延迟测量：并发受控、每目标一次（失败再补一次）。
@@ -14,6 +15,11 @@ using System.Net.Http;
 /// 避免把瞬时错误报成超时。
 ///
 /// 节点测速（走内核 API）与网络目标测速（走 HTTP）共用同一套策略，保证行为一致。
+///
+/// 另有一条独立的「只测 TCP」路径（<see cref="MeasureTcpAsync"/>）：直接对本机到
+/// 节点 server:port 建一次 TCP 连接，只量握手耗时，不经过内核、不发任何应用层数据。
+/// 它衡量的是「线路通不通、握手快不快」，与走代理发 HTTP 请求的「可用延迟」不是同一个量，
+/// 所以是设置项里的一个独立开关，而不是替换默认行为。
 /// </summary>
 public static class DelayTester
 {
@@ -60,6 +66,88 @@ public static class DelayTester
             sw.Stop();
             if (attempt + 1 >= MaxAttempts || sw.ElapsedMilliseconds >= FastFailureMs) return 0;
         }
+    }
+
+    /// <summary>
+    /// 只测 TCP：对 server:port 建一次 TCP 连接，返回握手耗时毫秒；0 表示失败或超时。
+    ///
+    /// 与 <see cref="MeasureAsync"/> 的区别：
+    /// - 不经过内核、不走代理协议，纯粹是本机到节点入口的 TCP 三次握手
+    /// - 不发送任何应用层数据，因此不受节点协议（VMess/Trojan/SS）差异影响
+    /// - 量不到 TLS 握手、也量不到节点到目标站的链路
+    ///
+    /// 用途：快速判断「线路通不通」。它比 URL 测速稳定得多（不依赖测试地址可达），
+    /// 但也不能替代 URL 测速——节点入口握手很快、实际转发很慢的情况完全存在。
+    /// </summary>
+    public static async Task<int> MeasureTcpAsync(
+        string server, int port, int timeoutMs, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(server) || port is <= 0 or > 65535) return 0;
+
+        for (var attempt = 0; ; attempt++)
+        {
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(timeoutMs);
+                using var client = new TcpClient();
+                await client.ConnectAsync(server, port, cts.Token).ConfigureAwait(false);
+                sw.Stop();
+
+                // 连接成功即断开：这里只要握手耗时，不做任何读写。
+                try { client.Close(); } catch { }
+
+                return (int)sw.ElapsedMilliseconds;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // 调用方取消了整批测速：不要把「被取消」记成「超时」。
+                throw;
+            }
+            catch
+            {
+            }
+
+            sw.Stop();
+            if (attempt + 1 >= MaxAttempts || sw.ElapsedMilliseconds >= FastFailureMs) return 0;
+        }
+    }
+
+    /// <summary>
+    /// 并发测量一组节点的 TCP 握手延迟。
+    /// 没有可直连地址的节点（如 QUIC 类协议）不会出现在 endpoints 里，
+    /// 调用方应自行回退到内核测速。
+    /// </summary>
+    public static async Task MeasureAllTcpAsync(
+        IReadOnlyCollection<string> names,
+        IReadOnlyDictionary<string, ProxyEndpoint> endpoints,
+        int timeoutMs,
+        int concurrency,
+        Func<string, int, Task> onMeasured,
+        CancellationToken ct = default)
+    {
+        using var gate = new SemaphoreSlim(Math.Max(1, concurrency));
+        var tasks = names.Select(async name =>
+        {
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var delay = endpoints.TryGetValue(name, out var ep)
+                    ? await MeasureTcpAsync(ep.Server, ep.Port, timeoutMs, ct).ConfigureAwait(false)
+                    : 0;
+                await onMeasured(name, delay).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToList();
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     /// <summary>

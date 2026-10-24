@@ -33,6 +33,14 @@ public sealed partial class MiniWindow : Window
     private VisState _state = VisState.Hidden;
     private Windows.Graphics.RectInt32 _targetRect;
 
+    // ---- 鼠标离开后自动收起 ----
+    //
+    // 只在「鼠标已经移出面板」时计时：鼠标停在面板上时不收起，否则用户正在选节点
+    // 会被打断。移到面板外才开始倒计时，移回来立即取消。
+    private DispatcherTimer? _autoHideTimer;
+    private int _autoHideSeconds;
+    private bool _pointerInside;
+
     public MiniWindow()
     {
         InitializeComponent();
@@ -76,13 +84,112 @@ public sealed partial class MiniWindow : Window
         _statsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         _statsTimer.Tick += async (_, _) => await Panel.ViewModel.LoadAsync();
 
+        // 鼠标进出面板：用于「离开后自动收起」的计时。
+        // 用隧道事件在根元素上监听，子控件（ComboBox 弹出层等）不会漏掉。
+        Panel.PointerEntered += (_, _) => OnPointerEntered();
+        Panel.PointerExited += (_, _) => OnPointerExited();
+
         _ = InitializeAsync();
+    }
+
+    private void OnPointerEntered()
+    {
+        _pointerInside = true;
+        _autoHideTimer?.Stop();
+    }
+
+    private void OnPointerExited()
+    {
+        _pointerInside = false;
+        RestartAutoHideTimer();
+    }
+
+    /// <summary>
+    /// 是否有弹出层正在显示（ComboBox 下拉、Flyout 等）。
+    ///
+    /// 鼠标移进 Popup 时 Panel 会收到 PointerExited，但用户其实还在操作面板。
+    /// 不做这个判断的话，点开节点下拉框选节点时面板会被自动收起。
+    /// </summary>
+    private bool IsPopupOpen()
+    {
+        try
+        {
+            return Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(Panel.XamlRoot).Count > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 设置「鼠标离开后自动收起」的秒数。0 表示关闭。
+    /// 由设置页在用户改动后调用，立即生效，不需要重启。
+    /// </summary>
+    public void SetAutoHideSeconds(int seconds)
+    {
+        _autoHideSeconds = Math.Max(0, seconds);
+        _autoHideTimer?.Stop();
+        RestartAutoHideTimer();
+    }
+
+    private void RestartAutoHideTimer()
+    {
+        if (_autoHideSeconds <= 0) return;
+        if (_state is not VisState.Shown) return;
+
+        // 鼠标还在面板里，不计时。
+        if (_pointerInside) return;
+
+        if (_autoHideTimer is null)
+        {
+            _autoHideTimer = new DispatcherTimer();
+            _autoHideTimer.Tick += OnAutoHideTick;
+        }
+
+        _autoHideTimer.Stop();
+        _autoHideTimer.Interval = TimeSpan.FromSeconds(_autoHideSeconds);
+        _autoHideTimer.Start();
+    }
+
+    private void OnAutoHideTick(object? sender, object e)
+    {
+        _autoHideTimer?.Stop();
+
+        // 倒计时期间鼠标又回来了：不收起。
+        if (_pointerInside) return;
+        if (_state is not VisState.Shown) return;
+
+        // 用户正在下拉框里选节点：等他选完再算。
+        if (IsPopupOpen())
+        {
+            RestartAutoHideTimer();
+            return;
+        }
+
+        Hide();
     }
 
     private async Task InitializeAsync()
     {
         ApplyBackdropStyle(await ReadBackdropStyleAsync());
+        SetAutoHideSeconds(await ReadAutoHideSecondsAsync());
         await Panel.InitializeAsync();
+    }
+
+    /// <summary>读取「鼠标离开后自动收起」的秒数，0 表示关闭。</summary>
+    private static async Task<int> ReadAutoHideSecondsAsync()
+    {
+        try
+        {
+            var v = await global::Momomi.App.AppHost.Host.Settings
+                .GetIntAsync("ui.miniAutoHideSeconds", 0);
+            return v is < 0 or > 3600 ? 0 : v;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static async Task<int> ReadBackdropStyleAsync()
@@ -222,6 +329,8 @@ public sealed partial class MiniWindow : Window
     {
         _forceClose = true;
         _statsTimer.Stop();
+        // 定时器不停的话，窗口销毁后它仍会触发，调用 Hide() 操作已关闭的窗口。
+        _autoHideTimer?.Stop();
 
         // 窗口即将销毁，必须摘掉活动标记：
         // 如果它是在显示状态下被销毁的（退出程序、渲染出错后重建），
@@ -271,6 +380,11 @@ public sealed partial class MiniWindow : Window
         bool wasHidden = _state is VisState.Hidden;
         _state = VisState.Showing;
 
+        // 每次呼出都当作鼠标不在面板上：计时从「显示完成」开始，
+        // 用户把鼠标移进来时 PointerEntered 会立刻取消。
+        _pointerInside = false;
+        _autoHideTimer?.Stop();
+
         // 马上要开始渲染动画，登记活动来源，避免这时被清工作集。
         WorkingSetTrimmer.BeginActivity(ActivitySources.MiniWindow);
 
@@ -312,6 +426,11 @@ public sealed partial class MiniWindow : Window
         _state = VisState.Shown;
         // 滑出动画结束后再拉取模式/开关/订阅/代理：避免冷页换入与网络加载突发叠加在动画起步上造成卡顿。
         _ = Panel.RefreshOnShowAsync();
+
+        // 动画期间鼠标可能在面板外，此时才开始计时；在面板内则等它离开。
+        // 不直接读 IsPointerOver：MiniPanelView 是 UserControl，该属性在
+        // WinUI 的 UserControl 上不可靠（构造后常为 false），交给 Pointer 事件驱动。
+        RestartAutoHideTimer();
     }
 
     public void Hide()
@@ -320,6 +439,7 @@ public sealed partial class MiniWindow : Window
         _state = VisState.Hiding;
 
         _statsTimer.Stop();
+        _autoHideTimer?.Stop();
 
         // 收起跟随窗口自身所在屏幕：此时光标可能已经移走，动画不该跨屏跳。
         UpdateTargetRect(IntPtr.Zero);

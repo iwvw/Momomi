@@ -99,7 +99,16 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
             {
                 foreach (var n in _all) n.SetSelected(n.Name == node.Name);
                 NowText = node.Name;
+
+                // 同步快照里的 Now：ApplyGroupDelaysFromMembers 靠它判断组的当前节点，
+                // 不同步的话切换后引用的还是旧节点，其它组里「手动」会一直显示旧延迟。
+                _owner.SetGroupNow(Name, node.Name);
+
                 _owner.ReportStatus($"已切换到 {node.Name}");
+
+                // 组的当前节点变了，引用它的组（含嵌套组）显示值要立刻跟着变。
+                _owner.ApplyGroupDelaysFromMembers();
+
                 // 本页已就地更新选中态，广播时让自己跳过刷新，避免整页重建。
                 _owner.RaiseProxiesChangedExceptSelf();
             });
@@ -122,11 +131,16 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
             _owner.Dispatcher.TryEnqueue(() => { foreach (var n in _all) n.IsTesting = true; });
             var names = _all.Select(n => n.Name).ToList();
             var scope = new HashSet<ProxyItemViewModel>(_all);
-            var batch = new DelayBatch(_owner.Dispatcher, results => _owner.ApplyDelayBatch(results, scope));
+            var batch = new DelayBatch(_owner.Dispatcher, results =>
+            {
+                _owner.ApplyDelayBatch(results, scope);
+                DelayCache.SetMany(results);
+            });
             try
             {
-                await DelayTester.MeasureAllAsync(
-                    _core.Api, names, _owner.DelayTestUrl, _owner.DelayTestTimeoutMs, _owner.DelayTestConcurrency,
+                // 按当前模式分派：TCP 模式直连节点入口，默认模式走内核 URL 测速。
+                await _owner.MeasureNodesAsync(
+                    names,
                     (name, delay) =>
                     {
                         batch.Report(name, delay);
@@ -174,15 +188,17 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
     {
         if (_core.Api is null || node.IsTesting) return;
         node.IsTesting = true;
-        var delay = await DelayTester
-            .MeasureAsync(_core.Api, node.Name, _owner.DelayTestUrl, _owner.DelayTestTimeoutMs)
-            .ConfigureAwait(false);
+        var delay = await _owner.MeasureNodeAsync(node.Name).ConfigureAwait(false);
         _owner.Dispatcher.TryEnqueue(() =>
         {
             node.IsTesting = false;
             node.Delay = delay;
             node.IsAlive = delay > 0;
+            // 单点测速同样进全局缓存，否则只有当前面板能看到结果。
+            DelayCache.Set(node.Name, delay);
             _owner.SyncNodeDelay(node.Name, delay, delay > 0);
+            // 该节点变了，引用它的组（含嵌套组）的显示值也要跟着更新。
+            _owner.ApplyGroupDelaysFromMembers();
             if (SortIndex == 1) ApplySort();
             // 单点测速时广播一次，让迷你面板同步延迟（整组测速由 TestAsync 统一广播）。
             if (broadcast) _owner.RaiseProxiesChangedExceptSelf();
@@ -224,17 +240,127 @@ public sealed partial class ProxiesViewModel : ObservableObject
     public int DelayTestTimeoutMs { get; private set; } = DelayTestSettings.DefaultTimeoutMs;
     public int DelayTestConcurrency { get; private set; } = DelayTestSettings.DefaultConcurrency;
 
+    /// <summary>是否只测 TCP 握手（设置项）。开启后节点测速改为直连节点 server:port。</summary>
+    public bool DelayTestTcpOnly { get; private set; } = DelayTestSettings.DefaultTcpOnly;
+
+    /// <summary>节点名 → 可直连地址，从 runtime.yaml 读取，供 TCP 模式使用。</summary>
+    private IReadOnlyDictionary<string, ProxyEndpoint> _endpoints =
+        new Dictionary<string, ProxyEndpoint>();
+
     /// <summary>切换节点后是否自动关闭旧连接。</summary>
     public bool AutoCloseConnection { get; private set; } = true;
 
     public async Task ReloadDelayTestAsync()
     {
         var settings = global::Momomi.App.AppHost.Host.Settings;
-        var (url, timeout, concurrency) = await DelayTestSettings.ReadAsync(settings).ConfigureAwait(false);
+        var (url, timeout, concurrency, tcpOnly) = await DelayTestSettings.ReadAsync(settings).ConfigureAwait(false);
         DelayTestUrl = url;
         DelayTestTimeoutMs = timeout;
         DelayTestConcurrency = concurrency;
+        DelayTestTcpOnly = tcpOnly;
         AutoCloseConnection = await settings.GetBoolAsync("core.autoCloseConnection", true).ConfigureAwait(false);
+
+        // 节点地址只在 TCP 模式下需要；读整份 runtime.yaml 有解析成本，
+        // 走 Task.Run 挪出 UI 线程，并按文件时间戳缓存。
+        if (tcpOnly)
+        {
+            _endpoints = await Task.Run(() => MihomoConfigBuilder.ReadProxyEndpoints(
+                _core.Paths.RuntimeConfigPath)).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 取节点地址表，必要时现读。
+    ///
+    /// 不能只依赖 <see cref="ReloadDelayTestAsync"/> 里的加载：用户在设置页打开开关时，
+    /// 代理页可能早就建好了（Attach 只跑一次），此时 _endpoints 还是空的，
+    /// 结果就是「开关看起来没生效、所有节点仍走 URL 测速」。
+    /// 这里按需补一次，读失败也只是回退，不会抛。
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, ProxyEndpoint>> GetEndpointsAsync()
+    {
+        if (_endpoints.Count > 0) return _endpoints;
+
+        var loaded = await Task.Run(() => MihomoConfigBuilder.ReadProxyEndpoints(
+            _core.Paths.RuntimeConfigPath)).ConfigureAwait(false);
+        _endpoints = loaded;
+        return loaded;
+    }
+
+    /// <summary>
+    /// 测一组节点的延迟，按当前模式分派：
+    /// - TCP 模式：直连各节点 server:port 量握手；没有可直连地址的节点（QUIC 类协议）
+    ///   回退到内核测速，保证每个节点都有结果。
+    /// - 默认模式：走内核 API 的 URL 测速。
+    /// </summary>
+    internal async Task MeasureNodesAsync(
+        IReadOnlyCollection<string> names,
+        Func<string, int, Task> onMeasured,
+        CancellationToken ct = default)
+    {
+        if (_core.Api is null) return;
+
+        // 并发不该超过目标数：对 5 个节点开 50 并发没有任何好处，
+        // 只会让它们同时抢连接，读数互相污染（实测并发下同一节点会从 178ms 跳到 56ms）。
+        var concurrency = EffectiveConcurrency(names.Count);
+
+        if (!DelayTestTcpOnly)
+        {
+            await DelayTester.MeasureAllAsync(
+                _core.Api, names, DelayTestUrl, DelayTestTimeoutMs, concurrency, onMeasured, ct)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        var endpoints = await GetEndpointsAsync().ConfigureAwait(false);
+        var tcpNames = names.Where(endpoints.ContainsKey).ToList();
+        var fallback = names.Where(n => !endpoints.ContainsKey(n)).ToList();
+
+        await DelayTester.MeasureAllTcpAsync(
+            tcpNames, endpoints, DelayTestTimeoutMs, concurrency, onMeasured, ct)
+            .ConfigureAwait(false);
+
+        if (fallback.Count > 0)
+        {
+            await DelayTester.MeasureAllAsync(
+                _core.Api, fallback, DelayTestUrl, DelayTestTimeoutMs, concurrency, onMeasured, ct)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 实际使用的并发数。
+    ///
+    /// 两条约束：
+    /// 1. 不超过目标数——多出来的名额只是让任务空转；
+    /// 2. 小规模时收敛到 10——节点少的时候高并发不会更快，反而互相干扰。
+    ///    实测 5 个节点开高并发，同一节点读数会在 56ms 与 178ms 之间跳。
+    /// </summary>
+    private int EffectiveConcurrency(int targetCount)
+    {
+        if (targetCount <= 0) return 1;
+        var cap = DelayTestConcurrency;
+        if (targetCount <= 20) cap = Math.Min(cap, 10);
+        return Math.Max(1, Math.Min(cap, targetCount));
+    }
+
+    /// <summary>测单个节点（按当前模式）。策略组与 DIRECT/REJECT 直接跳过。</summary>
+    internal async Task<int> MeasureNodeAsync(string name, CancellationToken ct = default)
+    {
+        if (_core.Api is null) return 0;
+        if (_proxies.TryGetValue(name, out var item) && !IsTestableNode(item)) return 0;
+
+        if (DelayTestTcpOnly)
+        {
+            var endpoints = await GetEndpointsAsync().ConfigureAwait(false);
+            if (endpoints.TryGetValue(name, out var ep))
+                return await DelayTester.MeasureTcpAsync(ep.Server, ep.Port, DelayTestTimeoutMs, ct)
+                    .ConfigureAwait(false);
+        }
+
+        return await DelayTester
+            .MeasureAsync(_core.Api, name, DelayTestUrl, DelayTestTimeoutMs, ct)
+            .ConfigureAwait(false);
     }
 
     public ProxiesViewModel(ICoreManager core, DispatcherQueue dispatcher)
@@ -258,6 +384,41 @@ public sealed partial class ProxiesViewModel : ObservableObject
             if (_suppressSelfReload) return;
             _dispatcher.TryEnqueue(() => _ = LoadAsync(force: true));
         };
+        _onDelayCached = (_, name) => _dispatcher.TryEnqueue(() => ApplyCachedDelay(name));
+    }
+
+    private readonly EventHandler<string> _onDelayCached;
+
+    /// <summary>
+    /// 把全局缓存里的新值写进本面板对应节点。
+    ///
+    /// 这是「在迷你面板测的速，主面板也要变」的实现：不重新拉内核
+    /// （那会丢掉客户端测出来的值，策略组在快照里恒为 null），
+    /// 只按名字更新现有节点实例，然后重算组继承。
+    /// </summary>
+    private void ApplyCachedDelay(string name)
+    {
+        var delay = DelayCache.Get(name);
+        if (delay is null) return;
+        var alive = DelayCache.GetAlive(name) ?? delay > 0;
+
+        var touched = false;
+        foreach (var group in Groups)
+        {
+            foreach (var node in group.AllNodes)
+            {
+                if (!string.Equals(node.Name, name, StringComparison.Ordinal)) continue;
+                node.Delay = delay;
+                node.IsAlive = alive;
+                touched = true;
+            }
+        }
+
+        if (!touched) return;
+
+        ApplyGroupDelaysFromMembers();
+        foreach (var g in Groups)
+            if (g.SortIndex == 1) g.ApplySort();
     }
 
     private readonly EventHandler _onSignals;
@@ -287,6 +448,7 @@ public sealed partial class ProxiesViewModel : ObservableObject
         ModeState.Changed += _onModeChanged;
         _core.StateChanged += _onStateChanged;
         AppSignals.ProxiesChanged += _onSignals;
+        DelayCache.Updated += _onDelayCached;
         _ = LoadSortAsync();
         _ = ReloadDelayTestAsync();
     }
@@ -322,6 +484,7 @@ public sealed partial class ProxiesViewModel : ObservableObject
         ModeState.Changed -= _onModeChanged;
         _core.StateChanged -= _onStateChanged;
         AppSignals.ProxiesChanged -= _onSignals;
+        DelayCache.Updated -= _onDelayCached;
     }
 
     public void ReportStatus(string text) => _dispatcher.TryEnqueue(() => StatusText = text);
@@ -402,6 +565,11 @@ public sealed partial class ProxiesViewModel : ObservableObject
 
         HasData = Groups.Count > 0;
         StatusText = $"共 {Groups.Count} 个代理组";
+
+        // 重建后立刻补齐组的延迟：BuildNodes 只能给真实节点带上缓存值，
+        // 策略组条目（「稳定」组里的「手动」）在 _proxies 里恒为 null，
+        // 必须在这里沿 now 链继承一次，否则每次刷新都会变回「—」。
+        ApplyGroupDelaysFromMembers();
     }
 
     private static List<ProxyItemViewModel> BuildNodes(
@@ -414,10 +582,36 @@ public sealed partial class ProxiesViewModel : ObservableObject
         foreach (var member in members)
         {
             if (!proxies.TryGetValue(member, out var p)) continue;
-            nodes.Add(new ProxyItemViewModel(p.Name, p.Type, p.Alive, p.Delay, now == member, groupName: groupName));
+
+            // 全局缓存优先：内核快照里的 delay 可能是旧的（甚至策略组根本没有值），
+            // 而缓存记录的是最近一次真实测速结果，跨面板一致。
+            var cached = DelayCache.Get(p.Name);
+            var delay = cached ?? p.Delay;
+            var alive = DelayCache.GetAlive(p.Name) ?? p.Alive;
+
+            nodes.Add(new ProxyItemViewModel(p.Name, p.Type, alive, delay, now == member, groupName: groupName));
         }
         return nodes;
     }
+
+    /// <summary>
+    /// 该条目是否可独立测速。
+    ///
+    /// 组的 members 里会混进不该单独测的东西：
+    /// 1. 嵌套的策略组（如「稳定」的成员里有「手动」）——Selector 没有自己的地址，
+    ///    对它发 delay 会递归测它的 now，和直接测那个节点重复，纯属浪费并发；
+    /// 2. REJECT / PASS 这类内置目标——没有可连的服务器，测了必然超时。
+    ///
+    /// 但 DIRECT 要测：它代表「直连」，有真实的本地网络路径可量，
+    /// 用户也需要知道直连延迟来和代理节点对比。内核支持对 DIRECT 做 delay。
+    /// </summary>
+    private static bool IsTestableNode(ProxyItem p)
+        => p.All is not { Count: > 0 }
+           && !string.Equals(p.Type, "Reject", StringComparison.OrdinalIgnoreCase)
+           && !string.Equals(p.Type, "Pass", StringComparison.OrdinalIgnoreCase)
+           && !string.Equals(p.Type, "Compatible", StringComparison.OrdinalIgnoreCase)
+           && !string.Equals(p.Type, "RejectDrop", StringComparison.OrdinalIgnoreCase)
+           && !string.Equals(p.Type, "PassRule", StringComparison.OrdinalIgnoreCase);
 
     public async Task SelectNodeAsync(string groupName, ProxyItemViewModel node)
     {
@@ -437,6 +631,25 @@ public sealed partial class ProxiesViewModel : ObservableObject
         catch
         {
         }
+    }
+
+    /// <summary>
+    /// 更新快照里某个组的当前节点。
+    ///
+    /// _proxies 是 GetProxiesAsync 的快照，切换节点后不会自动变。而
+    /// <see cref="ApplyGroupDelaysFromMembers"/> 靠 self.Now 判断组的当前节点，
+    /// 不同步就会拿着旧节点去继承延迟。
+    /// </summary>
+    internal void SetGroupNow(string groupName, string nodeName)
+    {
+        if (!_proxies.TryGetValue(groupName, out var item)) return;
+        if (string.Equals(item.Now, nodeName, StringComparison.Ordinal)) return;
+
+        var updated = new Dictionary<string, ProxyItem>(_proxies, StringComparer.Ordinal)
+        {
+            [groupName] = item with { Now = nodeName },
+        };
+        _proxies = updated;
     }
 
     /// <summary>
@@ -468,8 +681,8 @@ public sealed partial class ProxiesViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            // 按节点名去重：同一物理节点在多个组里只测一次，
-            // 避免重复并发请求互相竞争导致结果不一致。
+            // 只测真实节点：策略组（嵌套组）与 DIRECT/REJECT 没有自己的地址，
+            // 对它们发请求只会得到超时。组的延迟稍后由其 now 指向的节点结果填充。
             var names = new List<string>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
             var nodes = new List<ProxyItemViewModel>();
@@ -478,24 +691,35 @@ public sealed partial class ProxiesViewModel : ObservableObject
                 foreach (var node in group.AllNodes)
                 {
                     nodes.Add(node);
+                    if (!_proxies.TryGetValue(node.Name, out var item)) continue;
+                    if (!IsTestableNode(item)) continue;
                     if (seen.Add(node.Name)) names.Add(node.Name);
                 }
             }
 
             foreach (var g in Groups) g.SetBusy(true);
-            // 测速期间为每个待测节点点亮旋转动画（单点测速在 TestNodeAsync 里已处理）。
+            // 测速期间只为真正要测的节点点亮旋转动画。
             _dispatcher.TryEnqueue(() =>
             {
-                foreach (var node in nodes) node.IsTesting = true;
+                foreach (var node in nodes)
+                {
+                    if (_proxies.TryGetValue(node.Name, out var item) && IsTestableNode(item))
+                        node.IsTesting = true;
+                }
             });
 
             // 统一走 DelayTester：并发受控 + 每节点单次测量，与单点/组测速一致。
             // 结果批量写回，节点多时才不会卡在界面更新上。
-            var batch = new DelayBatch(_dispatcher, results => ApplyDelayBatch(results));
+            var batch = new DelayBatch(_dispatcher, results =>
+            {
+                ApplyDelayBatch(results);
+                // 写入全局缓存：迷你面板与其它视图都从这里取，保证跨面板一致。
+                DelayCache.SetMany(results);
+            });
             try
             {
-                await DelayTester.MeasureAllAsync(
-                    _core.Api, names, DelayTestUrl, DelayTestTimeoutMs, DelayTestConcurrency,
+                await MeasureNodesAsync(
+                    names,
                     (name, delay) =>
                     {
                         batch.Report(name, delay);
@@ -509,6 +733,9 @@ public sealed partial class ProxiesViewModel : ObservableObject
 
             _dispatcher.TryEnqueue(() =>
             {
+                // 组的延迟沿用其 now 指向的节点，不再对组本身发请求。
+                ApplyGroupDelaysFromMembers();
+
                 // 取消/异常时可能有节点没走到回调，统一收掉旋转动画。
                 foreach (var g in Groups)
                 {
@@ -533,6 +760,114 @@ public sealed partial class ProxiesViewModel : ObservableObject
                 IsBusy = false;
             });
         }
+    }
+
+    /// <summary>
+    /// 组的延迟沿用其 now 指向的节点：组本身没有地址，对它单独测速既慢又容易假超时。
+    ///
+    /// 分两步，不能一步到位：
+    /// 1. 先算出每个组的「有效延迟」（递归沿 now 链找到最终的真实节点）；
+    /// 2. 再把结果回填到**所有**引用该组的位置。
+    ///
+    /// 之所以要第二步：组的成员里除了节点还有别的组（「直连」组里有「手动」，
+    /// 「漏网」组里有「直连」）。只填 now 指向的那一个条目的话，这些嵌套组成员
+    /// 会一直是「—」，看起来像没继承到结果。
+    /// </summary>
+    internal void ApplyGroupDelaysFromMembers()
+    {
+        // 第 1 步：算出每个组的有效延迟。
+        var resolved = new Dictionary<string, (int? Delay, bool Alive)>(StringComparer.Ordinal);
+        foreach (var group in Groups)
+            ResolveGroupDelay(group, resolved, new HashSet<string>(StringComparer.Ordinal));
+
+        // 第 2 步：把结果写回所有条目——节点用自身测速值，组用上面算出的值。
+        foreach (var group in Groups)
+        {
+            foreach (var node in group.AllNodes)
+            {
+                if (!_proxies.TryGetValue(node.Name, out var item)) continue;
+
+                if (IsTestableNode(item))
+                {
+                    // 真实节点：界面上已有测速结果，保持不动。
+                    continue;
+                }
+
+                // 策略组或 REJECT/PASS 之类：能用解析结果就用，否则留空。
+                if (resolved.TryGetValue(node.Name, out var r))
+                {
+                    node.Delay = r.Delay;
+                    node.IsAlive = r.Alive;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 递归求一个组的有效延迟：沿 now 链找到最终的真实节点，取它的延迟。
+    /// 返回 false 表示链断了（指向 REJECT、空 now、或循环引用）。
+    /// </summary>
+    private bool ResolveGroupDelay(
+        ProxyGroupViewModel group,
+        Dictionary<string, (int? Delay, bool Alive)> resolved,
+        HashSet<string> visiting)
+    {
+        if (resolved.TryGetValue(group.Name, out var cached))
+            return cached.Delay is not null;
+
+        if (!visiting.Add(group.Name)) return false;
+
+        try
+        {
+            if (!_proxies.TryGetValue(group.Name, out var self)) return false;
+            var now = self.Now;
+            if (string.IsNullOrEmpty(now)) return false;
+
+            // now 指向真实节点（含 DIRECT）：优先取全局缓存，其次取界面上的值。
+            //
+            // 全局缓存是主面板与迷你面板的唯一数据源：内核的 /proxies 不返回
+            // 策略组延迟，而客户端测速结果原本只留在发起测速的那个面板里，
+            // 于是「在迷你面板测的速主面板看不到」。缓存解决了这个问题。
+            if (_proxies.TryGetValue(now, out var target) && IsTestableNode(target))
+            {
+                var cachedDelay = DelayCache.Get(now);
+                if (cachedDelay is not null)
+                {
+                    resolved[group.Name] = (cachedDelay, cachedDelay > 0);
+                    return true;
+                }
+
+                var fresh = FindNodeByName(now);
+                if (fresh is null) return false;
+                resolved[group.Name] = (fresh.Delay, fresh.IsAlive);
+                return fresh.Delay is not null;
+            }
+
+            // now 指向另一个组：递归求那个组，再继承它的结果。
+            var inner = Groups.FirstOrDefault(g => string.Equals(g.Name, now, StringComparison.Ordinal));
+            if (inner is null) return false;
+            if (!ResolveGroupDelay(inner, resolved, visiting)) return false;
+
+            resolved[group.Name] = resolved[inner.Name];
+            return true;
+        }
+        finally
+        {
+            visiting.Remove(group.Name);
+        }
+    }
+
+    /// <summary>在界面上按名字找节点实例（同名节点可能出现在多个组，取第一个）。</summary>
+    private ProxyItemViewModel? FindNodeByName(string name)
+    {
+        foreach (var group in Groups)
+        {
+            foreach (var node in group.AllNodes)
+            {
+                if (string.Equals(node.Name, name, StringComparison.Ordinal)) return node;
+            }
+        }
+        return null;
     }
 
     /// <summary>
