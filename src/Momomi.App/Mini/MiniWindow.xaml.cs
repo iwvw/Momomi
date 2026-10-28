@@ -14,23 +14,35 @@ public sealed partial class MiniWindow : Window
     private const int DesignHeight = 540;
     private const int MarginRight = 12;
     private const int MarginBottom = 12;
+
+    /// <summary>
+    /// 展开/收起时长。
+    ///
+    /// 260ms 是能看清整段位移的长度：180ms 在 200Hz 屏上只有十几帧，
+    /// 眼睛跟不上，观感就是"闪一下出现"。再长（300ms 以上）连续点几次
+    /// 会觉得拖沓，因为每次都得等动画跑完才有完整反馈。
+    ///
+    /// 收起比展开略快：收起时用户已经做出了"关掉"的决定，
+    /// 拖太久会让人想再点一次。
+    /// </summary>
     private const int ShowDurationMs = 260;
     private const int HideDurationMs = 220;
-
-    private enum VisState
-    {
-        Hidden,
-        Showing,
-        Shown,
-        Hiding,
-    }
+    private const int ResizeDurationMs = 240;
+    private const int SnapBackDurationMs = 160;
+    private const int DismissDurationMs = 220;
 
     private readonly IntPtr _hwnd;
     private readonly AppWindow _appWindow;
     private readonly WindowSlider _slider;
     private readonly DispatcherTimer _statsTimer;
     private bool _forceClose;
-    private VisState _state = VisState.Hidden;
+
+    /// <summary>目标状态：true = 应该展开，false = 应该收起。</summary>
+    private bool _wantVisible;
+
+    /// <summary>窗口当前是否真的在屏幕上（含动画中）。</summary>
+    private bool _windowShown;
+
     private Windows.Graphics.RectInt32 _targetRect;
 
     // ---- 鼠标离开后自动收起 ----
@@ -82,7 +94,12 @@ public sealed partial class MiniWindow : Window
         Panel.DragGestureEnded += (_, _) => OnDragEnded();
 
         _statsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-        _statsTimer.Tick += async (_, _) => await Panel.ViewModel.LoadAsync();
+        _statsTimer.Tick += async (_, _) =>
+        {
+            // 面板不可见时不要轮询：既浪费网络请求，也会让工作集反复被碰回来。
+            if (!_wantVisible) return;
+            await Panel.ViewModel.LoadAsync();
+        };
 
         // 鼠标进出面板：用于「离开后自动收起」的计时。
         // 用隧道事件在根元素上监听，子控件（ComboBox 弹出层等）不会漏掉。
@@ -136,7 +153,7 @@ public sealed partial class MiniWindow : Window
     private void RestartAutoHideTimer()
     {
         if (_autoHideSeconds <= 0) return;
-        if (_state is not VisState.Shown) return;
+        if (!_wantVisible) return;
 
         // 鼠标还在面板里，不计时。
         if (_pointerInside) return;
@@ -158,7 +175,7 @@ public sealed partial class MiniWindow : Window
 
         // 倒计时期间鼠标又回来了：不收起。
         if (_pointerInside) return;
-        if (_state is not VisState.Shown) return;
+        if (!_wantVisible) return;
 
         // 用户正在下拉框里选节点：等他选完再算。
         if (IsPopupOpen())
@@ -344,17 +361,70 @@ public sealed partial class MiniWindow : Window
         Close();
     }
 
-    public bool IsVisible => _state is VisState.Showing or VisState.Shown;
+    public bool IsVisible => _wantVisible;
+
+    /// <summary>
+    /// 预热：在屏幕外把面板渲染一帧，让 D3D 管线、字形缓存、
+    /// 材质采样都提前建好。
+    ///
+    /// 工作集被回收后第一次展开会明显卡一下——那不是代码慢，
+    /// 而是几十兆原生页要重新从页文件读回来，加上首帧要建交换链、
+    /// 编译着色器、光栅化全部字形。在"用户还没点"的空闲时刻
+    /// 先付这笔代价，展开时就是热的。
+    ///
+    /// 摆到工作区外而不是 Hide：隐藏状态的窗口不提交帧，
+    /// XAML 也就不会真正生成渲染目标和字形缓存，预热等于没做。
+    /// </summary>
+    public void WarmUp()
+    {
+        if (_windowShown || _forceClose) return;
+
+        try
+        {
+            var offscreen = _targetRect;
+            offscreen.X = -32000;
+            offscreen.Y = -32000;
+
+            // 记录当前前台窗口：预热会 Show 一个窗口，万一系统把它激活了，
+            // 用户正在打字的窗口就会失焦。这里事后还原。
+            var foreground = WindowChrome.GetForegroundWindow();
+
+            _appWindow.MoveAndResize(offscreen);
+            _appWindow.Show();
+
+            if (foreground != IntPtr.Zero && WindowChrome.GetForegroundWindow() == _hwnd)
+                WindowChrome.SetForegroundWindow(foreground);
+
+            Panel.UpdateLayout();
+
+            _ = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (_windowShown || _forceClose) return;
+
+                _appWindow.Hide();
+                _appWindow.MoveAndResize(_targetRect);
+                global::Momomi.App.App.WriteLog("迷你面板预热完成");
+            });
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"迷你面板预热失败：{ex}");
+        }
+    }
 
     public void ToggleVisible() => ToggleVisible(IntPtr.Zero);
 
     /// <summary>
     /// 切换显示。显示时按 <paramref name="monitor"/> 指定的屏幕定位（IntPtr.Zero 表示跟随窗口自身）。
+    ///
+    /// 只翻转"意图"，实际动作由 <see cref="ApplyIntent"/> 落地。
+    /// 动画跑到一半也照样翻转——反向由 <see cref="WindowSlider"/>
+    /// 从窗口真实位置接着走，所以连点不会丢，也不会跳。
     /// </summary>
     public void ToggleVisible(IntPtr monitor)
     {
-        if (_state is VisState.Showing or VisState.Shown) Hide();
-        else Show(monitor);
+        _wantVisible = !_wantVisible;
+        ApplyIntent(monitor);
     }
 
     /// <summary>
@@ -377,9 +447,46 @@ public sealed partial class MiniWindow : Window
     /// </summary>
     public void Show(IntPtr monitor)
     {
-        bool wasHidden = _state is VisState.Hidden;
-        _state = VisState.Showing;
+        _wantVisible = true;
+        ApplyIntent(monitor);
+    }
 
+    public void Hide()
+    {
+        _wantVisible = false;
+        ApplyIntent(IntPtr.Zero);
+    }
+
+    /// <summary>
+    /// 按当前意图推进到目标状态。
+    ///
+    /// 无论窗口此刻在做什么（静止、正在展开、正在收起），
+    /// 都从它<b>真实</b>所在的位置继续，因此反向点击是平滑折返，
+    /// 不会先跳到某个中间点再开始。
+    /// </summary>
+    private void ApplyIntent(IntPtr monitor)
+    {
+        if (_forceClose) return;
+
+        if (_wantVisible)
+        {
+            if (_windowShown) AnimateToShown(monitor);
+            else ShowFromHidden(monitor);
+        }
+        else
+        {
+            if (_windowShown) AnimateToHidden();
+        }
+    }
+
+    /// <summary>
+    /// 从隐藏状态展开。
+    ///
+    /// 关键在于<b>点击路径上不做重活</b>：网络加载（模式、开关、订阅、代理列表）
+    /// 全部排到动画之后，否则冷页换入与网络突发会叠加在动画起步上。
+    /// </summary>
+    private void ShowFromHidden(IntPtr monitor)
+    {
         // 每次呼出都当作鼠标不在面板上：计时从「显示完成」开始，
         // 用户把鼠标移进来时 PointerEntered 会立刻取消。
         _pointerInside = false;
@@ -390,41 +497,42 @@ public sealed partial class MiniWindow : Window
 
         // 每次呼出都重新定位：托盘图标可能已经换到另一块屏幕（改缩放后同样需要）。
         UpdateTargetRect(monitor);
-        var hiddenRect = SlideMath.Hidden(_targetRect, SlideDirection.BottomUp);
 
-        Windows.Graphics.RectInt32 start = hiddenRect;
-        if (!wasHidden)
-        {
-            var current = DpiLayout.GetCurrentRect(_hwnd);
-            // 面板已经在别的位置显示着（例如按热键再呼出）：就地展开。
-            // 但如果它当前在另一块屏幕上，就不要横跨两个屏幕滑过去——直接在新屏幕上重新滑出。
-            if (current.Width > 0 && current.Height > 0
-                && DpiLayout.IsWithinWorkArea(monitor, current))
-            {
-                start = current;
-            }
-        }
-        else
-        {
-            _appWindow.MoveAndResize(start);
-        }
+        // 先按隐藏位置摆好再显示：否则会先在目标位置闪一帧，
+        // 再开始动画，看起来像"闪一下才滑进来"。
+        _appWindow.MoveAndResize(SlideMath.Hidden(_targetRect, SlideDirection.BottomUp));
 
         _appWindow.Show();
+        _windowShown = true;
+
         WindowChrome.BringToForeground(_hwnd);
         // 必须最后插到任务栏下方：任务栏遮住窗口，滑动时才有"从任务栏后钻出"的观感。
         WindowChrome.PlaceBelowTaskbar(_hwnd);
 
-        // 呼出：fast-out / slow-in，末尾缓缓减速，对齐 Fluent 展开曲线。
-        _slider.Animate(start, _targetRect, 255, 255, ShowDurationMs, SlideEasing.EaseOut, OnShowCompleted);
+        _slider.Animate(_targetRect, 255, 255, AnimationSettings.Scale(ShowDurationMs), SlideEasing.EaseOut, OnShownSettled);
 
         _statsTimer.Start();
     }
 
-    private void OnShowCompleted()
+    /// <summary>已经在屏幕上（可能正在收起）：直接反向滑回去。</summary>
+    private void AnimateToShown(IntPtr monitor)
     {
-        if (_state != VisState.Showing) return;
-        _state = VisState.Shown;
-        // 滑出动画结束后再拉取模式/开关/订阅/代理：避免冷页换入与网络加载突发叠加在动画起步上造成卡顿。
+        WorkingSetTrimmer.BeginActivity(ActivitySources.MiniWindow);
+
+        // 反向时重新定位：托盘图标可能在另一块屏幕上。
+        if (monitor != IntPtr.Zero) UpdateTargetRect(monitor);
+
+        WindowChrome.PlaceBelowTaskbar(_hwnd);
+        _slider.Animate(_targetRect, 255, 255, AnimationSettings.Scale(ShowDurationMs), SlideEasing.EaseOut, OnShownSettled);
+        _statsTimer.Start();
+    }
+
+    private void OnShownSettled()
+    {
+        if (!_wantVisible) return;
+
+        // 滑出动画结束后再拉取模式/开关/订阅/代理：避免冷页换入与网络加载突发
+        // 叠加在动画起步上造成卡顿。
         _ = Panel.RefreshOnShowAsync();
 
         // 动画期间鼠标可能在面板外，此时才开始计时；在面板内则等它离开。
@@ -433,43 +541,37 @@ public sealed partial class MiniWindow : Window
         RestartAutoHideTimer();
     }
 
-    public void Hide()
+    private void AnimateToHidden()
     {
-        if (_state is VisState.Hidden or VisState.Hiding) return;
-        _state = VisState.Hiding;
-
         _statsTimer.Stop();
         _autoHideTimer?.Stop();
 
         // 收起跟随窗口自身所在屏幕：此时光标可能已经移走，动画不该跨屏跳。
         UpdateTargetRect(IntPtr.Zero);
-        var hiddenRect = SlideMath.Hidden(_targetRect, SlideDirection.BottomUp);
 
-        var current = DpiLayout.GetCurrentRect(_hwnd);
-        if (current.Width <= 0 || current.Height <= 0) current = _targetRect;
-
-        // 收起前把窗口插回任务栏下方：向下滑时被任务栏遮住，产生"从任务栏后藏入"的观感（与拖拽收起一致）。
+        // 收起前把窗口插回任务栏下方：向下滑时被任务栏遮住，
+        // 产生"从任务栏后藏入"的观感（与拖拽收起一致）。
         WindowChrome.PlaceBelowTaskbar(_hwnd);
 
-        // 收起：反向曲线，开始缓缓起步，对齐 Fluent 退出动画。
-        _slider.Animate(current, hiddenRect, 255, 255, HideDurationMs, SlideEasing.EaseIn, OnHideCompleted);
+        _slider.Animate(SlideMath.Hidden(_targetRect, SlideDirection.BottomUp),
+            255, 255, AnimationSettings.Scale(HideDurationMs), SlideEasing.EaseIn, OnHiddenSettled);
     }
 
-    private void OnHideCompleted()
+    private void OnHiddenSettled()
     {
-        if (_state != VisState.Hiding) return;
+        if (_wantVisible) return;
+
         _appWindow.Hide();
+        _windowShown = false;
         _appWindow.MoveAndResize(_targetRect);
-        _state = VisState.Hidden;
 
-        // 面板已收起、不再渲染，把工作集交还系统。
-        // 这是最频繁开合的窗口，每次收起都会留下一些 D3D/字形缓存，
-        // 不主动剥出去就会一直驻留——托盘常驻场景下这是内存的主要来源。
+        // 面板已收起、不再渲染，摘掉活动标记。
+        //
+        // 不立刻回收工作集：收起往往只是临时看一眼，几秒后又要打开，
+        // 立刻交还页会让下次展开重新缺页（冷启动卡顿就是这么来的）。
+        // 交给 WorkingSetTrimmer 延迟排队，期间重新打开会自动取消。
         WorkingSetTrimmer.EndActivity(ActivitySources.MiniWindow);
-
-        // 延后一拍：现在还在 WindowSlider 的动画回调里，
-        // 立刻清工作集会和它紧接着的收尾操作抢同一批页。
-        _ = DispatcherQueue.TryEnqueue(() => WorkingSetTrimmer.TryTrim("迷你面板收起"));
+        WorkingSetTrimmer.ScheduleTrim("迷你面板收起");
     }
 
     private void OpenFullPanel()
@@ -488,7 +590,7 @@ public sealed partial class MiniWindow : Window
 
     private void OnDragStarted()
     {
-        if (_state != VisState.Shown) return;
+        if (!_windowShown) return;
         _slider.Cancel();
         // 拖拽全程让任务栏盖住窗口：插到任务栏在 topmost 组内的正下方，避免盖在任务栏上方。
         WindowChrome.PlaceBelowTaskbar(_hwnd);
@@ -502,9 +604,9 @@ public sealed partial class MiniWindow : Window
     {
         if (!_dragging) return;
         GetCursorPos(out var p);
-        int dy = p.Y - _dragStartCursorY;
+        var dy = p.Y - _dragStartCursorY;
         // 跟手：窗口随鼠标移动；钳制在起始位置之下，避免拖出屏幕顶部（可往回拖到原位取消）。
-        int y = Math.Max(_dragStartRect.Y, _dragStartRect.Y + dy);
+        var y = Math.Max(_dragStartRect.Y, _dragStartRect.Y + dy);
         _appWindow.MoveAndResize(new Windows.Graphics.RectInt32(
             _dragStartRect.X, y, _dragStartRect.Width, _dragStartRect.Height));
     }
@@ -514,7 +616,7 @@ public sealed partial class MiniWindow : Window
         if (!_dragging) return;
         _dragging = false;
         GetCursorPos(out var p);
-        int dy = p.Y - _dragStartCursorY;
+        var dy = p.Y - _dragStartCursorY;
         var current = DpiLayout.GetCurrentRect(_hwnd);
 
         if (dy >= _dragStartRect.Height * DragDismissThresholdRatio)
@@ -527,15 +629,21 @@ public sealed partial class MiniWindow : Window
     private void DismissFromDrag(Windows.Graphics.RectInt32 current)
     {
         _statsTimer.Stop();
+        _autoHideTimer?.Stop();
+        _wantVisible = false;
+
         // 下滑前把窗口插到任务栏下层，与自然收起一致：被任务栏遮住、从底部藏入。
         WindowChrome.PlaceBelowTaskbar(_hwnd);
         var hidden = SlideMath.Hidden(current, SlideDirection.BottomUp);
-        _slider.Animate(current, hidden, 255, 255, 240, SlideEasing.EaseIn, () =>
+        _slider.Animate(hidden, 255, 255, AnimationSettings.Scale(DismissDurationMs), SlideEasing.EaseIn, () =>
         {
-            _state = VisState.Hidden;
+            _windowShown = false;
             _appWindow.Hide();
             _appWindow.MoveAndResize(_targetRect);
             _forceClose = true;
+
+            WorkingSetTrimmer.EndActivity(ActivitySources.MiniWindow);
+
             // 通知宿主（MainWindow）把 _miniWindow 置空，避免引用失效窗口。
             Dismissed?.Invoke(this, EventArgs.Empty);
             Panel.ViewModel.Dispose();
@@ -548,7 +656,8 @@ public sealed partial class MiniWindow : Window
     /// <summary>未过阈值：平滑弹回右下角原位（不关闭）。</summary>
     private void SnapBackFromDrag(Windows.Graphics.RectInt32 current)
     {
-        _slider.Animate(current, _targetRect, 255, 255, 220, SlideEasing.EaseOut, null);
+        _wantVisible = true;
+        _slider.Animate(_targetRect, 255, 255, AnimationSettings.Scale(SnapBackDurationMs), SlideEasing.EaseOut, OnShownSettled);
     }
 
     /// <summary>拖拽收起关闭时触发，宿主据此清理窗口引用。</summary>

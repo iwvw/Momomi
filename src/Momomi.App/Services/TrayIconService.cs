@@ -101,6 +101,20 @@ internal sealed class TrayIconService : IDisposable
         icon.LeftClickCommand = new SimpleCommand(() => LeftClicked?.Invoke());
         icon.NoLeftClickDelay = true;
 
+        // 双击也要算一次切换。
+        //
+        // H.NotifyIcon 处理托盘消息时，收到 WM_LBUTTONDBLCLK 会把内部
+        // IsDoubleClick 置位，紧接着那次 WM_LBUTTONUP 就被静默丢弃
+        // （MessageWindow.ProcessWindowMessage 里的 if (!IsDoubleClick)）。
+        //
+        // 只绑 LeftClickCommand 时，快速点两下、三下、N 下都只触发一次
+        // LeftClick，后面的点击全部消失——用户感受到的就是"点快了没反应"。
+        //
+        // 补上 DoubleClickCommand 后：2 次点击 = 1 次 LeftClick + 1 次
+        // DoubleClick，3 次 = 2 次 DoubleClick + 1 次 LeftClick。
+        // 无论点多快，点击次数都等于切换次数。
+        icon.DoubleClickCommand = new SimpleCommand(() => LeftClicked?.Invoke());
+
         if (icon.ContextFlyout is MenuFlyout menu)
         {
             _statusItem = FindItem<MenuFlyoutItem>(menu, "TrayStatusItem");

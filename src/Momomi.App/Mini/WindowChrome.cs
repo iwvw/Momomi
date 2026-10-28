@@ -86,28 +86,58 @@ internal static class WindowChrome
     }
 
     /// <summary>
+    /// 每台显示器任务栏窗口的缓存。
+    ///
+    /// 之前每次调用都 EnumWindows 全量遍历：系统上窗口一多就是 5–30ms，
+    /// 而面板展开、收起、拖动、改高度每一条路径都会调到这里，
+    /// 全部发生在 UI 线程上，直接体现为展开首帧掉帧。
+    ///
+    /// 任务栏只在显示器热插拔或 Explorer 重启时换 HWND，
+    /// 所以缓存失效判定用 <c>IsWindow</c> 就够。
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, IntPtr> TaskbarCache = new();
+
+    /// <summary>
     /// 找到与窗口同一显示器的任务栏：主屏为 Shell_TrayWnd，副屏为 Shell_SecondaryTrayWnd。
     /// </summary>
     private static IntPtr FindTaskbarForWindow(IntPtr hwnd)
     {
         IntPtr monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
 
+        if (TaskbarCache.TryGetValue(monitor, out IntPtr cached)
+            && cached != IntPtr.Zero
+            && IsWindow(cached))
+        {
+            return cached;
+        }
+
         IntPtr primary = FindWindowW("Shell_TrayWnd", null);
-        if (primary != IntPtr.Zero && MonitorFromWindow(primary, MONITOR_DEFAULTTONEAREST) == monitor)
-            return primary;
 
         IntPtr found = IntPtr.Zero;
-        EnumWindows((candidate, _) =>
-        {
-            var sb = new StringBuilder(64);
-            GetClassNameW(candidate, sb, sb.Capacity);
-            if (sb.ToString() != "Shell_SecondaryTrayWnd") return true;
-            if (MonitorFromWindow(candidate, MONITOR_DEFAULTTONEAREST) != monitor) return true;
-            found = candidate;
-            return false;
-        }, IntPtr.Zero);
 
-        return found != IntPtr.Zero ? found : primary;
+        if (primary != IntPtr.Zero && MonitorFromWindow(primary, MONITOR_DEFAULTTONEAREST) == monitor)
+        {
+            found = primary;
+        }
+        else
+        {
+            IntPtr secondary = IntPtr.Zero;
+            EnumWindows((candidate, _) =>
+            {
+                var sb = new StringBuilder(64);
+                GetClassNameW(candidate, sb, sb.Capacity);
+                if (sb.ToString() != "Shell_SecondaryTrayWnd") return true;
+                if (MonitorFromWindow(candidate, MONITOR_DEFAULTTONEAREST) != monitor) return true;
+                secondary = candidate;
+                return false;
+            }, IntPtr.Zero);
+
+            found = secondary != IntPtr.Zero ? secondary : primary;
+        }
+
+        if (found != IntPtr.Zero) TaskbarCache[monitor] = found;
+
+        return found;
     }
 
     private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
@@ -144,20 +174,30 @@ internal static class WindowChrome
 
     public static void BringToForeground(IntPtr hwnd)
     {
-        _ = SetForegroundWindow(hwnd);
-        if (GetForegroundWindow() == hwnd) return;
+        _ = SetForegroundWindowNative(hwnd);
+        if (GetForegroundWindowNative() == hwnd) return;
 
         uint targetThread = GetWindowThreadProcessId(hwnd, IntPtr.Zero);
-        uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
+        uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindowNative(), IntPtr.Zero);
         if (targetThread == foregroundThread)
         {
-            _ = SetForegroundWindow(hwnd);
+            _ = SetForegroundWindowNative(hwnd);
             return;
         }
 
         _ = AttachThreadInput(targetThread, foregroundThread, true);
-        _ = SetForegroundWindow(hwnd);
+        _ = SetForegroundWindowNative(hwnd);
         _ = AttachThreadInput(targetThread, foregroundThread, false);
+    }
+
+    /// <summary>当前前台窗口句柄。预热时用来记录、事后还原焦点。</summary>
+    public static IntPtr GetForegroundWindow() => GetForegroundWindowNative();
+
+    /// <summary>把焦点还给指定窗口（预热结束后还原用户原来的前台窗口）。</summary>
+    public static void SetForegroundWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        _ = SetForegroundWindowNative(hwnd);
     }
 
     private delegate IntPtr SUBCLASSPROC(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint uIdSubclass, IntPtr dwRefData);
@@ -190,11 +230,11 @@ internal static class WindowChrome
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
-    [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll", EntryPoint = "SetForegroundWindow")]
+    private static extern bool SetForegroundWindowNative(IntPtr hWnd);
 
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", EntryPoint = "GetForegroundWindow")]
+    private static extern IntPtr GetForegroundWindowNative();
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr pid);
@@ -207,6 +247,9 @@ internal static class WindowChrome
 
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassNameW(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);

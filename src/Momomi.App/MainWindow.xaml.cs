@@ -973,16 +973,13 @@ public sealed partial class MainWindow : Window
         WorkingSetTrimmer.EndActivity(ActivitySources.MainWindow);
         ReleasePageContent();
 
-        // 稍等一拍再修剪：Hide() 之后 XAML 还要跑完收起动画、释放交换链，
-        // 立刻清工作集会和那批释放操作抢同一批页。
-        DispatcherQueue.TryEnqueue(async () =>
-        {
-            await Task.Delay(1200).ConfigureAwait(true);
-
-            // 页面树已置空、窗口已隐藏，此时压缩托管堆不会造成可见停顿，
-            // 还能把 ReleasePageContent 掉下的页面一起还回去。
-            WorkingSetTrimmer.CompactAndTrim("主窗口隐藏");
-        });
+        // 不立刻修剪：用户最小化往往马上又打开，立刻交还页只会让
+        // 下次唤回重新缺页。交给延迟排队，期间重新打开会自动取消；
+        // 系统内存充裕时干脆不做（见 WorkingSetTrimmer.MemoryPressure）。
+        //
+        // 页面树已置空，压缩托管堆不会造成可见停顿，
+        // 还能把 ReleasePageContent 掉下的页面一起还回去。
+        WorkingSetTrimmer.CompactAndScheduleTrim("主窗口隐藏");
     }
 
     /// <summary>隐藏主窗口到托盘（用于静默启动）。</summary>
@@ -1010,7 +1007,8 @@ public sealed partial class MainWindow : Window
         EnsureMiniWindow();
         if (_miniWindow is null)
         {
-            // 不在 UI 线程时创建是排队执行的，这次点击直接丢弃，避免操作未初始化的窗口。
+            // 不在 UI 线程时创建是排队执行的。这里不能丢弃这次点击：
+            // 排队后仍然按用户点击时的意图执行，否则第一次点托盘会"没反应"。
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (_miniWindow is null) return;
@@ -1079,6 +1077,15 @@ public sealed partial class MainWindow : Window
             UpdateTrayState();
             DispatcherQueue.TryEnqueue(WarmupNextMiniWindow);
         };
+
+        // 只创建还不够：第一次展开仍要建交换链、编译着色器、光栅化字形，
+        // 工作集被回收过之后这些都要从页文件读回来。
+        // 在屏幕外先渲染一帧，把首帧代价提前付掉。
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (_miniWindow is null || _forceExit) return;
+            try { mini.WarmUp(); } catch { }
+        });
     }
 
     private bool _warmingMiniWindow;

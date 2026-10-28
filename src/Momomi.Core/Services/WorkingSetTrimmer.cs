@@ -33,12 +33,25 @@ public static class WorkingSetTrimmer
     /// <summary>
     /// 两次修剪之间的最小间隔。
     ///
-    /// 界面收起后立刻修剪，可以把工作集从上百兆打到个位数，
-    /// 而用户重新打开只多几次缺页（首帧感知不到）。
-    /// 但也不能太小：连续快速开合会反复丢弃刚读回来的页，
-    /// 反而让每次开合都重新缺页。20 秒是实测下来手感与回收都合适的值。
+    /// 界面收起后立刻修剪，可以把工作集从上百兆打到个位数。
+    ///
+    /// 但间隔太小时问题很明显：连续快速开合会反复丢弃刚读回来的页，
+    /// 每次展开都要重新缺页；而且修剪本身要遍历整个进程的页表，
+    /// 进程越大越慢。60 秒是「关掉界面后数字会变小」和
+    /// 「再次打开仍然热」之间的折中。
     /// </summary>
-    private const int MinimumIntervalMs = 20_000;
+    private const int MinimumIntervalMs = 60_000;
+
+    /// <summary>
+    /// 收起界面后延迟多久再修剪。
+    ///
+    /// 不用「收起就立刻修剪」：收起往往只是临时看一眼，几秒后又要打开。
+    /// 立刻把页全交出去，再打开时就得重新读回来，
+    /// 这正是「冷却之后第一次展开卡一下」的直接来源。
+    ///
+    /// 延迟期间任何界面重新打开都会取消这次修剪。
+    /// </summary>
+    private const int PostHideDelayMs = 45_000;
 
     private static readonly object Gate = new();
     private static readonly HashSet<string> ActiveSources = new(StringComparer.Ordinal);
@@ -111,6 +124,10 @@ public static class WorkingSetTrimmer
             ActiveSources.Add(source);
             LastActiveMs[source] = Environment.TickCount64;
         }
+
+        // 界面重新打开，取消排队中的延迟修剪：马上又要渲染了，
+        // 这时候把页交出去只会让首帧重新缺页。
+        CancelScheduledTrim();
     }
 
     /// <summary>标记某个界面停止渲染。</summary>
@@ -141,6 +158,11 @@ public static class WorkingSetTrimmer
     /// 尝试修剪一次工作集。返回是否真的执行了。
     ///
     /// 只在没有界面渲染、且距上次修剪超过 <see cref="MinimumIntervalMs"/> 时才动手。
+    ///
+    /// <b>EmptyWorkingSet 不在锁内调用</b>：它要遍历整个进程的页表，
+    /// 工作集大时能跑几十毫秒。持锁期间 UI 线程上的
+    /// <see cref="BeginActivity"/>（用户点开面板的第一件事）会一起等锁，
+    /// 表现就是「点了没反应，过一会儿才弹出来」。
     /// </summary>
     public static bool TryTrim(string reason, bool force = false)
     {
@@ -154,25 +176,126 @@ public static class WorkingSetTrimmer
 
             _hasTrimmed = true;
             _lastTrimMs = Environment.TickCount64;
+        }
 
-            long before = WorkingSetBytes();
+        var before = WorkingSetBytes();
 
-            bool ok;
-            try
-            {
-                ok = EmptyWorkingSet(GetCurrentProcess());
-            }
-            catch
-            {
-                return false;
-            }
+        bool ok;
+        try
+        {
+            ok = EmptyWorkingSet(GetCurrentProcess());
+        }
+        catch
+        {
+            return false;
+        }
 
-            // EmptyWorkingSet 在部分系统上会返回 false 但仍有效果，
-            // 所以不把它当作失败处理。
-            long after = WorkingSetBytes();
-            Log($"工作集回收（{reason}）：{before / 1048576.0:F1} MB -> {after / 1048576.0:F1} MB ok={ok}");
+        // EmptyWorkingSet 在部分系统上会返回 false 但仍有效果，
+        // 所以不把它当作失败处理。
+        var after = WorkingSetBytes();
+        Log($"工作集回收（{reason}）：{before / 1048576.0:F1} MB -> {after / 1048576.0:F1} MB ok={ok}");
 
-            return ok;
+        return ok;
+    }
+
+    private static readonly object ScheduleGate = new();
+    private static Timer? _deferredTrim;
+
+    /// <summary>
+    /// 系统当前可用物理内存（字节）。取不到时返回 -1。
+    /// </summary>
+    private static long AvailableBytes()
+    {
+        try
+        {
+            var status = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf<MEMORYSTATUSEX>() };
+            if (!GlobalMemoryStatusEx(ref status)) return -1;
+
+            return (long)status.ullAvailPhys;
+        }
+        catch
+        {
+            return -1;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MEMORYSTATUSEX
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX buffer);
+
+    /// <summary>
+    /// 内存紧张时才值得回收。
+    ///
+    /// 这条判断是「冷却后首次展开卡顿」的根本解法。
+    ///
+    /// 之前不管系统有没有内存压力，只要界面一隐藏就把几十兆页交还系统。
+    /// 交还的代价不是零：下次展开时那些代码页、D3D 资源、字形位图
+    /// 都要重新从页文件读回来，几十兆软缺页正好压在 UI 线程上——
+    /// 这就是「冷却久了点一下卡，之后再开合又很流畅」的全部原因。
+    /// 物理内存明明充裕时这么做纯粹是自己制造卡顿。
+    ///
+    /// 阈值取 3 GB：低于这个量系统本身就开始感到压力，
+    /// 这时候交还几十兆是有意义的。
+    /// </summary>
+    private static bool MemoryPressure()
+    {
+        var available = AvailableBytes();
+        return available >= 0 && available < 3L * 1024 * 1024 * 1024;
+    }
+
+    /// <summary>
+    /// 界面收起后安排一次延迟修剪。
+    ///
+    /// 为什么不立刻修剪：收起面板往往只是临时看一眼，
+    /// 几秒后又要打开。立刻交还页会让下次展开重新缺页，
+    /// 冷启动的卡顿就是这么产生的。延迟
+    /// <see cref="PostHideDelayMs"/> 毫秒再动手，期间任何界面
+    /// 重新打开都会取消；系统内存充裕时干脆不做。
+    /// </summary>
+    public static void ScheduleTrim(string reason)
+    {
+        if (!MemoryPressure()) return;
+
+        lock (ScheduleGate)
+        {
+            _deferredTrim ??= new Timer(_ => RunDeferredTrim(reason), null,
+                Timeout.Infinite, Timeout.Infinite);
+
+            _deferredTrim.Change(PostHideDelayMs, Timeout.Infinite);
+        }
+    }
+
+    /// <summary>取消已排队的延迟修剪（界面重新打开时调用）。</summary>
+    public static void CancelScheduledTrim()
+    {
+        lock (ScheduleGate)
+        {
+            _deferredTrim?.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+    }
+
+    private static void RunDeferredTrim(string reason)
+    {
+        try
+        {
+            TryTrim(reason);
+        }
+        catch
+        {
         }
     }
 
@@ -224,6 +347,33 @@ public static class WorkingSetTrimmer
     }
 
     /// <summary>
+    /// 压缩托管堆，然后<b>排队</b>一次延迟修剪。
+    ///
+    /// 与 <see cref="CompactAndTrim"/> 的区别只在最后一步：不立刻交还页，
+    /// 而是等 <see cref="PostHideDelayMs"/> 之后再看要不要交。
+    ///
+    /// 用户最小化主窗口往往马上又打开，立刻交还页会让下次唤回重新缺页。
+    /// 延迟期间重新打开会自动取消；系统内存充裕时干脆不做。
+    /// 托管堆压缩本身仍然立刻做——它只影响托管对象，代价是几十毫秒停顿，
+    /// 且能把 <c>ReleasePageContent</c> 掉下的页面一起还回去。
+    /// </summary>
+    public static void CompactAndScheduleTrim(string reason)
+    {
+        try
+        {
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+        }
+        catch
+        {
+        }
+
+        ScheduleTrim(reason);
+    }
+
+    /// <summary>
     /// 启动低频看门狗：只在界面长时间不渲染时修剪。
     ///
     /// 不做高频轮询：工作集不会自己涨回去，涨回去说明有渲染活动，
@@ -235,6 +385,10 @@ public static class WorkingSetTrimmer
         {
             try
             {
+                // 没有内存压力就不要主动交还页：这里每一次回收，
+                // 都会让用户下一次展开面板多一次缺页。
+                if (!MemoryPressure()) return;
+
                 TryTrim("idle");
             }
             catch
