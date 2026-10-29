@@ -5,7 +5,7 @@
     <AssemblyName>Momomi.Elevated</AssemblyName>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
-    <WindowsSdkPackageVersion>10.0.26100.80</WindowsSdkPackageVersion>
+    <WindowsSdkPackageVersion>10.0.26100.87</WindowsSdkPackageVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Platforms>x86;x64;ARM64</Platforms>

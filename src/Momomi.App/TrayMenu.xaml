@@ -14,7 +14,7 @@
         ToolTipText="Momomi"
         Visibility="Collapsed">
         <tb:TaskbarIcon.ContextFlyout>
-            <MenuFlyout AreOpenCloseAnimationsEnabled="False">
+            <MenuFlyout AreOpenCloseAnimationsEnabled="True">
                 <!-- 内核状态（只读，图标与颜色由 TrayIconService 按状态更新） -->
                 <MenuFlyoutItem x:Name="TrayStatusItem" FontSize="13" IsEnabled="False" Text="内核：未知">
                     <MenuFlyoutItem.Icon>

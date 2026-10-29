@@ -5,7 +5,7 @@
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
-    <WindowsSdkPackageVersion>10.0.26100.80</WindowsSdkPackageVersion>
+    <WindowsSdkPackageVersion>10.0.26100.87</WindowsSdkPackageVersion>
     <LangVersion>preview</LangVersion>
     <RootNamespace>Momomi.App</RootNamespace>
     <!-- 免打包（Inno/便携）用 requireAdministrator；MSIX 必须用 highestAvailable，
@@ -56,16 +56,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.Segmented" Version="8.2.251219" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
     <PackageReference Include="H.NotifyIcon.WinUI" Version="2.5.0-beta.3" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.6.1" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2957" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.4" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.7.1" />
     <!-- 进程图标提取需要 System.Drawing；用 NuGet 包替代 WindowsDesktop.App.WindowsForms 框架引用，
          避免为取一个图标把整个 WinForms 运行时（约 24 MB）打进发布目录。 -->
-    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.14" />
   </ItemGroup>
 
   <ItemGroup>
@@ -125,6 +125,9 @@
       <UnusedRuntimeDll Include="$(PublishDir)onnxruntime.dll" />
       <UnusedRuntimeDll Include="$(PublishDir)DirectML.dll" />
       <UnusedRuntimeDll Include="$(PublishDir)NPUDetect.dll" />
+      <!-- 2.6 起新增的 AI Fabric 语义索引兼容层（约 3.8 MB），本应用不使用。 -->
+      <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Asg.*.dll" />
+      <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.Internal.SemanticSearch*.winmd" />
       <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.Search.dll" />
       <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.Search.Projection.dll" />
       <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.Search.winmd" />
@@ -151,6 +154,7 @@
       <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.Workloads.pri" />
       <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Windows.Private.Workloads*.winmd" />
       <UnusedRuntimeDll Include="$(PublishDir)workloads.*.json" />
+      <UnusedRuntimeDll Include="$(PublishDir)workloads.json" />
       <!-- WebView2（本应用不使用）。 -->
       <UnusedRuntimeDll Include="$(PublishDir)Microsoft.Web.WebView2*.dll" />
       <UnusedRuntimeDll Include="$(PublishDir)WebView2Loader.dll" />

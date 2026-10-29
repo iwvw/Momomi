@@ -29,7 +29,7 @@ $manifest = [regex]::Replace($manifest, '<Identity[^>]*/>',
 # 分离版（框架依赖）需声明 WindowsAppRuntime 包依赖，否则启动时找不到 WinUI 运行时（CLR20r3 崩溃）。
 # 自包含版已内置运行时（存在 Microsoft.ui.xaml.dll），无需依赖声明。
 if (-not (Test-Path (Join-Path $SourceDir "Microsoft.ui.xaml.dll"))) {
-  $depXml = '    <PackageDependency Name="Microsoft.WindowsAppRuntime.2" MinVersion="2.4.0.0" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />'
+  $depXml = '    <PackageDependency Name="Microsoft.WindowsAppRuntime.2" MinVersion="2.6.4.0" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />'
   $manifest = [regex]::Replace($manifest,
     '(<TargetDeviceFamily[^>]*/>)',
     "`$1`r`n$depXml")

@@ -59,7 +59,7 @@ Momomi 是一个原生 Windows 桌面应用，用 [mihomo](https://github.com/Me
 | ARM64 便携版 | ARM64 设备（如骁龙本） |
 | ARM64 完整版 便携包 | ARM64 设备，内置内核与地理数据库 |
 
-**分离版（框架依赖，体积最小）** — 需系统已装 Windows App Runtime 2.4+ 与 .NET 运行时 10.0，否则无法启动。仅提供 x64，体积比合并版小约 100 MB。
+**分离版（框架依赖，体积最小）** — 需系统已装 Windows App Runtime 2.6+ 与 .NET 运行时 10.0，否则无法启动。仅提供 x64，体积比合并版小约 100 MB。
 
 | 类型 | 说明 |
 |---|---|
@@ -71,7 +71,7 @@ Momomi 是一个原生 Windows 桌面应用，用 [mihomo](https://github.com/Me
 
 | 运行时 | 所需版本 | 下载地址 |
 |---|---|---|
-| Windows App Runtime | 2.4 或更高（2.x） | [WindowsAppRuntimeInstall-x64.exe](https://aka.ms/windowsappsdk/2.4/2.4.0/windowsappruntimeinstall-x64.exe) |
+| Windows App Runtime | 2.6 或更高（2.x） | [WindowsAppRuntimeInstall-x64.exe](https://aka.ms/windowsappsdk/2.6/2.6.4/windowsappruntimeinstall-x64.exe) |
 | .NET 运行时 | 10.0 | [.NET 10 下载](https://dotnet.microsoft.com/download/dotnet/10.0) |
 
 精简版体积更小，首次启动会联网下载内核与地理数据；完整版内置内核与地理数据，适合网络访问 GitHub 不便的场景。绝大多数 Windows 电脑选 **x64 合并版**。
@@ -145,7 +145,7 @@ Momomi 是一个原生 Windows 桌面应用，用 [mihomo](https://github.com/Me
 
 - **Windows 10 1809（17763）及以上**，支持 x64 与 ARM64。
 - **管理员权限**：主程序以管理员运行，内核作为子进程继承权限，TUN 才能直接生效。若 UAC 设置为不通知，提权会失败并回退到普通代理模式。
-- **分离版额外要求**：需系统已安装 [Windows App Runtime 2.4 或更高（x64）](https://aka.ms/windowsappsdk/2.4/2.4.0/windowsappruntimeinstall-x64.exe) 与 [.NET 运行时 10.0（x64）](https://dotnet.microsoft.com/download/dotnet/10.0)。本应用基于 Windows App SDK 2.4 构建，运行时需 2.4 或更高的 2.x 版本。合并版无需这些。
+- **分离版额外要求**：需系统已安装 [Windows App Runtime 2.6 或更高（x64）](https://aka.ms/windowsappsdk/2.6/2.6.4/windowsappruntimeinstall-x64.exe) 与 [.NET 运行时 10.0（x64）](https://dotnet.microsoft.com/download/dotnet/10.0)。本应用基于 Windows App SDK 2.6 构建，运行时需 2.6 或更高的 2.x 版本。合并版无需这些。
 - TUN 依赖 **wintun**，会在需要时自动下载。
 - 默认混合端口 **7890**、控制端口 **9090**。若端口被 clash-party 等程序占用，请在设置中修改混合端口。
 
