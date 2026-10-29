@@ -48,8 +48,8 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
-            presenter.PreferredMinimumWidth = 900;
-            presenter.PreferredMinimumHeight = 600;
+            presenter.PreferredMinimumWidth = 1200;
+            presenter.PreferredMinimumHeight = 800;
         }
 
         // 默认窗口尺寸（用户调整后持久化，重启恢复；无记录时用较小的默认值）。
@@ -1293,8 +1293,8 @@ public sealed partial class MainWindow : Window
                 w = (int)DefaultWindowWidth;
                 h = (int)DefaultWindowHeight;
             }
-            w = Math.Max(w, 900);
-            h = Math.Max(h, 600);
+            w = Math.Max(w, 1200);
+            h = Math.Max(h, 800);
             AppWindow.Resize(new Windows.Graphics.SizeInt32(w, h));
         }
         catch
