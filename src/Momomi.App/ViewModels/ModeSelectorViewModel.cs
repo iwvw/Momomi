@@ -297,25 +297,17 @@ public sealed partial class ModeSelectorViewModel : ObservableObject, IDisposabl
 
                 if (_host.Core.Api is not null && _host.Core.State == CoreState.Running)
                 {
-                    // 热切换：只 PATCH tun.enable，内核即时应用，不重启进程、不动系统代理。
-                    try
-                    {
-                        await _host.Core.Api.PatchConfigsAsync(new Dictionary<string, object>
-                        {
-                            ["tun"] = new Dictionary<string, object>
-                            {
-                                ["enable"] = enabled,
-                            },
-                        }).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        // PATCH 失败（旧内核不支持热切换）时兜底：整配置重载让 tun 段生效；
-                        // 仍失败才重启内核。
-                        var reloaded = await _host.ApplyActiveProfileAsync().ConfigureAwait(false);
-                        if (!reloaded)
-                            await _host.Core.RestartAsync().ConfigureAwait(false);
-                    }
+                    // 必须走完整配置重载，不能只 PATCH tun.enable。
+                    //
+                    // 只 PATCH enable 时，内核会建起 TUN 适配器与路由，但 DNS 解析器仍停在
+                    // 「TUN 关闭」那套状态：内核自己解析节点域名会失败（日志里是
+                    // "dns resolve failed: couldn't find ip"），表现为 TUN 开着但所有节点测速超时、
+                    // 网页全打不开。实测：PATCH 开 TUN 全部 504，改配置重载后立即恢复。
+                    //
+                    // 重载会重新初始化 DNS，代价是已建立的连接被重置，这是必要代价。
+                    var reloaded = await _host.ApplyActiveProfileAsync().ConfigureAwait(false);
+                    if (!reloaded)
+                        await _host.Core.RestartAsync().ConfigureAwait(false);
                 }
             }).ConfigureAwait(false);
         }
