@@ -81,7 +81,7 @@ Filename: "schtasks.exe"; Parameters: "/Delete /TN ""Momomi"" /F"; Flags: runhid
 
 [Code]
 #if RequireRuntime == "1"
-// 分离版：启动前检测 .NET 运行时 10.0 与 Windows App Runtime 2.6（均为 x64），缺失则提示（不自动安装）。
+// 分离版：启动前检测 .NET 运行时 10.0 与 Windows App Runtime 2.6.4（均为 x64），缺失则提示（不自动安装）。
 const
   DotnetUrl = 'https://dotnet.microsoft.com/download/dotnet/10.0';
   WinAppRuntimeUrl = 'https://aka.ms/windowsappsdk/2.6/2.6.4/windowsappruntimeinstall-x64.exe';
@@ -116,9 +116,10 @@ end;
 
 function HasWindowsAppRuntime(): Boolean;
 begin
-  // Windows App Runtime 2.6 以 Appx 包安装，用 Get-AppxPackage 检测最可靠。
-  // 名称 Microsoft.WindowsAppRuntime.2 对应 2.x 系列，版本须 >= 2.6。
-  Result := RunProbe('$(if (Get-AppxPackage Microsoft.WindowsAppRuntime.2 | Where-Object { $_.Version -ge [Version]''2.6'' }) { ''FOUND'' } else { ''MISSING'' })') = 'FOUND';
+  // Windows App Runtime 2.6.4 以 Appx 包安装，用 Get-AppxPackage 检测最可靠。
+  // 名称 Microsoft.WindowsAppRuntime.2 对应 2.x 系列。门槛与 MSIX 依赖声明的
+  // MinVersion 保持一致（2.6.4.0），否则低版本 2.6.x 会通过检测却启动失败。
+  Result := RunProbe('$(if (Get-AppxPackage Microsoft.WindowsAppRuntime.2 | Where-Object { $_.Version -ge [Version]''2.6.4'' }) { ''FOUND'' } else { ''MISSING'' })') = 'FOUND';
 end;
 
 function InitializeSetup(): Boolean;
@@ -129,7 +130,7 @@ begin
   if not HasDotnet10() then
     Missing := Missing + '  - .NET 运行时 10.0（x64）：' + DotnetUrl + #13#10;
   if not HasWindowsAppRuntime() then
-    Missing := Missing + '  - Windows App Runtime 2.6（x64）：' + WinAppRuntimeUrl + #13#10;
+    Missing := Missing + '  - Windows App Runtime 2.6.4（x64）：' + WinAppRuntimeUrl + #13#10;
 
   if Missing <> '' then
   begin

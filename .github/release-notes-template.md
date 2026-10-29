@@ -50,10 +50,10 @@ Add-AppxPackage .\Momomi-{{VERSION}}.0-x64.msix
 
 | 运行时 | 所需版本 | 下载地址 |
 |---|---|---|
-| Windows App Runtime | **2.6 或更高**（2.x） | [WindowsAppRuntimeInstall-x64.exe](https://aka.ms/windowsappsdk/2.6/2.6.4/windowsappruntimeinstall-x64.exe) |
+| Windows App Runtime | **2.6.4 或更高**（2.x） | [WindowsAppRuntimeInstall-x64.exe](https://aka.ms/windowsappsdk/2.6/2.6.4/windowsappruntimeinstall-x64.exe) |
 | .NET 运行时 | **10.0** | [.NET 10 下载](https://dotnet.microsoft.com/download/dotnet/10.0) |
 
-- 本应用基于 **Windows App SDK 2.6** 构建，Windows App Runtime 需 **2.6 或更高**的 2.x 版本，推荐直接安装上表的 2.6。
+- 本应用基于 **Windows App SDK 2.6** 构建，Windows App Runtime 需 **2.6.4 或更高**的 2.x 版本，推荐直接安装上表的 2.6.4。
 - .NET 请选择 **「.NET 运行时」**（组件名 `Microsoft.NETCore.App`），而非「.NET 桌面运行时」或「ASP.NET Core 运行时」，版本 10.0.x。
 - 安装完成后可执行下列命令核对，两条均应有输出：
 
@@ -69,7 +69,7 @@ Get-AppxPackage Microsoft.WindowsAppRuntime.2 | Select-Object Name, Version
 | 使用场景 | 推荐版本 |
 |---|---|
 | 一般用户 | **合并版 x64 安装包**（自带运行时，安装即用） |
-| 追求最小体积，且已装 .NET 10 与 Windows App Runtime 2.6 | **分离版**（较合并版小约 100 MB） |
+| 追求最小体积，且已装 .NET 10 与 Windows App Runtime 2.6.4 | **分离版**（较合并版小约 100 MB） |
 | 网络可正常访问 GitHub | 精简版（内核按需下载，体积更小） |
 | 访问 GitHub 不便 / 需开箱即用 | **完整版**（内置 mihomo 内核与全部地理数据库） |
 | ARM64 设备（如骁龙本） | 合并版 ARM64 便携包 |
@@ -77,6 +77,6 @@ Get-AppxPackage Microsoft.WindowsAppRuntime.2 | Select-Object Name, Version
 ## 注意事项
 
 - **管理员权限**：主程序以管理员身份运行以支持 TUN。UAC 为默认级别时，每次启动会弹出一次授权提示。
-- **分离版运行环境**：须预先安装 Windows App Runtime 2.6（x64）与 .NET 运行时 10.0（x64），安装器会检测并在缺失时给出下载地址，详见上方「分离版」章节。
+- **分离版运行环境**：须预先安装 Windows App Runtime 2.6.4（x64）与 .NET 运行时 10.0（x64），安装器会检测并在缺失时给出下载地址，详见上方「分离版」章节。
 - **端口 7890 冲突**：若同时运行 clash-party 等占用 7890 端口的程序，Momomi 的混合端口将绑定失败，请在设置中改用其他端口（如 7897）。
 - **代码签名**：安装包未做代码签名，Windows SmartScreen 可能提示「未知发布者」，选择「仍要运行」即可。
