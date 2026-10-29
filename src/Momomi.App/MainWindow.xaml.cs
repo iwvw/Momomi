@@ -537,6 +537,16 @@ public sealed partial class MainWindow : Window
                     }
                 }
 
+                // 顺带裁剪失效记录：这里已经拿到完整的组与节点列表，
+                // 不需要额外请求。订阅切换后旧组名会一直残留，不清理会无限增长。
+                var groups = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
+                foreach (var (name, item) in proxies)
+                {
+                    if (item.All is { Count: > 0 })
+                        groups[name] = item.All;
+                }
+                await ProxySelectionStore.PruneAsync(host.Settings, groups).ConfigureAwait(false);
+
                 if (applied > 0)
                 {
                     await Task.Delay(300).ConfigureAwait(false);

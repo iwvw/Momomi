@@ -710,9 +710,14 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         if (_loading) return;
         _ = _host.Settings.SetAsync("core.tunMtuText", value ?? "");
-        var mtu = int.TryParse(value, out var m) && m > 0 ? m : 0;
+        // 0 表示交给内核默认（1500）。过小会让每个包都被分片、实际不可用，
+        // 过大则超出链路 MTU 后被丢弃，两者都会表现为 TUN 开了但上不了网。
+        // 576 是 IPv4 最小重组缓冲，9000 是常见巨帧上限。
+        var mtu = int.TryParse(value, out var m) && m is >= 576 and <= 9000 ? m : 0;
         _ = _host.Settings.SetIntAsync("core.tunMtu", mtu);
-        StatusText = "已保存，重启内核后生效";
+        StatusText = mtu == 0 && !string.IsNullOrWhiteSpace(value)
+            ? "MTU 超出 576-9000，已改用默认值"
+            : "已保存，重启内核后生效";
     }
 
     partial void OnTunDnsHijackChanged(string value)
@@ -748,6 +753,13 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (_loading) return;
         if (int.TryParse(value, out var mp) && mp is > 0 and < 65536)
         {
+            // 与控制器端口相同时，内核会先占用它给 RESTful API，
+            // 混合端口绑定失败 → 系统代理指向一个不代理的端口，表现为完全断网。
+            if (int.TryParse(ControllerPort, out var cp) && cp == mp)
+            {
+                StatusText = "混合端口不能与控制器端口相同";
+                return;
+            }
             _ = _host.Settings.SetIntAsync("core.mixedPort", mp);
             StatusText = "端口已保存，重启内核后生效";
         }
@@ -758,6 +770,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (_loading) return;
         if (int.TryParse(value, out var cp) && cp is > 0 and < 65536)
         {
+            if (int.TryParse(MixedPort, out var mp) && mp == cp)
+            {
+                StatusText = "控制器端口不能与混合端口相同";
+                return;
+            }
             _ = _host.Settings.SetIntAsync("core.controllerPort", cp);
             StatusText = "端口已保存，重启内核后生效";
         }

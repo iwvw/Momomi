@@ -83,40 +83,67 @@ public sealed class OverrideService : IOverrideService
         new("direct", "添加直连规则",
             "让指定的域名绕开代理直接连接，适合银行、政务、内网类站点。",
             """
-            # 这些域名走直连。把下面几行换成你需要直连的域名即可。
+            # +rules 会把规则插到规则表最前面，优先级高于订阅自带的所有规则。
+            # 把下面几行换成你需要直连的域名即可；内网域名可用 DOMAIN-SUFFIX,corp.local,DIRECT。
+            #
+            # 若希望这些规则排到最后（只在其他规则都没命中时才生效），把 +rules 改成 rules+。
             +rules:
-              - "DOMAIN-SUFFIX,baidu.com,DIRECT"
-              - "DOMAIN-SUFFIX,qq.com,DIRECT"
-              - "DOMAIN-SUFFIX,taobao.com,DIRECT"
+              - "DOMAIN-SUFFIX,icbc.com.cn,DIRECT"
+              - "DOMAIN-SUFFIX,cmbchina.com,DIRECT"
+              - "DOMAIN-SUFFIX,corp.local,DIRECT"
             """),
         new("proxy", "强制走代理",
             "订阅规则里没有的站点，强制交给代理组处理。",
             """
-            # 强制走代理。GLOBAL 是 mihomo 内置的全局出口，
-            # 想改用订阅里的代理组，把 GLOBAL 换成组名即可，例如 "🚀 节点选择"。
+            # 注意：目标必须填「代理组名」，不能填 GLOBAL。
+            #
+            # GLOBAL 是 mihomo 内置的全集组，默认选中 DIRECT，直接用它写规则
+            # 等于强制直连，效果和本模板想做的正好相反。
+            # 下面填的是 Momomi 自带的默认组名；订阅自带组的话换成实际组名，
+            # 例如 "🚀 节点选择"、"Proxy"，组名可在「代理」页看到。
             +rules:
-              - "DOMAIN-SUFFIX,openai.com,GLOBAL"
-              - "DOMAIN-SUFFIX,anthropic.com,GLOBAL"
-              - "DOMAIN-SUFFIX,github.com,GLOBAL"
+              - "DOMAIN-SUFFIX,openai.com,🚀 手动"
+              - "DOMAIN-SUFFIX,anthropic.com,🚀 手动"
+              - "DOMAIN-SUFFIX,github.com,🚀 手动"
             """),
         new("reject", "拦截广告与追踪",
             "把常见广告、遥测域名直接拒绝连接。",
             """
+            # 用 DOMAIN-SUFFIX 精确到域名后缀，比 DOMAIN-KEYWORD 更不容易误伤。
+            # 需要拦某个关键词时再加 DOMAIN-KEYWORD，例如 doubleclick。
             +rules:
-              - "DOMAIN-KEYWORD,doubleclick,REJECT"
+              - "DOMAIN-SUFFIX,doubleclick.net,REJECT"
               - "DOMAIN-SUFFIX,google-analytics.com,REJECT"
               - "DOMAIN-SUFFIX,googletagmanager.com,REJECT"
               - "DOMAIN-SUFFIX,umeng.com,REJECT"
+              - "DOMAIN-SUFFIX,cnzz.com,REJECT"
             """),
         new("dns", "自定义 DNS",
             "替换订阅自带的 DNS 段。用 ! 强制整体覆盖，不做递归合并。",
             """
-            # 键名以 ! 结尾表示整体替换，避免和订阅里的 dns 设置混合出怪结果。
+            # 键名以 ! 结尾表示整体替换，不递归合并。
+            #
+            # 因为是整体替换，订阅原有的 dns 字段会全部丢弃，所以这里必须写全。
+            # 尤其是 fake-ip-filter：缺了它，局域网设备名、mDNS 和 QQ 快速登录
+            # 都会被解析成 198.18.x.x 的假 IP，表现为内网访问失败。
+            #
+            # 通配符必须用 + 而不是 *：mihomo 的 * 一次只匹配一级域名，
+            # *.lan 匹配不到 nas.home.lan；+ 才是多级后缀匹配。
+            #
+            # 想保留订阅的 dns 并只改其中几项，把 dns! 改成 dns（去掉感叹号）。
             dns!:
               enable: true
               ipv6: false
               enhanced-mode: fake-ip
               fake-ip-range: 198.18.0.1/16
+              fake-ip-filter:
+                - '*'
+                - '+.lan'
+                - '+.local'
+                - '+.home.arpa'
+                - 'time.*.com'
+                - 'ntp.*.com'
+                - localhost.ptlogin2.qq.com
               default-nameserver:
                 - 223.5.5.5
                 - 119.29.29.29
@@ -130,6 +157,11 @@ public sealed class OverrideService : IOverrideService
         new("sniffer", "开启域名嗅探",
             "TUN 模式下按 IP 连接的流量也能识别出真实域名，规则分流更准。",
             """
+            # TUN 模式下部分流量只带 IP 不带域名（如 QUIC、直接连 IP 的程序），
+            # 嗅探后可按真实域名命中规则，分流更准。
+            #
+            # override-destination: false 表示嗅探结果只用于规则匹配，
+            # 不改写实际连接目标。若你的节点对 SNI 敏感，改成 true 可减少握手差异。
             sniffer:
               enable: true
               force-dns-mapping: true
@@ -210,9 +242,11 @@ public sealed class OverrideService : IOverrideService
         #
         #   key: value    简单值直接覆盖，嵌套映射递归合并
         #   key!:         整体替换该键，不递归合并
-        #   rules:        整个数组替换
-        #   +rules:       插到原数组最前面
-        #   rules+:       追加到原数组最后
+        #                 注意：dns! 这类整体替换会丢弃订阅原有的同名字段，
+        #                 需要保留的字段必须自己写全
+        #   rules:        整个数组替换（订阅自带规则会全部丢失）
+        #   +rules:       插到原数组最前面，优先级高于订阅规则
+        #   rules+:       追加到原数组最后，优先级最低
         #
         # 例如：让 example.com 直连
         +rules:

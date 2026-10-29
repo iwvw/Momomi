@@ -46,7 +46,7 @@ public static class MihomoConfigBuilder
         {
             "external-controller", "secret", "port", "socks-port", "mixed-port",
             "allow-lan", "mode", "log-level", "ipv6", "tun", "external-controller-cors",
-            "dns", "unified-delay",
+            "dns", "unified-delay", "profile", "sniffer",
         };
         foreach (var key in keysToStrip)
             root.Children.Remove(new YamlScalarNode(key));
@@ -59,12 +59,22 @@ public static class MihomoConfigBuilder
         root.Children[new YamlScalarNode("external-controller")] = new YamlScalarNode($"127.0.0.1:{options.ControllerPort}");
         root.Children[new YamlScalarNode("secret")] = new YamlScalarNode(options.Secret);
 
+        // 持久化策略组选择与 fake-ip 映射：
+        // 不显式开启时，重启内核后策略组会回到订阅里的第一个节点，
+        // 用户手动选的节点丢失；fake-ip 映射也重新分配，已建立的连接域名对不上。
+        root.Children[new YamlScalarNode("profile")] = new YamlMappingNode
+        {
+            { "store-selected", new YamlScalarNode("true") },
+            { "store-fake-ip", new YamlScalarNode("true") },
+        };
+
         // 统一延迟：内核测速时扣掉 TLS/TCP 握手耗时，只报真实往返时间。
         // 不开的话同一个节点在测速接口里会凭空多出一次握手的开销（几十到几百毫秒），
         // 数字比实际使用时的体验大得多。clash-party 也默认打开这一项。
         root.Children[new YamlScalarNode("unified-delay")] = new YamlScalarNode("true");
 
         root.Children[new YamlScalarNode("dns")] = BuildDnsNode(options.TunEnabled);
+        root.Children[new YamlScalarNode("sniffer")] = BuildSnifferNode();
 
         var cors = new YamlMappingNode
         {
@@ -127,16 +137,27 @@ public static class MihomoConfigBuilder
             new YamlScalarNode("223.5.5.5"),
             new YamlScalarNode("119.29.29.29"));
 
+        // fake-ip-filter 必须用 + 前缀，不能用 *：
+        // mihomo 的 * 一次只匹配一级域名（*.lan 匹配不到 nas.home.lan，
+        // 且不匹配 lan 本身），+ 才是多级后缀匹配。用 * 会让多级内网域名
+        // 拿到 198.18.x.x 假 IP，表现为局域网设备访问失败。
+        // 与 clash-party 的默认值保持一致（*、+.lan、+.local 加时间同步类域名）。
+        var fakeIpFilter = new YamlSequenceNode(
+            new YamlScalarNode("*"),
+            new YamlScalarNode("+.lan"),
+            new YamlScalarNode("+.local"),
+            new YamlScalarNode("+.home.arpa"),
+            new YamlScalarNode("time.*.com"),
+            new YamlScalarNode("ntp.*.com"),
+            new YamlScalarNode("localhost.ptlogin2.qq.com"));
+
         var dns = new YamlMappingNode
         {
             { "enable", new YamlScalarNode("true") },
             { "ipv6", new YamlScalarNode(tunEnabled ? "true" : "false") },
             { "enhanced-mode", new YamlScalarNode("fake-ip") },
             { "fake-ip-range", new YamlScalarNode("198.18.0.1/16") },
-            { "fake-ip-filter", new YamlSequenceNode(
-                new YamlScalarNode("*.lan"),
-                new YamlScalarNode("*.local"),
-                new YamlScalarNode("localhost.ptlogin2.qq.com")) },
+            { "fake-ip-filter", fakeIpFilter },
             { "default-nameserver", new YamlSequenceNode(
                 new YamlScalarNode("223.5.5.5"),
                 new YamlScalarNode("119.29.29.29")) },
@@ -145,6 +166,51 @@ public static class MihomoConfigBuilder
         };
 
         return dns;
+    }
+
+    /// <summary>
+    /// 域名嗅探：TUN 模式下部分流量只带目标 IP 不带域名（QUIC、直连 IP 的程序），
+    /// 嗅探出真实域名后才能按域名规则正确分流，否则这些流量会落到 MATCH 兜底规则。
+    ///
+    /// 与 clash-party 的默认值保持一致：
+    /// - override-destination 为 false，嗅探结果只用于规则匹配，不改写连接目标
+    /// - skip-domain 排除 Apple 推送，嗅探会破坏它的长连接
+    /// - skip-dst-address 排除 Telegram 全部网段，嗅探其 MTProto 会握手失败
+    /// </summary>
+    private static YamlMappingNode BuildSnifferNode()
+    {
+        var sniff = new YamlMappingNode
+        {
+            { "HTTP", new YamlMappingNode { { "ports", new YamlSequenceNode(
+                new YamlScalarNode("80"), new YamlScalarNode("443")) } } },
+            { "TLS", new YamlMappingNode { { "ports", new YamlSequenceNode(
+                new YamlScalarNode("443")) } } },
+        };
+
+        var skipDst = new YamlSequenceNode(
+            new YamlScalarNode("91.105.192.0/23"),
+            new YamlScalarNode("91.108.4.0/22"),
+            new YamlScalarNode("91.108.8.0/21"),
+            new YamlScalarNode("91.108.16.0/21"),
+            new YamlScalarNode("91.108.56.0/22"),
+            new YamlScalarNode("95.161.64.0/20"),
+            new YamlScalarNode("149.154.160.0/20"),
+            new YamlScalarNode("185.76.151.0/24"),
+            new YamlScalarNode("2001:67c:4e8::/48"),
+            new YamlScalarNode("2001:b28:f23c::/47"),
+            new YamlScalarNode("2001:b28:f23f::/48"),
+            new YamlScalarNode("2a0a:f280:203::/48"));
+
+        return new YamlMappingNode
+        {
+            { "enable", new YamlScalarNode("true") },
+            { "parse-pure-ip", new YamlScalarNode("true") },
+            { "force-dns-mapping", new YamlScalarNode("true") },
+            { "override-destination", new YamlScalarNode("false") },
+            { "sniff", sniff },
+            { "skip-domain", new YamlSequenceNode(new YamlScalarNode("+.push.apple.com")) },
+            { "skip-dst-address", skipDst },
+        };
     }
 
     public static string BuildFallbackYaml(RuntimeYamlOptions options)
