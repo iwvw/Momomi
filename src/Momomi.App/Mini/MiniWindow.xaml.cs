@@ -403,6 +403,13 @@ public sealed partial class MiniWindow : Window
 
                 _appWindow.Hide();
                 _appWindow.MoveAndResize(_targetRect);
+
+                // 预热也会让窗口真正渲染一帧，但它是「屏幕外的一次性渲染」，
+                // 不是用户打开的面板。必须把活动标记摘掉，
+                // 否则 IsUiActive 会永远为 true，主窗口隐藏时的工作集回收
+                // 会被 CompactAndTrim 里的判断整个跳过。
+                WorkingSetTrimmer.EndActivity(ActivitySources.MiniWindow);
+
                 global::Momomi.App.App.WriteLog("迷你面板预热完成");
             });
         }

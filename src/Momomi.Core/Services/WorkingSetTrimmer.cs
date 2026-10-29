@@ -328,6 +328,10 @@ public static class WorkingSetTrimmer
     /// 必须先跑一次真正的阻塞式回收，才能把这些页还出去。
     ///
     /// 代价是一次几十毫秒的停顿，所以只能在没有渲染活动时调用。
+    ///
+    /// 修剪本身带 <c>force</c>：主窗口隐藏是一个明确的「用户不要看了」
+    /// 信号，不该被 60 秒的最小间隔挡住——那样快速关开一次之后
+    /// 就再也回收不了，任务管理器里的数字会一直挂着。
     /// </summary>
     public static void CompactAndTrim(string reason)
     {
@@ -343,34 +347,7 @@ public static class WorkingSetTrimmer
         {
         }
 
-        TryTrim(reason);
-    }
-
-    /// <summary>
-    /// 压缩托管堆，然后<b>排队</b>一次延迟修剪。
-    ///
-    /// 与 <see cref="CompactAndTrim"/> 的区别只在最后一步：不立刻交还页，
-    /// 而是等 <see cref="PostHideDelayMs"/> 之后再看要不要交。
-    ///
-    /// 用户最小化主窗口往往马上又打开，立刻交还页会让下次唤回重新缺页。
-    /// 延迟期间重新打开会自动取消；系统内存充裕时干脆不做。
-    /// 托管堆压缩本身仍然立刻做——它只影响托管对象，代价是几十毫秒停顿，
-    /// 且能把 <c>ReleasePageContent</c> 掉下的页面一起还回去。
-    /// </summary>
-    public static void CompactAndScheduleTrim(string reason)
-    {
-        try
-        {
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-            GC.WaitForPendingFinalizers();
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        }
-        catch
-        {
-        }
-
-        ScheduleTrim(reason);
+        TryTrim(reason, force: true);
     }
 
     /// <summary>

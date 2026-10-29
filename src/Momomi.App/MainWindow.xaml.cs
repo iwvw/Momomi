@@ -973,13 +973,21 @@ public sealed partial class MainWindow : Window
         WorkingSetTrimmer.EndActivity(ActivitySources.MainWindow);
         ReleasePageContent();
 
-        // 不立刻修剪：用户最小化往往马上又打开，立刻交还页只会让
-        // 下次唤回重新缺页。交给延迟排队，期间重新打开会自动取消；
-        // 系统内存充裕时干脆不做（见 WorkingSetTrimmer.MemoryPressure）。
+        // 立即回收，不排队也不看内存压力。
         //
+        // 主窗口隐藏意味着用户已经把它收进托盘、较长一段时间不会再看，
+        // 那批原生页确实用不上了。这一点与迷你面板不同——面板收起往往
+        // 只是临时瞄一眼，几秒后又要打开，立刻交还反而让下次展开重新缺页。
+        //
+        // 稍等一拍再修剪：Hide() 之后 XAML 还要跑完收起动画、释放交换链，
+        // 立刻清工作集会和那批释放操作抢同一批页。
         // 页面树已置空，压缩托管堆不会造成可见停顿，
         // 还能把 ReleasePageContent 掉下的页面一起还回去。
-        WorkingSetTrimmer.CompactAndScheduleTrim("主窗口隐藏");
+        _ = DispatcherQueue.TryEnqueue(async () =>
+        {
+            await Task.Delay(1200).ConfigureAwait(true);
+            WorkingSetTrimmer.CompactAndTrim("主窗口隐藏");
+        });
     }
 
     /// <summary>隐藏主窗口到托盘（用于静默启动）。</summary>
