@@ -72,7 +72,9 @@
             <FontFamily x:Key="NodeNameFontFamily">ms-appx:///Assets/FlagsEmoji.ttf#Twemoji Mozilla, Segoe UI, Microsoft YaHei UI, Segoe UI Emoji</FontFamily>
 
             <!-- 节点按钮：直接用原生 Button 模板（hover/按下填充由系统负责），
-                 自身无边框，描边由外层 Border 提供，避免 hover 时覆盖。 -->
+                 自身无边框，描边由外层 Border 提供，避免 hover 时覆盖。
+                 VerticalContentAlignment 必须是 Stretch：Center 会让内容按自身尺寸居中，
+                 完整模式的两行内容高度传不到按钮，按钮被 MinItemHeight 钳住后就把第二行裁掉。 -->
             <Style x:Key="NodeButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />
@@ -81,7 +83,7 @@
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="VerticalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
             </Style>
 

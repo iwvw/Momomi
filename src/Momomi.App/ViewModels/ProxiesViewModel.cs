@@ -24,7 +24,7 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
     public partial string NowText { get; set; } = "";
 
     [ObservableProperty]
-    public partial bool IsExpanded { get; set; } = true;
+    public partial bool IsExpanded { get; set; } = false;
 
     public string ExpandGlyph => IsExpanded ? "\uE70D" : "\uE76C";
 
@@ -176,7 +176,12 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
     [RelayCommand]
     private void ToggleExpand() => IsExpanded = !IsExpanded;
 
-    partial void OnIsExpandedChanged(bool value) => OnPropertyChanged(nameof(ExpandGlyph));
+    partial void OnIsExpandedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ExpandGlyph));
+        // 单组展开状态变了，"展开全部/收起全部" 的文案也要跟着变。
+        _owner.RaiseAllExpandedChanged();
+    }
 
     /// <summary>组内全部节点（不随排序变化）。</summary>
     public IReadOnlyList<ProxyItemViewModel> AllNodes => _all;
@@ -235,6 +240,41 @@ public sealed partial class ProxiesViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsGlobalMode { get; set; }
 
+    /// <summary>
+    /// 节点卡片显示模式，对齐 clash-party：0 = 简单（单行），1 = 完整（两行 + 徽标）。
+    ///
+    /// 用单选索引而不是布尔开关：布尔值在 ToggleButton 上有默认值反向覆盖源的坑，
+    /// 而且「简单/完整」是互斥的两种呈现，本来就是枚举语义。
+    /// </summary>
+    [ObservableProperty]
+    public partial int DisplayMode { get; set; } = 1;
+
+    public bool IsSimpleMode => DisplayMode == 0;
+
+    partial void OnDisplayModeChanged(int value)
+    {
+        OnPropertyChanged(nameof(IsSimpleMode));
+
+        var showBadges = value != 0;
+        foreach (var g in Groups)
+            foreach (var n in g.AllNodes)
+                n.ShowBadges = showBadges;
+
+        _ = SaveDisplayModeAsync(value);
+    }
+
+    private static async Task SaveDisplayModeAsync(int value)
+    {
+        try
+        {
+            await global::Momomi.App.AppHost.Host.Settings
+                .SetIntAsync("ui.proxyDisplayMode", value).ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
     /// <summary>当前延迟测试参数（供组内节点测速读取）。</summary>
     public string DelayTestUrl { get; private set; } = DelayTestSettings.DefaultUrl;
     public int DelayTestTimeoutMs { get; private set; } = DelayTestSettings.DefaultTimeoutMs;
@@ -242,6 +282,25 @@ public sealed partial class ProxiesViewModel : ObservableObject
 
     /// <summary>是否只测 TCP 握手（设置项）。开启后节点测速改为直连节点 server:port。</summary>
     public bool DelayTestTcpOnly { get; private set; } = DelayTestSettings.DefaultTcpOnly;
+
+    /// <summary>节点名 → 传输层（ws/grpc/h2/tcp），从 runtime.yaml 读取，供节点卡片显示协议徽标。</summary>
+    private IReadOnlyDictionary<string, string> _transports =
+        new Dictionary<string, string>();
+
+    /// <summary>
+    /// 取传输层表，必要时现读。
+    ///
+    /// /proxies 不含 network 字段，只能从配置文件拿；读整份 YAML 有解析成本，
+    /// 所以按文件时间戳缓存（见 ReadProxyTransports），并在每次 Rebuild 前补一次，
+    /// 订阅更新、覆写模板改动后都能跟上。
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, string>> GetTransportsAsync()
+    {
+        var loaded = await Task.Run(() => MihomoConfigBuilder.ReadProxyTransports(
+            _core.Paths.RuntimeConfigPath)).ConfigureAwait(false);
+        _transports = loaded;
+        return loaded;
+    }
 
     /// <summary>节点名 → 可直连地址，从 runtime.yaml 读取，供 TCP 模式使用。</summary>
     private IReadOnlyDictionary<string, ProxyEndpoint> _endpoints =
@@ -440,6 +499,7 @@ public sealed partial class ProxiesViewModel : ObservableObject
 
     private bool _attached;
     private bool _loadingSort;
+    private Task _prefsReady = Task.CompletedTask;
 
     public void Attach()
     {
@@ -449,8 +509,43 @@ public sealed partial class ProxiesViewModel : ObservableObject
         _core.StateChanged += _onStateChanged;
         AppSignals.ProxiesChanged += _onSignals;
         DelayCache.Updated += _onDelayCached;
-        _ = LoadSortAsync();
+
+        // 记住偏好加载的任务，供 LoadAsync 等待。
+        //
+        // 不能只是发出去不管：OnNavigatedTo 里 Attach 之后紧接着就 LoadAsync，
+        // 两者并发时 Rebuild 可能先跑完，那时 DisplayMode 还是默认值 0，
+        // 结果完整模式被当成简单模式渲染——开关看起来完全没反应。
+        _prefsReady = Task.WhenAll(LoadSortAsync(), LoadDisplayModeAsync());
         _ = ReloadDelayTestAsync();
+    }
+
+    private async Task LoadDisplayModeAsync()
+    {
+        try
+        {
+            var settings = global::Momomi.App.AppHost.Host.Settings;
+            var saved = await settings.GetIntAsync("ui.proxyDisplayMode", 1).ConfigureAwait(false);
+
+            // 必须等 UI 线程真正赋值完成再返回：调用方（LoadAsync）要靠这个
+            // Task 判断偏好是否已就绪，只投递不等待等于没同步。
+            var done = new TaskCompletionSource();
+            var queued = _dispatcher.TryEnqueue(() =>
+            {
+                try
+                {
+                    DisplayMode = saved is 0 ? 0 : 1;
+                }
+                finally
+                {
+                    done.TrySetResult();
+                }
+            });
+            if (!queued) done.TrySetResult();
+            await done.Task.ConfigureAwait(false);
+        }
+        catch
+        {
+        }
     }
 
     private async Task LoadSortAsync()
@@ -459,18 +554,30 @@ public sealed partial class ProxiesViewModel : ObservableObject
         {
             var settings = global::Momomi.App.AppHost.Host.Settings;
             var saved = await settings.GetIntAsync("ui.proxySort", 0).ConfigureAwait(false);
+
+            // 同 LoadDisplayModeAsync：必须等 UI 线程赋值完成，
+            // 否则 LoadAsync 里 await 到的只是"已投递"，Rebuild 仍可能读到旧值。
+            var done = new TaskCompletionSource();
             _dispatcher.TryEnqueue(() =>
             {
-                _loadingSort = true;
                 try
                 {
-                    SortIndex = Math.Clamp(saved, 0, 2);
+                    _loadingSort = true;
+                    try
+                    {
+                        SortIndex = Math.Clamp(saved, 0, 2);
+                    }
+                    finally
+                    {
+                        _loadingSort = false;
+                    }
                 }
                 finally
                 {
-                    _loadingSort = false;
+                    done.SetResult();
                 }
             });
+            await done.Task.ConfigureAwait(false);
         }
         catch
         {
@@ -518,12 +625,17 @@ public sealed partial class ProxiesViewModel : ObservableObject
         _dispatcher.TryEnqueue(() => IsBusy = true);
         try
         {
+            // 先等偏好加载完：Rebuild 要用 DisplayMode 决定是否渲染徽标，
+            // 偏好没到位就重建，会把完整模式当成简单模式画出来。
+            await _prefsReady.ConfigureAwait(false);
+
             _proxies = await _core.Api.GetProxiesAsync().ConfigureAwait(false);
 
-            // 组顺序要读并解析 runtime.yaml，放到后台取，避免在 UI 线程上做这件事。
+            // 组顺序与节点传输层都要读并解析 runtime.yaml，放到后台取，避免在 UI 线程上做这件事。
             var order = await Task.Run(
                 () => MihomoConfigBuilder.ReadProxyGroupOrder(_core.Paths.RuntimeConfigPath))
                 .ConfigureAwait(false);
+            await GetTransportsAsync().ConfigureAwait(false);
 
             _dispatcher.TryEnqueue(() =>
             {
@@ -541,7 +653,13 @@ public sealed partial class ProxiesViewModel : ObservableObject
 
     private void Rebuild(IReadOnlyList<string>? declaredOrder = null)
     {
-        Groups.Clear();
+        // 记住各组的展开状态：刷新会重建整个集合，不保留的话用户刚展开的组会被收回去。
+        var expanded = new Dictionary<string, bool>(StringComparer.Ordinal);
+        foreach (var g in Groups) expanded[g.Name] = g.IsExpanded;
+
+        // 逐个移除而不是 Clear：Clear 会让 ListView 一次性丢弃全部容器，
+        // 组多时重建整页的代价比增量更新大得多。
+        for (var i = Groups.Count - 1; i >= 0; i--) Groups.RemoveAt(i);
 
         var declared = declaredOrder
             ?? MihomoConfigBuilder.ReadProxyGroupOrder(_core.Paths.RuntimeConfigPath);
@@ -553,18 +671,26 @@ public sealed partial class ProxiesViewModel : ObservableObject
             .OrderBy(p => rank.TryGetValue(p.Name, out var r) ? r : int.MaxValue)
             .ToList();
 
+        var first = true;
         foreach (var p in ordered)
         {
             if (!IsGlobalMode && string.Equals(p.Name, "GLOBAL", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             var group = new ProxyGroupViewModel(p.Name, p.Type, _core, this);
-            group.SetNodes(BuildNodes(p.Name, p.All!, _proxies, p.Now), p.Now, SortIndex);
+            group.SetNodes(BuildNodes(p.Name, p.All!, _proxies, p.Now, _transports, DisplayMode != 0), p.Now, SortIndex);
+
+            // 首次加载只展开第一个组：全部展开时列表会很长，用户得滚很久才能看到别的组。
+            // 之后按用户上次的状态恢复。
+            group.IsExpanded = expanded.TryGetValue(p.Name, out var wasExpanded) ? wasExpanded : first;
+            first = false;
+
             Groups.Add(group);
         }
 
         HasData = Groups.Count > 0;
         StatusText = $"共 {Groups.Count} 个代理组";
+        RaiseAllExpandedChanged();
 
         // 重建后立刻补齐组的延迟：BuildNodes 只能给真实节点带上缓存值，
         // 策略组条目（「稳定」组里的「手动」）在 _proxies 里恒为 null，
@@ -576,7 +702,9 @@ public sealed partial class ProxiesViewModel : ObservableObject
         string groupName,
         IReadOnlyList<string> members,
         IReadOnlyDictionary<string, ProxyItem> proxies,
-        string? now)
+        string? now,
+        IReadOnlyDictionary<string, string> transports,
+        bool showBadges)
     {
         var nodes = new List<ProxyItemViewModel>();
         foreach (var member in members)
@@ -589,7 +717,19 @@ public sealed partial class ProxiesViewModel : ObservableObject
             var delay = cached ?? p.Delay;
             var alive = DelayCache.GetAlive(p.Name) ?? p.Alive;
 
-            nodes.Add(new ProxyItemViewModel(p.Name, p.Type, alive, delay, now == member, groupName: groupName));
+            transports.TryGetValue(p.Name, out var transport);
+
+            nodes.Add(new ProxyItemViewModel(p.Name, p.Type, alive, delay, now == member,
+                groupName: groupName,
+                supportsUdp: p.Udp,
+                transport: transport ?? "",
+                tfo: p.Tfo,
+                xudp: p.Xudp,
+                mptcp: p.Mptcp,
+                smux: p.Smux)
+            {
+                ShowBadges = showBadges,
+            });
         }
         return nodes;
     }
@@ -673,6 +813,32 @@ public sealed partial class ProxiesViewModel : ObservableObject
 
     [RelayCommand]
     private async Task RefreshAsync() => await LoadAsync(force: true);
+
+    /// <summary>
+    /// 全部展开或全部收起。
+    ///
+    /// 合成一个命令而不是两个按钮：两者是互斥的一对操作，
+    /// 分开摆会让人每次都要先判断该点哪个，也白占一个按钮位。
+    /// </summary>
+    [RelayCommand]
+    private void ToggleAll()
+    {
+        var expand = !AllExpanded;
+        foreach (var g in Groups) g.IsExpanded = expand;
+        RaiseAllExpandedChanged();
+    }
+
+    /// <summary>所有组是否都已展开（无组时视为未展开）。</summary>
+    public bool AllExpanded => Groups.Count > 0 && Groups.All(g => g.IsExpanded);
+
+    /// <summary>全部展开按钮的文案：全部展开时提示可以收起。</summary>
+    public string ToggleAllText => AllExpanded ? "收起全部" : "展开全部";
+
+    public void RaiseAllExpandedChanged()
+    {
+        OnPropertyChanged(nameof(AllExpanded));
+        OnPropertyChanged(nameof(ToggleAllText));
+    }
 
     [RelayCommand]
     private async Task TestAllAsync()

@@ -809,9 +809,12 @@ public sealed partial class MainWindow : Window
         try
         {
             _tray = new Services.TrayIconService();
-            _tray.LeftClicked += () => Dispatch(OnTrayLeftClick);
+            // 光标位置必须在托盘事件线程上立刻取。Dispatch 只是把动作排到 UI 线程，
+            // 一旦 UI 线程正忙（排版、预热渲染），排队期间用户可能已经把鼠标移回另一块屏，
+            // 等 OnTrayLeftClick 里再取光标就落到副屏上了——这是"点主屏托盘却弹在副屏"的根因。
+            _tray.LeftClicked += () => OnTrayLeftClick(Mini.DpiLayout.MonitorForCursor());
             _tray.OpenRequested += () => Dispatch(ShowAndActivate);
-            _tray.ToggleMiniRequested += () => Dispatch(ToggleMiniWindow);
+            _tray.ToggleMiniRequested += () => OnTrayLeftClick(Mini.DpiLayout.MonitorForCursor());
             _tray.StartCoreRequested += () => Dispatch(async () => await AppHost.Host.Core.StartAsync());
             _tray.StopCoreRequested += () => Dispatch(async () => await AppHost.Host.Core.StopAsync());
             _tray.RestartCoreRequested += () => Dispatch(async () => await AppHost.Host.Core.RestartAsync());
@@ -1006,19 +1009,23 @@ public sealed partial class MainWindow : Window
     /// <summary>启动时直接最小化到托盘（供 App 依据设置调用）。</summary>
     public void StartMinimizedToTray() => MinimizeToTray();
 
-    private void OnTrayLeftClick()
+    private void OnTrayLeftClick(IntPtr monitor)
     {
         // H.NotifyIcon 的 LeftClickCommand 只在真实左键单击时触发（右键菜单不触发），无需再区分。
         //
-        // 光标此刻正停在托盘图标上，所以在事件线程上立刻取显示器，作为面板的落点。
-        // 不能等排到 UI 线程再取：那期间用户可能已经把鼠标移开了。
-        var monitor = Mini.DpiLayout.MonitorForCursor();
+        // 显示器由调用方在托盘事件线程上取好再传进来，这里只负责排到 UI 线程执行。
+        // 不在 UI 线程上取光标：排队期间鼠标可能已经移走，取到的会是另一块屏。
         Dispatch(() => ToggleMiniWindow(monitor));
     }
 
-    /// <summary>切换迷你面板。默认按托盘图标（光标）所在屏幕定位。</summary>
+    /// <summary>
+    /// 切换迷你面板。默认按光标所在屏幕定位。
+    ///
+    /// 不能用前台窗口：右键菜单弹在托盘图标旁，点击菜单项时前台窗口可能还在另一块屏上，
+    /// 面板就会跑到那块屏去。
+    /// </summary>
     public void ToggleMiniWindow()
-        => ToggleMiniWindow(Mini.DpiLayout.MonitorForForegroundWindow());
+        => ToggleMiniWindow(Mini.DpiLayout.MonitorForCursor());
 
     public void ToggleMiniWindow(IntPtr monitor)
     {

@@ -16,7 +16,11 @@ internal static class DpiLayout
     ///
     /// 目标屏幕必须显式传入，不能从窗口自身推导：面板隐藏时只是挪到原屏工作区下方，
     /// 窗口始终归属于原屏，于是换到另一块屏呼出时它还是弹回原屏——这就是
-    /// "不跟随图标所在屏幕"。传 IntPtr.Zero 时才退回窗口当前所在显示器。
+    /// "不跟随图标所在屏幕"。
+    ///
+    /// 传 IntPtr.Zero 表示「跟随窗口当前所在屏幕」，只给收起动画用：
+    /// 那时光标可能已经移走，跟着光标会让收起动画跨屏跳。
+    /// 呼出必须传显式锚点（见 <see cref="MonitorForAnchor"/>）。
     /// </summary>
     public static RectInt32 ComputeBottomRight(
         AppWindow window, int widthDip, int heightDip,
@@ -27,7 +31,13 @@ internal static class DpiLayout
 
         var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
-            return new RectInt32(0, 0, widthDip, heightDip);
+        {
+            // 解析失败时退回主显示器：给 (0,0) 加逻辑像素尺寸会得到一个
+            // 既不在这块屏、尺寸也不对的矩形，窗口会闪到左上角。
+            monitor = MonitorFromPoint(new POINT { X = 0, Y = 0 }, MonitorDefaultToNearest);
+            if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
+                return new RectInt32(0, 0, widthDip, heightDip);
+        }
 
         // 用工作区（已扣掉任务栏），不是整块屏幕。
         var work = info.rcWork;
@@ -96,6 +106,8 @@ internal static class DpiLayout
     /// <summary>
     /// 前台窗口所在显示器。用于热键呼出：此时既没有托盘图标被点击，光标也可能停在别处，
     /// 以用户正在操作的窗口为准最符合直觉。
+    ///
+    /// 只在热键路径使用。托盘菜单点击不能用它：菜单弹在图标旁，前台窗口可能还在另一块屏。
     /// </summary>
     public static IntPtr MonitorForForegroundWindow()
     {
@@ -112,6 +124,24 @@ internal static class DpiLayout
         {
         }
         return MonitorForCursor();
+    }
+
+    /// <summary>
+    /// 呼出时的锚点解析：光标 → 主任务栏 → 窗口自身。
+    ///
+    /// 窗口位置必须排在最后。预热会把窗口临时挪到 (-32000, -32000) 做离屏渲染，
+    /// 那个坐标离哪块屏最近就解析成哪块屏——副屏在主屏左侧或上方时就是副屏。
+    /// 若拿它当锚点，落点会被固化成副屏，下次再按窗口位置解析仍然是副屏，自我强化。
+    /// </summary>
+    public static IntPtr MonitorForAnchor(AppWindow window)
+    {
+        var monitor = MonitorForCursor();
+        if (monitor != IntPtr.Zero) return monitor;
+
+        monitor = MonitorForTrayTaskbar();
+        if (monitor != IntPtr.Zero) return monitor;
+
+        return MonitorForWindow(window);
     }
 
     /// <summary>窗口当前所在显示器。</summary>

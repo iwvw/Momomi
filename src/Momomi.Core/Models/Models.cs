@@ -26,7 +26,12 @@ public sealed record ProxyItem(
     string? Now,
     IReadOnlyList<string>? All,
     string? TestUrl,
-    string? Icon);
+    string? Icon,
+    bool Udp = false,
+    bool Tfo = false,
+    bool Xudp = false,
+    bool Mptcp = false,
+    bool Smux = false);
 
 public sealed record ProxyGroup(
     string Name,

@@ -350,6 +350,78 @@ public static class MihomoConfigBuilder
                || type.Equals("hysteria2", StringComparison.OrdinalIgnoreCase)
                || type.Equals("tuic", StringComparison.OrdinalIgnoreCase));
 
+    private static readonly object ProxyTransportCacheGate = new();
+    private static (string Path, DateTime WriteTime, long Length) ProxyTransportCacheKey = default;
+    private static IReadOnlyDictionary<string, string>? ProxyTransportCache;
+
+    /// <summary>
+    /// 从运行时配置读取每个节点的传输层（ws / grpc / h2 / http / tcp）。
+    ///
+    /// 为什么必须读配置文件：mihomo 的 /proxies 只返回 type（Vless / Hysteria2 …）
+    /// 与 udp 能力，不含 network 字段。而「vless over ws」和「vless over tcp」
+    /// 在节点列表里是两种完全不同的东西，光看 type 区分不出来。
+    /// 缺省 network 的节点按 tcp 处理——这是 mihomo 的默认值。
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ReadProxyTransports(string yamlPath)
+    {
+        try
+        {
+            var info = new FileInfo(yamlPath);
+            if (!info.Exists) return new Dictionary<string, string>();
+
+            var key = (yamlPath, info.LastWriteTimeUtc, info.Length);
+            lock (ProxyTransportCacheGate)
+            {
+                if (ProxyTransportCacheKey == key && ProxyTransportCache is not null)
+                    return ProxyTransportCache;
+            }
+
+            var transports = ParseProxyTransports(yamlPath);
+
+            lock (ProxyTransportCacheGate)
+            {
+                ProxyTransportCacheKey = key;
+                ProxyTransportCache = transports;
+            }
+            return transports;
+        }
+        catch
+        {
+            return new Dictionary<string, string>();
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string> ParseProxyTransports(string yamlPath)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            var yaml = new YamlStream();
+            using var reader = new StreamReader(yamlPath);
+            yaml.Load(reader);
+
+            if (yaml.Documents.Count == 0) return result;
+            if (yaml.Documents[0].RootNode is not YamlMappingNode root) return result;
+            if (!root.Children.TryGetValue(new YamlScalarNode("proxies"), out var node)) return result;
+            if (node is not YamlSequenceNode proxies) return result;
+
+            foreach (var item in proxies.Children)
+            {
+                if (item is not YamlMappingNode proxy) continue;
+
+                var name = GetScalar(proxy, "name");
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                var network = GetScalar(proxy, "network");
+                result[name] = string.IsNullOrWhiteSpace(network) ? "tcp" : network;
+            }
+        }
+        catch
+        {
+        }
+        return result;
+    }
+
     private static string? GetScalar(YamlMappingNode mapping, string key)
         => mapping.Children.TryGetValue(new YamlScalarNode(key), out var value)
            && value is YamlScalarNode scalar

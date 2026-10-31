@@ -92,10 +92,12 @@ internal static class WindowChrome
     /// 而面板展开、收起、拖动、改高度每一条路径都会调到这里，
     /// 全部发生在 UI 线程上，直接体现为展开首帧掉帧。
     ///
-    /// 任务栏只在显示器热插拔或 Explorer 重启时换 HWND，
-    /// 所以缓存失效判定用 <c>IsWindow</c> 就够。
+    /// 缓存值带上显示器矩形做校验位：<c>IsWindow</c> 只能证明句柄有效，
+    /// 不能证明它还是同一块屏的任务栏。显示器热插拔、换位、改分辨率后
+    /// 句柄可能被复用而矩形已变，只判 IsWindow 会一直返回错的那个，
+    /// 表现为面板压在错误的屏幕任务栏下方（Z 序错位）。
     /// </summary>
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, IntPtr> TaskbarCache = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, (IntPtr Taskbar, RECT Bounds)> TaskbarCache = new();
 
     /// <summary>
     /// 找到与窗口同一显示器的任务栏：主屏为 Shell_TrayWnd，副屏为 Shell_SecondaryTrayWnd。
@@ -103,12 +105,21 @@ internal static class WindowChrome
     private static IntPtr FindTaskbarForWindow(IntPtr hwnd)
     {
         IntPtr monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (monitor == IntPtr.Zero) return IntPtr.Zero;
 
-        if (TaskbarCache.TryGetValue(monitor, out IntPtr cached)
-            && cached != IntPtr.Zero
-            && IsWindow(cached))
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(monitor, ref info)) return IntPtr.Zero;
+        var bounds = info.rcMonitor;
+
+        if (TaskbarCache.TryGetValue(monitor, out var cached)
+            && cached.Taskbar != IntPtr.Zero
+            && IsWindow(cached.Taskbar)
+            && cached.Bounds.Left == bounds.Left
+            && cached.Bounds.Top == bounds.Top
+            && cached.Bounds.Right == bounds.Right
+            && cached.Bounds.Bottom == bounds.Bottom)
         {
-            return cached;
+            return cached.Taskbar;
         }
 
         IntPtr primary = FindWindowW("Shell_TrayWnd", null);
@@ -135,7 +146,7 @@ internal static class WindowChrome
             found = secondary != IntPtr.Zero ? secondary : primary;
         }
 
-        if (found != IntPtr.Zero) TaskbarCache[monitor] = found;
+        if (found != IntPtr.Zero) TaskbarCache[monitor] = (found, bounds);
 
         return found;
     }
@@ -258,4 +269,25 @@ internal static class WindowChrome
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
 
     private const uint MONITOR_DEFAULTTONEAREST = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 }

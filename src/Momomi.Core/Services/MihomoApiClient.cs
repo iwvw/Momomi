@@ -153,7 +153,12 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
                 GetString(v, "now"),
                 all,
                 GetString(v, "testUrl"),
-                GetString(v, "icon"));
+                GetString(v, "icon"),
+                GetBool(v, "udp"),
+                GetBool(v, "tfo"),
+                GetBool(v, "xudp"),
+                GetBool(v, "mptcp"),
+                GetBool(v, "smux"));
         }
         return result;
     }

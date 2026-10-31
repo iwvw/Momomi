@@ -8,7 +8,167 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:Momomi.App.ViewModels"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
     mc:Ignorable="d">
+
+    <Page.Resources>
+        <!--
+            节点信息徽标（协议 / 传输层 / UDP）。
+
+            用 Grid 而不是 Border：Border 同时设置 CornerRadius + BorderThickness + Background
+            时背景与描边会被拆成两个 visual，圆角处出现接缝（microsoft-ui-xaml#9454），
+            卡片容器也出于同样原因用 Grid。
+        -->
+        <Style x:Key="NodeBadgeStyle" TargetType="Grid">
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Padding" Value="5,1" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!--
+            精简版 Expander 模板。
+
+            官方模板把展开动画写死成 333ms、收起 167ms（generic.xaml 的
+            DefaultExpanderStyle）。代理组动辄几十个，每次展开都要等三分之一秒
+            才铺开内容，连续点几个组就明显拖沓。这里保留同样的视觉结构，
+            只把时长压到 150ms / 100ms——仍然是缓动而不是瞬变，但不影响连续操作。
+
+            只声明 Down 方向的两个状态：本页的组始终向下展开，
+            控制器的 ExpandDirection 默认就是 Down，不会去找 Up 状态。
+        -->
+        <Style x:Key="CompactExpanderStyle" TargetType="Expander">
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="Background" Value="{ThemeResource ExpanderContentBackground}" />
+            <Setter Property="BackgroundSizing" Value="InnerBorderEdge" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="BorderThickness" Value="{ThemeResource ExpanderContentDownBorderThickness}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource ExpanderContentBorderBrush}" />
+            <Setter Property="Padding" Value="{StaticResource ExpanderContentPadding}" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <Grid MinWidth="{TemplateBinding MinWidth}" MaxWidth="{TemplateBinding MaxWidth}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="ExpandStates">
+                                    <VisualState x:Name="ExpandDown">
+                                        <VisualState.Setters>
+                                            <Setter Target="ExpanderHeader.CornerRadius" Value="{Binding CornerRadius, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource TopCornerRadiusFilterConverter}}" />
+                                        </VisualState.Setters>
+                                        <VisualState.Storyboard>
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ExpanderContent" Storyboard.TargetProperty="Visibility">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="Visible" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetName="ExpanderContent" Storyboard.TargetProperty="(UIElement.RenderTransform).(CompositeTransform.TranslateY)">
+                                                    <DiscreteDoubleKeyFrame KeyTime="0" Value="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=TemplateSettings.NegativeContentHeight}" />
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0.15" Value="0" KeySpline="0.0, 0.0, 0.0, 1.0" />
+                                                </DoubleAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState.Storyboard>
+                                    </VisualState>
+                                    <VisualState x:Name="CollapseDown">
+                                        <VisualState.Storyboard>
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ExpanderContent" Storyboard.TargetProperty="Visibility">
+                                                    <DiscreteObjectKeyFrame KeyTime="0:0:0.1" Value="Collapsed" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetName="ExpanderContent" Storyboard.TargetProperty="(UIElement.RenderTransform).(CompositeTransform.TranslateY)">
+                                                    <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0.1" Value="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=TemplateSettings.ContentHeight}" KeySpline="1.0, 1.0, 0.0, 1.0" />
+                                                </DoubleAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState.Storyboard>
+                                    </VisualState>
+                                    <VisualState x:Name="ExpandUp">
+                                        <VisualState.Setters>
+                                            <Setter Target="ExpanderHeader.CornerRadius" Value="{Binding CornerRadius, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BottomCornerRadiusFilterConverter}}" />
+                                        </VisualState.Setters>
+                                        <VisualState.Storyboard>
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ExpanderContent" Storyboard.TargetProperty="Visibility">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="Visible" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetName="ExpanderContent" Storyboard.TargetProperty="(UIElement.RenderTransform).(CompositeTransform.TranslateY)">
+                                                    <DiscreteDoubleKeyFrame KeyTime="0" Value="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=TemplateSettings.ContentHeight}" />
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0.15" Value="0" KeySpline="0.0, 0.0, 0.0, 1.0" />
+                                                </DoubleAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState.Storyboard>
+                                    </VisualState>
+                                    <VisualState x:Name="CollapseUp">
+                                        <VisualState.Storyboard>
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ExpanderContent" Storyboard.TargetProperty="Visibility">
+                                                    <DiscreteObjectKeyFrame KeyTime="0:0:0.1" Value="Collapsed" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetName="ExpanderContent" Storyboard.TargetProperty="(UIElement.RenderTransform).(CompositeTransform.TranslateY)">
+                                                    <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0.1" Value="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=TemplateSettings.NegativeContentHeight}" KeySpline="1.0, 1.0, 0.0, 1.0" />
+                                                </DoubleAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState.Storyboard>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <ToggleButton x:Name="ExpanderHeader"
+                                          AutomationProperties.AutomationId="ExpanderToggleButton"
+                                          Background="{ThemeResource ExpanderHeaderBackground}"
+                                          BackgroundSizing="{TemplateBinding BackgroundSizing}"
+                                          BorderBrush="{ThemeResource ExpanderHeaderBorderBrush}"
+                                          BorderThickness="{ThemeResource ExpanderHeaderBorderThickness}"
+                                          MinHeight="{TemplateBinding MinHeight}"
+                                          CornerRadius="{TemplateBinding CornerRadius}"
+                                          IsEnabled="{TemplateBinding IsEnabled}"
+                                          Padding="{StaticResource ExpanderHeaderPadding}"
+                                          Style="{StaticResource ExpanderHeaderDownStyle}"
+                                          HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="{StaticResource ExpanderHeaderHorizontalContentAlignment}"
+                                          VerticalContentAlignment="{StaticResource ExpanderHeaderVerticalContentAlignment}"
+                                          Content="{TemplateBinding Header}"
+                                          ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                          ContentTemplateSelector="{TemplateBinding HeaderTemplateSelector}"
+                                          IsChecked="{Binding Path=IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" />
+
+                            <Border x:Name="ExpanderContentClip" Grid.Row="1">
+                                <Border x:Name="ExpanderContent"
+                                        Visibility="Collapsed"
+                                        Background="{TemplateBinding Background}"
+                                        BackgroundSizing="{TemplateBinding BackgroundSizing}"
+                                        CornerRadius="{Binding CornerRadius, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BottomCornerRadiusFilterConverter}}"
+                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                        BorderThickness="{StaticResource ExpanderContentDownBorderThickness}"
+                                        MinHeight="{TemplateBinding MinHeight}"
+                                        HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch"
+                                        Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter Content="{TemplateBinding Content}"
+                                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                      ContentTemplateSelector="{TemplateBinding ContentTemplateSelector}"
+                                                      HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                      VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                                    <Border.RenderTransform>
+                                        <CompositeTransform />
+                                    </Border.RenderTransform>
+                                </Border>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Page.Resources>
 
     <Grid RowSpacing="16">
         <Grid.RowDefinitions>
@@ -21,13 +181,29 @@
                              Subtitle="{x:Bind ViewModel.StatusText, Mode=OneWay}">
             <controls:PageHeader.Actions>
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <ComboBox Width="150"
-                              VerticalAlignment="Center"
-                              SelectedIndex="{x:Bind ViewModel.SortIndex, Mode=TwoWay}">
-                        <ComboBoxItem Content="默认顺序" />
-                        <ComboBoxItem Content="按延迟排序" />
-                        <ComboBoxItem Content="按名称排序" />
-                    </ComboBox>
+                    <!-- 排序方式：同样用分段切换，与显示模式、顶部栏模式保持一致 -->
+                    <toolkit:Segmented MinHeight="0"
+                                       VerticalAlignment="Center"
+                                       SelectedIndex="{x:Bind ViewModel.SortIndex, Mode=TwoWay}">
+                        <toolkit:SegmentedItem Content="默认"
+                                               ToolTipService.ToolTip="按配置里的组内顺序" />
+                        <toolkit:SegmentedItem Content="延迟"
+                                               ToolTipService.ToolTip="按延迟从低到高，超时的排在最后" />
+                        <toolkit:SegmentedItem Content="名称"
+                                               ToolTipService.ToolTip="按节点名称排序" />
+                    </toolkit:Segmented>
+                    <!-- 节点显示模式：用分段切换，与顶部栏的模式切换保持一致 -->
+                    <toolkit:Segmented MinHeight="0"
+                                       VerticalAlignment="Center"
+                                       SelectedIndex="{x:Bind ViewModel.DisplayMode, Mode=TwoWay}">
+                        <toolkit:SegmentedItem Content="简单"
+                                               ToolTipService.ToolTip="只显示节点名与延迟" />
+                        <toolkit:SegmentedItem Content="完整"
+                                               ToolTipService.ToolTip="额外显示协议与协议特性" />
+                    </toolkit:Segmented>
+                    <Button VerticalAlignment="Center"
+                            Command="{x:Bind ViewModel.ToggleAllCommand}"
+                            Content="{x:Bind ViewModel.ToggleAllText, Mode=OneWay}" />
                     <Button VerticalAlignment="Center"
                             Command="{x:Bind ViewModel.TestAllCommand}" Content="全部测速" />
                     <Button VerticalAlignment="Center"
@@ -36,161 +212,228 @@
             </controls:PageHeader.Actions>
         </controls:PageHeader>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
-                      Padding="36,0,36,0">
-            <Border>
-            <ItemsControl ItemsSource="{x:Bind ViewModel.Groups}" MaxWidth="{StaticResource PageContentMaxWidth}" Margin="0,0,0,24">
-                <!-- 展开/收起时其余代理组平滑移位，而不是瞬间跳位 -->
-                <ItemsControl.ItemContainerTransitions>
-                    <TransitionCollection>
-                        <RepositionThemeTransition />
-                        <EntranceThemeTransition />
-                    </TransitionCollection>
-                </ItemsControl.ItemContainerTransitions>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:ProxyGroupViewModel">
-                        <Expander HorizontalAlignment="Stretch"
-                                  HorizontalContentAlignment="Stretch"
-                                  CornerRadius="8"
-                                  Margin="0,0,0,12"
-                                  Padding="12,0,12,12"
-                                  IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}">
-                            <Expander.Header>
-                                <Grid Padding="0,8,0,8" ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
+        <!--
+            ListView 自己就是滚动宿主，外面不能再套 ScrollViewer：
+            被无限高度约束时 ListView 会把所有项全部实例化，虚拟化形同虚设，
+            节点一多就卡死。让它自己滚动，容器回收才会真正生效。
 
-                                    <!-- 组名放大，当前节点紧随其后同行；整体在头部垂直居中，内部文字基线对齐 -->
-                                    <StackPanel Grid.Column="0"
-                                                Orientation="Horizontal"
-                                                Spacing="10"
-                                                VerticalAlignment="Center">
-                                        <TextBlock FontSize="18" FontWeight="SemiBold"
-                                                   FontFamily="{StaticResource NodeNameFontFamily}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   TextLineBounds="TrimToBaseline"
-                                                   VerticalAlignment="Bottom"
-                                                   Text="{x:Bind Name}" />
-                                        <TextBlock FontSize="13"
-                                                   VerticalAlignment="Bottom"
-                                                   FontFamily="{StaticResource NodeNameFontFamily}"
-                                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   TextLineBounds="TrimToBaseline"
-                                                   Text="{x:Bind NowText, Mode=OneWay}" />
-                                    </StackPanel>
+            限宽与居中放在 ListView 上，不能放在项模板里：项模板的根元素若用
+            HorizontalAlignment="Center"，会按内容自动宽度布局，组收起后
+            内容只剩一个表头，整张卡片就跟着缩窄，和展开的组宽度对不上。
+            Stretch + MaxWidth 才是正确组合：宽度被 MaxWidth 钳住后自动居中，
+            且与内容多少无关。
+        -->
+        <ListView Grid.Row="1"
+                  ItemsSource="{x:Bind ViewModel.Groups}"
+                  MaxWidth="{StaticResource PageContentMaxWidth}"
+                  HorizontalAlignment="Stretch"
+                  Margin="36,0,36,0"
+                  Padding="0,0,0,24"
+                  SelectionMode="None"
+                  IsItemClickEnabled="False"
+                  ItemContainerTransitions="{x:Null}">
+            <ListView.Resources>
+                <!-- 卡片自带背景与描边，列表项自身不要再加 hover/选中底色 -->
+                <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="Transparent" />
+                <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="Transparent" />
+                <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="Transparent" />
+                <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="Transparent" />
+                <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="Transparent" />
+            </ListView.Resources>
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="Margin" Value="0" />
+                    <Setter Property="MinHeight" Value="0" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="VerticalContentAlignment" Value="Top" />
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="UseSystemFocusVisuals" Value="False" />
+                    <Setter Property="IsTabStop" Value="False" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:ProxyGroupViewModel">
+                    <Expander Style="{StaticResource CompactExpanderStyle}"
+                              HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch"
+                              CornerRadius="8"
+                              Margin="0,0,0,12"
+                              Padding="12,0,12,12"
+                              IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}">
+                        <Expander.Header>
+                            <Grid Padding="0,8,0,8" ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
 
-                                    <!-- 测速区固定宽度，避免切换进度环/图标时组名横向移位 -->
-                                    <Grid Grid.Column="1" Width="32" Height="32"
-                                          VerticalAlignment="Center">
-                                        <ProgressRing Width="18" Height="18"
-                                                      HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                      IsActive="{x:Bind IsBusy, Mode=OneWay}"
-                                                      Visibility="{x:Bind IsBusy, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                                        <Button Style="{StaticResource IconButtonStyle}"
-                                                HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                Command="{x:Bind TestCommand}" ToolTipService.ToolTip="测速"
-                                                Visibility="{x:Bind IsBusy, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
-                                            <FontIcon FontSize="14" Glyph="&#xE9D9;" />
-                                        </Button>
-                                    </Grid>
+                                <!-- 组名放大，当前节点紧随其后同行；整体在头部垂直居中，内部文字基线对齐 -->
+                                <StackPanel Grid.Column="0"
+                                            Orientation="Horizontal"
+                                            Spacing="10"
+                                            VerticalAlignment="Center">
+                                    <TextBlock FontSize="18" FontWeight="SemiBold"
+                                               FontFamily="{StaticResource NodeNameFontFamily}"
+                                               TextTrimming="CharacterEllipsis"
+                                               TextLineBounds="TrimToBaseline"
+                                               VerticalAlignment="Bottom"
+                                               Text="{x:Bind Name}" />
+                                    <TextBlock FontSize="13"
+                                               VerticalAlignment="Bottom"
+                                               FontFamily="{StaticResource NodeNameFontFamily}"
+                                               Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               TextLineBounds="TrimToBaseline"
+                                               Text="{x:Bind NowText, Mode=OneWay}" />
+                                </StackPanel>
+
+                                <!-- 测速区固定宽度，避免切换进度环/图标时组名横向移位 -->
+                                <Grid Grid.Column="1" Width="32" Height="32"
+                                      VerticalAlignment="Center">
+                                    <ProgressRing Width="18" Height="18"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  IsActive="{x:Bind IsBusy, Mode=OneWay}"
+                                                  Visibility="{x:Bind IsBusy, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                    <Button Style="{StaticResource IconButtonStyle}"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                                            Command="{x:Bind TestCommand}" ToolTipService.ToolTip="测速"
+                                            Visibility="{x:Bind IsBusy, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
+                                        <FontIcon FontSize="14" Glyph="&#xE9D9;" />
+                                    </Button>
                                 </Grid>
-                            </Expander.Header>
+                            </Grid>
+                        </Expander.Header>
 
-                            <ItemsRepeater Margin="0,8,0,0"
-                                           ItemsSource="{x:Bind Nodes}">
-                                <ItemsRepeater.Layout>
-                                    <UniformGridLayout MinItemWidth="240"
-                                                       MinItemHeight="40"
-                                                       MinColumnSpacing="8"
-                                                       MinRowSpacing="8"
-                                                       ItemsStretch="Fill" />
-                                </ItemsRepeater.Layout>
-                                <ItemsRepeater.ItemTemplate>
-                                    <DataTemplate x:DataType="vm:ProxyItemViewModel">
-                                        <Grid>
-                                            <!-- 底层：默认主题描边 + 选中态填充。
-                                                 用 ControlStrokeColorDefaultBrush：暗色下是浅色描边，浅色下是深色描边 -->
-                                            <Grid CornerRadius="8"
-                                                    BorderThickness="1"
-                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    Background="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedToBrush}}" />
-                                            <!-- 中层：点击选节点（自身无边框，避免覆盖底层描边） -->
-                                            <Button Style="{StaticResource NodeButtonStyle}"
-                                                    AutomationProperties.Name="{x:Bind Name}"
-                                                    Click="Node_Click"
-                                                    Tag="{x:Bind}">
-                                                <Button.Resources>
-                                                    <ResourceDictionary>
-                                                        <ResourceDictionary.ThemeDictionaries>
-                                                            <ResourceDictionary x:Key="Default">
-                                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#1AFFFFFF" />
-                                                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#26FFFFFF" />
-                                                            </ResourceDictionary>
-                                                            <ResourceDictionary x:Key="Dark">
-                                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#1AFFFFFF" />
-                                                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#26FFFFFF" />
-                                                            </ResourceDictionary>
-                                                            <ResourceDictionary x:Key="Light">
-                                                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0F000000" />
-                                                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#1A000000" />
-                                                            </ResourceDictionary>
-                                                        </ResourceDictionary.ThemeDictionaries>
-                                                    </ResourceDictionary>
-                                                </Button.Resources>
-                                                <Grid ColumnSpacing="8">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                        <TextBlock VerticalAlignment="Center"
-                                                                   FontSize="18"
-                                                                   FontFamily="{StaticResource NodeNameFontFamily}"
-                                                                   Text="{x:Bind IconText}" />
-                                                        <TextBlock VerticalAlignment="Center"
-                                                                   FontSize="15"
-                                                                   FontFamily="{StaticResource NodeNameFontFamily}"
-                                                                   TextTrimming="CharacterEllipsis"
-                                                                   Text="{x:Bind DisplayName}" />
-                                                    </StackPanel>
-                                                    <!-- 延迟即测速：测速中显示旋转环，完成后显示延迟数字并可点击重测 -->
-                                                    <Grid Grid.Column="1"
-                                                          MinWidth="56"
-                                                          VerticalAlignment="Center"
-                                                          Tag="{x:Bind}"
-                                                          ToolTipService.ToolTip="点击测速">
-                                                        <ProgressRing Width="16" Height="16"
-                                                                      HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                                      IsActive="{x:Bind IsTesting, Mode=OneWay}"
-                                                                      Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                                                        <Button Style="{StaticResource DelayButtonStyle}"
-                                                                HorizontalAlignment="Right"
-                                                                Content="{x:Bind DelayText, Mode=OneWay}"
-                                                                Foreground="{x:Bind DelayKey, Mode=OneWay, Converter={StaticResource DelayToBrush}}"
-                                                                Tag="{x:Bind}"
-                                                                Click="NodeTest_Click"
-                                                                Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
+                        <ItemsRepeater Margin="0,8,0,0"
+                                       ItemsSource="{x:Bind Nodes}">
+                            <ItemsRepeater.Layout>
+                                <!-- ItemsStretch 必须是 None：Fill 会把每项强行拉到布局行高，
+                                     完整模式的两行内容因此被压扁、字体底部被裁。
+                                     None 时项高度由内容自然决定，简洁模式自动变矮，
+                                     完整模式自动变高，两种模式各得其所。
+                                     MinItemHeight 只作为下限，取单行高度。 -->
+                                <UniformGridLayout MinItemWidth="240"
+                                                   MinItemHeight="0"
+                                                   MinColumnSpacing="8"
+                                                   MinRowSpacing="8"
+                                                   ItemsStretch="None" />
+                            </ItemsRepeater.Layout>
+                            <ItemsRepeater.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ProxyItemViewModel">
+                                    <Grid>
+                                        <!-- 底层：默认主题描边 + 选中态填充。
+                                             用 ControlStrokeColorDefaultBrush：暗色下是浅色描边，浅色下是深色描边 -->
+                                        <Grid CornerRadius="8"
+                                                BorderThickness="1"
+                                                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                                Background="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedToBrush}}" />
+                                        <!-- 中层：点击选节点（自身无边框，避免覆盖底层描边） -->
+                                        <Button Style="{StaticResource NodeButtonStyle}"
+                                                AutomationProperties.Name="{x:Bind Name}"
+                                                Click="Node_Click"
+                                                Tag="{x:Bind}">                                            <Button.Resources>
+                                                <ResourceDictionary>
+                                                    <ResourceDictionary.ThemeDictionaries>
+                                                        <ResourceDictionary x:Key="Default">
+                                                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#1AFFFFFF" />
+                                                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#26FFFFFF" />
+                                                        </ResourceDictionary>
+                                                        <ResourceDictionary x:Key="Dark">
+                                                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#1AFFFFFF" />
+                                                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#26FFFFFF" />
+                                                        </ResourceDictionary>
+                                                        <ResourceDictionary x:Key="Light">
+                                                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#0F000000" />
+                                                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#1A000000" />
+                                                        </ResourceDictionary>
+                                                    </ResourceDictionary.ThemeDictionaries>
+                                                </ResourceDictionary>
+                                            </Button.Resources>
+                                            <Grid ColumnSpacing="8" RowSpacing="3">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <StackPanel Grid.Row="0" Grid.Column="0"
+                                                            Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                    <TextBlock VerticalAlignment="Center"
+                                                               FontSize="18"
+                                                               FontFamily="{StaticResource NodeNameFontFamily}"
+                                                               Text="{x:Bind IconText}" />
+                                                    <TextBlock VerticalAlignment="Center"
+                                                               FontSize="15"
+                                                               FontFamily="{StaticResource NodeNameFontFamily}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Text="{x:Bind DisplayName}" />
+                                                </StackPanel>
+
+                                                <!-- 第二行：协议 + 协议特性徽标（对齐 clash-party 的完整模式）。
+                                                     特性列表用 ItemsControl 展开，避免为每个特性写一份 XAML。 -->
+                                                <StackPanel Grid.Row="1" Grid.Column="0"
+                                                            Orientation="Horizontal" Spacing="4"
+                                                            Visibility="{x:Bind ShowBadges, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                                    <Grid Style="{StaticResource NodeBadgeStyle}">
+                                                        <TextBlock FontSize="11"
+                                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                   Text="{x:Bind ProtocolBadge}" />
                                                     </Grid>
+                                                    <ItemsControl ItemsSource="{x:Bind FeatureBadges}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <StackPanel Orientation="Horizontal" Spacing="4" />
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="x:String">
+                                                                <Grid Style="{StaticResource NodeBadgeStyle}">
+                                                                    <TextBlock FontSize="11"
+                                                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                               Text="{x:Bind}" />
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+
+                                                <!-- 延迟即测速：测速中显示旋转环，完成后显示延迟数字并可点击重测 -->
+                                                <Grid Grid.Row="0" Grid.Column="1"
+                                                      MinWidth="56"
+                                                      VerticalAlignment="Center"
+                                                      Tag="{x:Bind}"
+                                                      ToolTipService.ToolTip="点击测速">
+                                                    <ProgressRing Width="16" Height="16"
+                                                                  HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                                  IsActive="{x:Bind IsTesting, Mode=OneWay}"
+                                                                  Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                                                    <Button Style="{StaticResource DelayButtonStyle}"
+                                                            HorizontalAlignment="Right"
+                                                            Content="{x:Bind DelayText, Mode=OneWay}"
+                                                            Foreground="{x:Bind DelayKey, Mode=OneWay, Converter={StaticResource DelayToBrush}}"
+                                                            Tag="{x:Bind}"
+                                                            Click="NodeTest_Click"
+                                                            Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}" />
                                                 </Grid>
-                                            </Button>
-                                            <!-- 顶层：选中态强调色描边，置于最上；未选中透明，不参与命中测试 -->
-                                            <Grid CornerRadius="8"
-                                                    BorderThickness="1"
-                                                    IsHitTestVisible="False"
-                                                    Background="Transparent"
-                                                    BorderBrush="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedBorderBrush}}" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ItemsRepeater.ItemTemplate>
-                            </ItemsRepeater>
-                        </Expander>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-            </Border>
-        </ScrollViewer>
+                                            </Grid>
+                                        </Button>
+                                        <!-- 顶层：选中态强调色描边，置于最上；未选中透明，不参与命中测试 -->
+                                        <Grid CornerRadius="8"
+                                                BorderThickness="1"
+                                                IsHitTestVisible="False"
+                                                Background="Transparent"
+                                                BorderBrush="{x:Bind IsSelected, Mode=OneWay, Converter={StaticResource SelectedBorderBrush}}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsRepeater.ItemTemplate>
+                        </ItemsRepeater>
+                    </Expander>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
     </Grid>
 </Page>

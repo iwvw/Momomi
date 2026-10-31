@@ -379,6 +379,7 @@ public sealed partial class MiniWindow : Window
     {
         if (_windowShown || _forceClose) return;
 
+        var restore = _targetRect;
         try
         {
             var offscreen = _targetRect;
@@ -415,14 +416,25 @@ public sealed partial class MiniWindow : Window
         }
         catch (Exception ex)
         {
+            // 异常时窗口可能还停在 -32000。那个坐标离哪块屏最近就归哪块屏，
+            // 之后再按窗口位置解析锚点就会永久锁定在错误的屏上。
+            // 这里立刻挪回安全位置，不让它污染后续定位。
+            try
+            {
+                _appWindow.Hide();
+                _appWindow.MoveAndResize(restore);
+            }
+            catch
+            {
+            }
             global::Momomi.App.App.WriteLog($"迷你面板预热失败：{ex}");
         }
     }
 
-    public void ToggleVisible() => ToggleVisible(IntPtr.Zero);
+    public void ToggleVisible() => ToggleVisible(DpiLayout.MonitorForAnchor(_appWindow));
 
     /// <summary>
-    /// 切换显示。显示时按 <paramref name="monitor"/> 指定的屏幕定位（IntPtr.Zero 表示跟随窗口自身）。
+    /// 切换显示。显示时按 <paramref name="monitor"/> 指定的屏幕定位。
     ///
     /// 只翻转"意图"，实际动作由 <see cref="ApplyIntent"/> 落地。
     /// 动画跑到一半也照样翻转——反向由 <see cref="WindowSlider"/>
@@ -446,11 +458,23 @@ public sealed partial class MiniWindow : Window
             _appWindow, DesignWidth, DesignHeight, MarginRight, MarginBottom, monitor);
     }
 
-    public void Show() => Show(IntPtr.Zero);
+    /// <summary>
+    /// 呼出专用：按用户交互点重算落点。
+    ///
+    /// 不能用窗口当前位置当锚点：预热会把窗口临时挪到 -32000 做离屏渲染，
+    /// 那个坐标离哪块屏最近就归哪块屏（副屏在主屏左侧或上方时就是副屏），
+    /// 一旦拿它当锚点，落点会被固化并自我强化——用户点主屏托盘，面板却一直在副屏。
+    /// </summary>
+    private void UpdateTargetRectFromAnchor(IntPtr monitor)
+    {
+        if (monitor == IntPtr.Zero) monitor = DpiLayout.MonitorForAnchor(_appWindow);
+        UpdateTargetRect(monitor);
+    }
+
+    public void Show() => Show(DpiLayout.MonitorForAnchor(_appWindow));
 
     /// <summary>
-    /// 显示面板。<paramref name="monitor"/> 为目标显示器（托盘图标所在屏幕），
-    /// IntPtr.Zero 表示跟随窗口当前所在屏幕。
+    /// 显示面板。<paramref name="monitor"/> 为目标显示器（托盘图标所在屏幕）。
     /// </summary>
     public void Show(IntPtr monitor)
     {
@@ -503,7 +527,8 @@ public sealed partial class MiniWindow : Window
         WorkingSetTrimmer.BeginActivity(ActivitySources.MiniWindow);
 
         // 每次呼出都重新定位：托盘图标可能已经换到另一块屏幕（改缩放后同样需要）。
-        UpdateTargetRect(monitor);
+        // 必须按交互点算，不能按窗口当前位置——预热把窗口挪到过 -32000。
+        UpdateTargetRectFromAnchor(monitor);
 
         // 先按隐藏位置摆好再显示：否则会先在目标位置闪一帧，
         // 再开始动画，看起来像"闪一下才滑进来"。
@@ -527,7 +552,9 @@ public sealed partial class MiniWindow : Window
         WorkingSetTrimmer.BeginActivity(ActivitySources.MiniWindow);
 
         // 反向时重新定位：托盘图标可能在另一块屏幕上。
-        if (monitor != IntPtr.Zero) UpdateTargetRect(monitor);
+        // 不管调用方有没有传锚点都要算：面板正在收起时窗口已经往屏幕外滑，
+        // 按窗口位置解析会落到错误的屏。
+        UpdateTargetRectFromAnchor(monitor);
 
         WindowChrome.PlaceBelowTaskbar(_hwnd);
         _slider.Animate(_targetRect, 255, 255, AnimationSettings.Scale(ShowDurationMs), SlideEasing.EaseOut, OnShownSettled);
