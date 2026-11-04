@@ -231,7 +231,8 @@
                   Padding="0,0,0,24"
                   SelectionMode="None"
                   IsItemClickEnabled="False"
-                  ItemContainerTransitions="{x:Null}">
+                  ItemContainerTransitions="{x:Null}"
+                  ScrollViewer.VerticalScrollBarVisibility="Hidden">
             <ListView.Resources>
                 <!-- 卡片自带背景与描边，列表项自身不要再加 hover/选中底色 -->
                 <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="Transparent" />
@@ -309,16 +310,13 @@
                         <ItemsRepeater Margin="0,8,0,0"
                                        ItemsSource="{x:Bind Nodes}">
                             <ItemsRepeater.Layout>
-                                <!-- ItemsStretch 必须是 None：Fill 会把每项强行拉到布局行高，
-                                     完整模式的两行内容因此被压扁、字体底部被裁。
-                                     None 时项高度由内容自然决定，简洁模式自动变矮，
-                                     完整模式自动变高，两种模式各得其所。
-                                     MinItemHeight 只作为下限，取单行高度。 -->
+                                <!-- ItemsStretch 设为 Fill：沿宽度均匀拉伸填满整行，节点卡片对齐铺满整行宽度。
+                                     MinItemHeight 绑定到 NodeItemHeight：简单模式 42，完整模式 60，高度自适应且不被挤压。 -->
                                 <UniformGridLayout MinItemWidth="240"
-                                                   MinItemHeight="0"
+                                                   MinItemHeight="{x:Bind NodeItemHeight, Mode=OneWay}"
                                                    MinColumnSpacing="8"
                                                    MinRowSpacing="8"
-                                                   ItemsStretch="None" />
+                                                   ItemsStretch="Fill" />
                             </ItemsRepeater.Layout>
                             <ItemsRepeater.ItemTemplate>
                                 <DataTemplate x:DataType="vm:ProxyItemViewModel">
@@ -333,7 +331,8 @@
                                         <Button Style="{StaticResource NodeButtonStyle}"
                                                 AutomationProperties.Name="{x:Bind Name}"
                                                 Click="Node_Click"
-                                                Tag="{x:Bind}">                                            <Button.Resources>
+                                                Tag="{x:Bind}">
+                                            <Button.Resources>
                                                 <ResourceDictionary>
                                                     <ResourceDictionary.ThemeDictionaries>
                                                         <ResourceDictionary x:Key="Default">
@@ -351,7 +350,7 @@
                                                     </ResourceDictionary.ThemeDictionaries>
                                                 </ResourceDictionary>
                                             </Button.Resources>
-                                            <Grid ColumnSpacing="8" RowSpacing="3">
+                                            <Grid ColumnSpacing="8" RowSpacing="3" VerticalAlignment="Center">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
@@ -377,6 +376,7 @@
                                                      特性列表用 ItemsControl 展开，避免为每个特性写一份 XAML。 -->
                                                 <StackPanel Grid.Row="1" Grid.Column="0"
                                                             Orientation="Horizontal" Spacing="4"
+                                                            VerticalAlignment="Center"
                                                             Visibility="{x:Bind ShowBadges, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                                                     <Grid Style="{StaticResource NodeBadgeStyle}">
                                                         <TextBlock FontSize="11"
@@ -401,8 +401,8 @@
                                                     </ItemsControl>
                                                 </StackPanel>
 
-                                                <!-- 延迟即测速：测速中显示旋转环，完成后显示延迟数字并可点击重测 -->
-                                                <Grid Grid.Row="0" Grid.Column="1"
+                                                <!-- 延迟即测速：跨两行垂直居中，单行和两行模式下都在卡片中居中 -->
+                                                <Grid Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
                                                       MinWidth="56"
                                                       VerticalAlignment="Center"
                                                       Tag="{x:Bind}"

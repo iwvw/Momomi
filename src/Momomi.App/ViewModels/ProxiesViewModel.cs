@@ -34,6 +34,10 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
     [ObservableProperty]
     public partial int SortIndex { get; set; }
 
+    /// <summary>组内节点卡片在 UniformGridLayout 中的高度（简单模式 42，完整模式 60）。</summary>
+    [ObservableProperty]
+    public partial double NodeItemHeight { get; set; } = 60;
+
     public ProxyGroupViewModel(string name, string type, ICoreManager core, ProxiesViewModel owner)
     {
         Name = name;
@@ -256,9 +260,13 @@ public sealed partial class ProxiesViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSimpleMode));
 
         var showBadges = value != 0;
+        var itemHeight = value == 0 ? 42.0 : 60.0;
         foreach (var g in Groups)
+        {
+            g.NodeItemHeight = itemHeight;
             foreach (var n in g.AllNodes)
                 n.ShowBadges = showBadges;
+        }
 
         _ = SaveDisplayModeAsync(value);
     }
@@ -677,7 +685,10 @@ public sealed partial class ProxiesViewModel : ObservableObject
             if (!IsGlobalMode && string.Equals(p.Name, "GLOBAL", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            var group = new ProxyGroupViewModel(p.Name, p.Type, _core, this);
+            var group = new ProxyGroupViewModel(p.Name, p.Type, _core, this)
+            {
+                NodeItemHeight = DisplayMode == 0 ? 42.0 : 60.0,
+            };
             group.SetNodes(BuildNodes(p.Name, p.All!, _proxies, p.Now, _transports, DisplayMode != 0), p.Now, SortIndex);
 
             // 首次加载只展开第一个组：全部展开时列表会很长，用户得滚很久才能看到别的组。
