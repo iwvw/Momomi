@@ -31,14 +31,27 @@ public sealed partial class CodeEditor : UserControl
     /// <summary>控件就绪前收到的文本，Loaded 后写入。</summary>
     private string? _pendingText;
 
+    /// <summary>最近一次确认过的文本内容，用于过滤 RichEdit 因格式变化补发的 TextChanged。</summary>
+    private string? _lastKnownText;
+
     /// <summary>文本变化（已过滤掉着色/程序写入自身触发的事件）。</summary>
     public event EventHandler? TextChanged;
+
+    /// <summary>
+    /// 是否启用 YAML 语法着色。订阅配置编辑器只需要纯文本 + emoji，
+    /// 大文件逐 token 上色反而是卡顿来源，可显式关闭。
+    /// </summary>
+    public bool IsHighlightingEnabled { get; set; } = true;
+
+    /// <summary>超过这个字符数就不再着色：全文 tokenize + 逐段改格式的开销会压过收益。</summary>
+    private const int MaxHighlightChars = 40000;
 
     public CodeEditor()
     {
         InitializeComponent();
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+        ActualThemeChanged += (_, _) => ScheduleHighlight();
     }
 
     /// <summary>编辑器文本（统一 LF 换行，便于与存储格式一致）。</summary>
@@ -120,10 +133,15 @@ public sealed partial class CodeEditor : UserControl
         // ActualWidth 还是 0，靠尺寸判断只会把自己转进死循环（之前就是这样卡死的）。
         // SetText 本身在未加载时也能安全调用，写完校验一下即可。
         _applyingHighlight = true;
+        var readOnly = Editor.IsReadOnly;
         try
         {
+            // 只读的 RichEditBox 会拒绝程序化 SetText（0x80070005），写入时临时解锁。
+            if (readOnly) Editor.IsReadOnly = false;
+
             // SetText 只认 \r 作为换行。
             Editor.TextDocument.SetText(TextSetOptions.None, text.Replace('\n', '\r'));
+            _lastKnownText = text;
         }
         catch (Exception ex)
         {
@@ -131,6 +149,7 @@ public sealed partial class CodeEditor : UserControl
         }
         finally
         {
+            if (readOnly) Editor.IsReadOnly = true;
             _applyingHighlight = false;
         }
 
@@ -140,15 +159,22 @@ public sealed partial class CodeEditor : UserControl
     private void Editor_TextChanged(object sender, RoutedEventArgs e)
     {
         if (_applyingHighlight || !_loaded) return;
+
+        // RichEdit 在改字符格式后也会补发 TextChanged。文本没变就不该再排一次着色，
+        // 否则「着色 → TextChanged → 着色」会持续占用 UI 线程，滚动就会明显卡顿。
+        var text = GetText();
+        if (string.Equals(text, _lastKnownText, StringComparison.Ordinal)) return;
+        _lastKnownText = text;
+
         TextChanged?.Invoke(this, EventArgs.Empty);
         ScheduleHighlight();
     }
 
     private void ScheduleHighlight()
     {
-        if (_highlightTimer is null)
+        if (!IsHighlightingEnabled || _highlightTimer is null)
         {
-            // 计时器还没建（未 Loaded）：直接下次 Loaded 再处理。
+            // 关闭着色，或计时器还没建（未 Loaded）：直接下次 Loaded 再处理。
             return;
         }
         _highlightTimer.Stop();
@@ -194,12 +220,18 @@ public sealed partial class CodeEditor : UserControl
 
         var text = GetText();
         if (text.Length == 0) return;
+        _lastKnownText = text;
+        if (text.Length > MaxHighlightChars) return;
 
         _applyingHighlight = true;
         var batching = false;
         var undoGroup = false;
+        var readOnly = Editor.IsReadOnly;
         try
         {
+            // 只读文档同样允许改格式，但部分系统版本会拒绝，保险起见临时解锁。
+            if (readOnly) Editor.IsReadOnly = false;
+
             // 关键：绝对不要用 GetRange(0, MaxUnitCount) 去设置整个文档的字符格式。
             // 那样会把全文涂成一个连续格式块，导致：
             //   - 选区反向（从后往前选）失效
@@ -247,23 +279,38 @@ public sealed partial class CodeEditor : UserControl
             {
                 try { Editor.TextDocument.ApplyDisplayUpdates(); } catch { }
             }
+            if (readOnly) Editor.IsReadOnly = true;
             _applyingHighlight = false;
         }
     }
 
-    private static Color? ColorFor(YamlTokenKind kind) => kind switch
+    private Color? ColorFor(YamlTokenKind kind)
     {
-        // 键名：蓝色系
-        YamlTokenKind.Key => Color.FromArgb(0xFF, 0x1F, 0x6F, 0xEB),
-        // 字符串：棕红色（区分于键）
-        YamlTokenKind.String => Color.FromArgb(0xFF, 0xC1, 0x50, 0x2D),
-        // 数字：青绿
-        YamlTokenKind.Number => Color.FromArgb(0xFF, 0x0E, 0x8A, 0x8A),
-        // 关键字：紫色
-        YamlTokenKind.Keyword => Color.FromArgb(0xFF, 0x8B, 0x3F, 0xC1),
-        // 注释：灰
-        YamlTokenKind.Comment => Color.FromArgb(0xFF, 0x8A, 0x8A, 0x8A),
-        // 列表符号、锚点：默认色
-        _ => null,
-    };
+        var dark = ActualTheme == ElementTheme.Dark;
+        return kind switch
+        {
+            // 键名：蓝色系
+            YamlTokenKind.Key => dark
+                ? Color.FromArgb(0xFF, 0x9C, 0xDC, 0xFE)
+                : Color.FromArgb(0xFF, 0x04, 0x51, 0xA5),
+            // 字符串：暖橙色
+            YamlTokenKind.String => dark
+                ? Color.FromArgb(0xFF, 0xCE, 0x91, 0x78)
+                : Color.FromArgb(0xFF, 0xA3, 0x15, 0x15),
+            // 数字：绿色
+            YamlTokenKind.Number => dark
+                ? Color.FromArgb(0xFF, 0xB5, 0xCE, 0xA8)
+                : Color.FromArgb(0xFF, 0x09, 0x86, 0x58),
+            // 关键字：紫色
+            YamlTokenKind.Keyword => dark
+                ? Color.FromArgb(0xFF, 0xC5, 0x86, 0xC0)
+                : Color.FromArgb(0xFF, 0xAF, 0x00, 0xDB),
+            // 注释：绿色
+            YamlTokenKind.Comment => dark
+                ? Color.FromArgb(0xFF, 0x6A, 0x99, 0x55)
+                : Color.FromArgb(0xFF, 0x00, 0x80, 0x00),
+            // 列表符号、锚点：默认色
+            _ => null,
+        };
+    }
 }

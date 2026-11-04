@@ -270,25 +270,23 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
-                                <!-- 组名放大，当前节点紧随其后同行；整体在头部垂直居中，内部文字基线对齐 -->
-                                <StackPanel Grid.Column="0"
-                                            Orientation="Horizontal"
-                                            Spacing="10"
-                                            VerticalAlignment="Center">
-                                    <TextBlock FontSize="18" FontWeight="SemiBold"
-                                               FontFamily="{StaticResource NodeNameFontFamily}"
-                                               TextTrimming="CharacterEllipsis"
-                                               TextLineBounds="TrimToBaseline"
-                                               VerticalAlignment="Bottom"
-                                               Text="{x:Bind Name}" />
-                                    <TextBlock FontSize="13"
-                                               VerticalAlignment="Bottom"
-                                               FontFamily="{StaticResource NodeNameFontFamily}"
-                                               Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                               TextTrimming="CharacterEllipsis"
-                                               TextLineBounds="TrimToBaseline"
-                                               Text="{x:Bind NowText, Mode=OneWay}" />
-                                </StackPanel>
+                                <!-- 组名放大，当前节点紧随其后同行；图标/旗帜与文本由 ProxyNameView 统一渲染 -->
+                                <Grid Grid.Column="0" ColumnSpacing="10" VerticalAlignment="Center">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <controls:ProxyNameView Grid.Column="0"
+                                                            NameText="{x:Bind Name}"
+                                                            TextSize="18"
+                                                            IsSemiBold="True"
+                                                            VerticalAlignment="Center" />
+                                    <controls:ProxyNameView Grid.Column="1"
+                                                            NameText="{x:Bind NowText, Mode=OneWay}"
+                                                            TextSize="13"
+                                                            TextForeground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                            VerticalAlignment="Center" />
+                                </Grid>
 
                                 <!-- 测速区固定宽度，避免切换进度环/图标时组名横向移位 -->
                                 <Grid Grid.Column="1" Width="32" Height="32"
@@ -350,31 +348,29 @@
                                                     </ResourceDictionary.ThemeDictionaries>
                                                 </ResourceDictionary>
                                             </Button.Resources>
-                                            <Grid ColumnSpacing="8" RowSpacing="3" VerticalAlignment="Center">
+                                            <Grid ColumnSpacing="8">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
+                                                <!-- Row0 用 *：内容 Grid 被 Button 拉满后，第一行吃掉全部剩余高度，
+                                                     图标+名称才能在卡片内垂直居中；徽标行保持在底部。 -->
                                                 <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="*" />
                                                     <RowDefinition Height="Auto" />
                                                 </Grid.RowDefinitions>
-                                                <StackPanel Grid.Row="0" Grid.Column="0"
-                                                            Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                    <TextBlock VerticalAlignment="Center"
-                                                               FontSize="18"
-                                                               FontFamily="{StaticResource NodeNameFontFamily}"
-                                                               Text="{x:Bind IconText}" />
-                                                    <TextBlock VerticalAlignment="Center"
-                                                               FontSize="15"
-                                                               FontFamily="{StaticResource NodeNameFontFamily}"
-                                                               TextTrimming="CharacterEllipsis"
-                                                               Text="{x:Bind DisplayName}" />
-                                                </StackPanel>
+
+                                                <controls:ProxyNameView Grid.Row="0" Grid.Column="0"
+                                                                        NameText="{x:Bind Name}"
+                                                                        TextSize="15"
+                                                                        VerticalAlignment="Center" />
 
                                                 <!-- 第二行：协议 + 协议特性徽标（对齐 clash-party 的完整模式）。
-                                                     特性列表用 ItemsControl 展开，避免为每个特性写一份 XAML。 -->
+                                                     特性列表用 ItemsControl 展开，避免为每个特性写一份 XAML。
+                                                     行距用 Margin 而不是 RowSpacing：RowSpacing 在第二行折叠后仍会占位，
+                                                     简洁模式下会把单行内容顶高、失去垂直居中。 -->
                                                 <StackPanel Grid.Row="1" Grid.Column="0"
+                                                            Margin="0,3,0,0"
                                                             Orientation="Horizontal" Spacing="4"
                                                             VerticalAlignment="Center"
                                                             Visibility="{x:Bind ShowBadges, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">

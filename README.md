@@ -209,7 +209,8 @@ dotnet publish src/Momomi.App/Momomi.App.csproj `
 | [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo) | 代理内核（Clash.Meta） | MIT |
 | [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat) | 地理数据库（geoip / geosite / ASN） | GPL-3.0 |
 | [WireGuard/wintun](https://www.wintun.net/) | TUN 模式的虚拟网卡驱动 | GPL-2.0 |
-| [lipis/flag-icons](https://github.com/lipis/flag-icons) | 出口 IP 归属地的 SVG 国旗 | MIT |
+| [lipis/flag-icons](https://github.com/lipis/flag-icons) | 出口 IP 归属地与节点名称的 SVG 国旗 | MIT |
+| [mozilla/twemoji-colr](https://github.com/mozilla/twemoji-colr) | 未收录国旗的回退 emoji 字体（Twemoji Mozilla） | Apache-2.0 / CC-BY 4.0 |
 | [HavenDV/H.NotifyIcon](https://github.com/HavenDV/H.NotifyIcon) | 托盘图标与右键菜单 | MIT |
 | [CommunityToolkit/dotnet](https://github.com/CommunityToolkit/dotnet) | MVVM 框架（CommunityToolkit.Mvvm） | MIT |
 | [CommunityToolkit/Windows](https://github.com/CommunityToolkit/Windows) | WinUI 控件（SettingsControls 等） | MIT |

@@ -205,8 +205,16 @@ public sealed partial class MiniPanelView : UserControl
         if (sender is not ComboBox combo) return;
         if (combo.Tag is not MiniProxyGroupViewModel group) return;
         if (combo.SelectedItem is not MiniProxyNodeViewModel node) return;
-        // 重排集合或程序化同步 Selected 时，ComboBox 会触发 SelectionChanged；
-        // 只有用户真实改选（选择引用确实变化）才处理，否则会与 ProxiesChanged 形成无限重载循环。
+
+        // 程序化改集合/重推 Selected 时 ComboBox 会自行触发 SelectionChanged；
+        // 这类事件不是用户操作，不能被当成切换节点回写内核。否则重启或刷新订阅后
+        // 组会被选到排序后的相邻节点，并被持久化成用户选择。
+        if (group.IsSyncingSelection) return;
+
+        // 面板隐藏预热、后台刷新时 ComboBox 没有焦点，产生的选择变更同样不是用户操作。
+        // 用户真实改选一定发生在下拉展开中或控件获得焦点时。
+        if (!combo.IsDropDownOpen && combo.FocusState == FocusState.Unfocused) return;
+
         if (ReferenceEquals(group.Selected, node)) return;
         group.Selected = node;
         _ = ViewModel.SelectNodeAsync(group, node);

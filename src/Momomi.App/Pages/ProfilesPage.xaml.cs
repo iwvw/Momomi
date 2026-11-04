@@ -23,21 +23,48 @@ public sealed partial class ProfilesPage : Page
         await ViewModel.LoadAsync();
     }
 
-    private void Edit_Click(object sender, RoutedEventArgs e)
+    private async void Edit_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement fe || fe.Tag is not ProfileRowViewModel row) return;
+
+        // 每次打开都默认最大化，避免用户上次还原后忘记再展开。
+        _editorMaximized = true;
+        if (EditorPanel is not null) EditorPanel.Margin = new Thickness(0);
+        if (EditorMaximizeIcon is not null) EditorMaximizeIcon.Glyph = "\uE73F";
+
         EditorTabs.SelectedItem = EditorTabs.Items.Count > 0 ? EditorTabs.Items[0] : null;
-        _ = ViewModel.OpenEditorCommand.ExecuteAsync(row);
+        await ViewModel.OpenEditorCommand.ExecuteAsync(row);
+
+        // CodeEditor 不是绑定控件，文本在命令完成后显式灌入；控件未 Loaded 时会自行缓存。
+        RuntimeEditor.Text = "";
+        RawEditor.Text = ViewModel.EditorText;
     }
 
     /// <summary>点击卡片激活对应订阅；已激活或点到按钮时不重复触发。</summary>
     private void Card_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
     {
         if (sender is not FrameworkElement fe || fe.Tag is not ProfileRowViewModel row) return;
-        if (row.IsActive) return;
+        if (row.IsActive || row.IsActivating) return;
         // 点在卡片内的按钮/输入控件上时不激活。
         if (IsWithinInteractive(e.OriginalSource as DependencyObject)) return;
         _ = ViewModel.ActivateCommand.ExecuteAsync(row);
+    }
+
+    private void Card_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+        => SetHover(sender, 1);
+
+    private void Card_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+        => SetHover(sender, 0);
+
+    /// <summary>悬停高亮：激活中的卡片本身已有强调描边，不再叠加灰色遮罩。</summary>
+    private static void SetHover(object sender, double opacity)
+    {
+        if (sender is not Grid root) return;
+        if (opacity > 0 && root.Tag is ProfileRowViewModel { IsActive: true }) return;
+
+        var hover = root.FindName("CardHover") as Grid
+            ?? (root.Children.Count > 0 ? root.Children[0] as Grid : null);
+        if (hover is not null) hover.Opacity = opacity;
     }
 
     private static bool IsWithinInteractive(DependencyObject? element)
@@ -58,12 +85,6 @@ public sealed partial class ProfilesPage : Page
     {
         if (sender is not FrameworkElement fe || fe.Tag is not ProfileRowViewModel row) return;
         _ = ViewModel.RefreshCommand.ExecuteAsync(row);
-    }
-
-    private void ToggleTime_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement fe || fe.Tag is not ProfileRowViewModel row) return;
-        row.ToggleTime();
     }
 
     private void Activate_Click(object sender, RoutedEventArgs e)
@@ -90,9 +111,15 @@ public sealed partial class ProfilesPage : Page
         _ = ShowInfoEditorAsync(row);
     }
 
-    private void EditorTabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    private async void EditorTabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
-        ViewModel.EditorTabIndex = sender.Items.IndexOf(sender.SelectedItem);
+        var index = sender.Items.IndexOf(sender.SelectedItem);
+        ViewModel.EditorTabIndex = index;
+        if (index == 1)
+        {
+            await ViewModel.LoadRuntimePreviewAsync();
+            RuntimeEditor.Text = ViewModel.RuntimePreview;
+        }
     }
 
     private void SaveEditor_Click(object sender, RoutedEventArgs e)
@@ -102,7 +129,7 @@ public sealed partial class ProfilesPage : Page
         _ = ViewModel.SaveEditorCommand.ExecuteAsync(null);
     }
 
-    private bool _editorMaximized;
+    private bool _editorMaximized = true;
 
     private void ToggleEditorMaximize_Click(object sender, RoutedEventArgs e)
     {

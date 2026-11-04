@@ -51,9 +51,34 @@ public sealed partial class MiniProxyGroupViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsTesting { get; set; }
 
+    private int _selectionSyncDepth;
+
+    /// <summary>
+    /// 程序化改动 Nodes/Selected 期间为 true。
+    ///
+    /// 迷你面板的下拉框监听 SelectionChanged，但集合 Clear/Add/Move 或重推 Selected
+    /// 都会让 ComboBox 自己产生一次选择变更。这类事件不是用户操作，绝不能回写内核：
+    /// 会导致重启或刷新订阅后，该组被「选中」到排序后的相邻节点（例如直连组跳到手动），
+    /// 并且被 RememberAsync 当成用户选择持久化，越偏越远。
+    /// </summary>
+    public bool IsSyncingSelection => _selectionSyncDepth > 0;
+
     public MiniProxyGroupViewModel(string name) => Name = name;
 
     public void Fill(IReadOnlyList<string> members, IReadOnlyDictionary<string, ProxyItem> all, string? now)
+    {
+        _selectionSyncDepth++;
+        try
+        {
+            FillCore(members, all, now);
+        }
+        finally
+        {
+            _selectionSyncDepth--;
+        }
+    }
+
+    private void FillCore(IReadOnlyList<string> members, IReadOnlyDictionary<string, ProxyItem> all, string? now)
     {
         var names = new List<string>();
         foreach (var member in members)
@@ -95,11 +120,24 @@ public sealed partial class MiniProxyGroupViewModel : ObservableObject
         else if (Selected is null || !Nodes.Contains(Selected))
             Selected = Nodes.FirstOrDefault();
 
-        SortByDelay();
+        SortByDelayCore();
     }
 
     /// <summary>按延迟排序：有效延迟在前且升序，超时/未测速在后。</summary>
     public void SortByDelay()
+    {
+        _selectionSyncDepth++;
+        try
+        {
+            SortByDelayCore();
+        }
+        finally
+        {
+            _selectionSyncDepth--;
+        }
+    }
+
+    private void SortByDelayCore()
     {
         var sorted = Nodes
             .OrderBy(n => n.Delay is > 0 ? 0 : 1)

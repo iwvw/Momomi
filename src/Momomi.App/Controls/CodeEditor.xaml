@@ -11,7 +11,7 @@
                  AcceptsReturn="True"
                  IsSpellCheckEnabled="False"
                  IsTextPredictionEnabled="False"
-                 FontFamily="Consolas"
+                 FontFamily="{StaticResource EditorFontFamily}"
                  FontSize="12"
                  FontWeight="Normal"
                  TextWrapping="NoWrap"

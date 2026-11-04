@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Navigation;
+using Momomi.App.Controls;
 using Momomi.App.ViewModels;
 
 namespace Momomi.App.Pages;
@@ -129,7 +130,7 @@ public sealed partial class ConnectionsPage : Page, IPageLifecycle
         AddDetailRow(content, "进程", row.Process);
         AddDetailRow(content, "主机", row.Host);
         AddDetailRow(content, "网络", row.Network);
-        AddDetailRow(content, "链路", row.Chain);
+        AddDetailNameRow(content, "链路", row.Chain);
         AddDetailRow(content, "规则", row.Rule);
         AddDetailRow(content, "来源", row.Source);
         AddDetailRow(content, "目标", row.Destination);
@@ -160,6 +161,31 @@ public sealed partial class ConnectionsPage : Page, IPageLifecycle
         text.Inlines.Add(new Run { Text = label + "：", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         text.Inlines.Add(new Run { Text = string.IsNullOrEmpty(value) ? "—" : value });
         panel.Children.Add(text);
+    }
+
+    private static void AddDetailNameRow(StackPanel panel, string label, string value)
+    {
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.Children.Add(new TextBlock
+        {
+            Text = label + "：",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        row.Children.Add(new ProxyNameView
+        {
+            NameText = string.IsNullOrEmpty(value) ? "—" : value,
+            ChainMode = true,
+            TextSize = 14,
+            MaxWidth = 420,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        panel.Children.Add(row);
     }
 
     private void CopyRule_Click(object sender, RoutedEventArgs e)

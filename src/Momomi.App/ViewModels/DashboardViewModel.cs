@@ -76,7 +76,7 @@ public sealed partial class DashboardViewModel : ObservableObject
     public partial string ProfileUsageText { get; set; } = "";
 
     [ObservableProperty]
-    public partial double ProfileUsagePercent { get; set; }
+    public partial double ProfileRemainingPercent { get; set; }
 
     [ObservableProperty]
     public partial bool HasProfileUsage { get; set; }
@@ -496,9 +496,11 @@ public sealed partial class DashboardViewModel : ObservableObject
             }
 
             ProfileUsageText = info.Total > 0
-                ? $"{Format.Bytes(info.Used)} / {Format.Bytes(info.Total)}"
+                ? $"剩余 {Format.Bytes(Math.Max(0, info.Total - info.Used))} / {Format.Bytes(info.Total)}"
                 : $"↑ {Format.Bytes(info.Upload)}  ↓ {Format.Bytes(info.Download)}";
-            ProfileUsagePercent = info.Total > 0 ? Math.Clamp(info.Used * 100.0 / info.Total, 0, 100) : 0;
+            ProfileRemainingPercent = info.Total > 0
+                ? 100 - Math.Clamp(info.Used * 100.0 / info.Total, 0, 100)
+                : 0;
             HasProfileUsage = info.Total > 0;
             ProfileExpireText = SubscriptionUsage.FormatExpire(info.Expire);
         }

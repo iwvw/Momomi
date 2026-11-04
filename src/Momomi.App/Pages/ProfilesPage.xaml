@@ -80,41 +80,47 @@
                 <GridView.ItemTemplate>
                     <DataTemplate x:DataType="vm:ProfileRowViewModel">
                         <Grid Style="{StaticResource CardStyle}"
-                                MinHeight="140"
-                                Padding="16,14"
-                                Tag="{x:Bind}"
-                                Tapped="Card_Tapped">
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
+                              VerticalAlignment="Center"
+                              Tag="{x:Bind}"
+                              Tapped="Card_Tapped"
+                              PointerEntered="Card_PointerEntered"
+                              PointerExited="Card_PointerExited">
 
-                                <Grid Grid.Row="0" ColumnSpacing="6">
+                            <!-- 悬停/激活态用覆盖层，不破坏 CardStyle 的圆角与描边 -->
+                            <Grid x:Name="CardHover"
+                                  CornerRadius="8"
+                                  Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                  Opacity="0"
+                                  IsHitTestVisible="False" />
+                            <Grid CornerRadius="8"
+                                  Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                  Opacity="0.1"
+                                  Visibility="{x:Bind IsActive, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
+                                  IsHitTestVisible="False" />
+                            <StackPanel Padding="14" Spacing="10">
+                                <!-- 标题行：名称 + 刷新 / 更多 -->
+                                <Grid ColumnSpacing="8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                        <Border Width="16" Height="16" CornerRadius="8"
-                                                Background="{ThemeResource SystemFillColorSuccessBrush}"
-                                                Visibility="{x:Bind IsActive, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
-                                            <FontIcon FontSize="9" Glyph="&#xE73E;" Foreground="White"
-                                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
-                                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   Text="{x:Bind Name}" />
-                                    </StackPanel>
-                                    <Grid Grid.Column="1" Width="28" Height="28">
+
+                                    <TextBlock Grid.Column="0"
+                                               VerticalAlignment="Center"
+                                               Style="{StaticResource BodyStrongTextBlockStyle}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Text="{x:Bind Name}" />
+
+                                    <Grid Grid.Column="1" Width="26" Height="26" VerticalAlignment="Center">
                                         <ProgressRing Width="18" Height="18"
                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
                                                       IsActive="{x:Bind IsRefreshing, Mode=OneWay}"
                                                       Visibility="{x:Bind IsRefreshing, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                                        <Button Style="{StaticResource IconButtonStyle}"
-                                                Width="28" Height="28"
+                                        <Button Width="26" Height="26" Padding="0"
+                                                CornerRadius="4"
+                                                HorizontalContentAlignment="Center"
+                                                VerticalContentAlignment="Center"
                                                 ToolTipService.ToolTip="刷新"
                                                 Tag="{x:Bind}"
                                                 Click="Refresh_Click"
@@ -122,8 +128,12 @@
                                             <FontIcon FontSize="12" Glyph="&#xE72C;" />
                                         </Button>
                                     </Grid>
-                                    <Button Grid.Column="2" Style="{StaticResource IconButtonStyle}"
-                                            Width="28" Height="28"
+
+                                    <Button Grid.Column="2" Width="26" Height="26" Padding="0"
+                                            CornerRadius="4"
+                                            HorizontalContentAlignment="Center"
+                                            VerticalContentAlignment="Center"
+                                            VerticalAlignment="Center"
                                             ToolTipService.ToolTip="更多">
                                         <FontIcon FontSize="12" Glyph="&#xE712;" />
                                         <Button.Flyout>
@@ -150,51 +160,64 @@
                                     </Button>
                                 </Grid>
 
-                                <StackPanel Grid.Row="1" VerticalAlignment="Center" Margin="0,10,0,10" Spacing="3">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                   Text="{x:Bind KindText}" />
-                                        <Button Style="{StaticResource IconButtonStyle}"
-                                                Width="20" Height="20" Padding="2"
-                                                VerticalAlignment="Center"
-                                                Tag="{x:Bind}"
-                                                Click="ToggleTime_Click"
-                                                ToolTipService.ToolTip="点击切换显示到期时间 / 更新时间">
-                                            <FontIcon FontSize="8" Glyph="&#xE823;" />
-                                        </Button>
-                                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                   Text="{x:Bind ToggleTimeText, Mode=OneWay}" />
-                                    </StackPanel>
-                                </StackPanel>
-
-                                <StackPanel Grid.Row="2" Spacing="6">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                                   Text="{x:Bind UsageText}" />
-                                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                   Text="{x:Bind ExpireText}" />
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Spacing="6"
-                                                Visibility="{x:Bind HasOverrides, Converter={StaticResource BoolToVisibility}}">
-                                        <FontIcon FontSize="10" VerticalAlignment="Center"
-                                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                  Glyph="&#xE70F;" />
-                                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                                   ToolTipService.ToolTip="{x:Bind OverrideTooltip}"
+                                <!-- 信息区：剩余流量 + 到期时间 -->
+                                <StackPanel Spacing="8">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                                                   Style="{StaticResource CaptionTextBlockStyle}"
                                                    TextTrimming="CharacterEllipsis"
-                                                   Text="{x:Bind OverrideText}" />
-                                    </StackPanel>
+                                                   Text="{x:Bind UsageText}" />
+                                        <TextBlock Grid.Column="1"
+                                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                   Text="{x:Bind ExpireText}"
+                                                   Visibility="{x:Bind HasExpire, Converter={StaticResource BoolToVisibility}}" />
+                                    </Grid>
+
                                     <ProgressBar Maximum="100"
-                                                 Value="{x:Bind UsagePercent}"
+                                                 Value="{x:Bind RemainingPercent}"
                                                  Height="4"
                                                  Visibility="{x:Bind HasUsageBar, Converter={StaticResource BoolToVisibility}}" />
                                 </StackPanel>
+
+                                <!-- 底部：挂载的覆写 -->
+                                <StackPanel Orientation="Horizontal" Spacing="6"
+                                            Visibility="{x:Bind HasOverrides, Converter={StaticResource BoolToVisibility}}">
+                                    <FontIcon FontSize="10" VerticalAlignment="Center"
+                                              Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                              Glyph="&#xE70F;" />
+                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                               VerticalAlignment="Center"
+                                               Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                               ToolTipService.ToolTip="{x:Bind OverrideTooltip}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Text="{x:Bind OverrideText}" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- 正在应用：用不透明底色完全盖住卡片内容，避免提示文字与正文重叠 -->
+                            <Grid Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                                  CornerRadius="8"
+                                  Visibility="{x:Bind IsActivating, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+                                    <ProgressRing Width="24" Height="24" IsActive="{x:Bind IsActivating, Mode=OneWay}" />
+                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                               HorizontalAlignment="Center"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="正在应用配置…" />
+                                </StackPanel>
                             </Grid>
+
+                            <!-- 激活描边放在最上层，应用配置时也能看到当前卡片状态 -->
+                            <Grid CornerRadius="8"
+                                  BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                  BorderThickness="2"
+                                  Visibility="{x:Bind IsActive, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
+                                  IsHitTestVisible="False" />
                         </Grid>
                     </DataTemplate>
                 </GridView.ItemTemplate>
@@ -207,7 +230,7 @@
               Background="{ThemeResource SmokeFillColorDefaultBrush}"
               Visibility="{x:Bind ViewModel.IsEditorOpen, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
             <Border x:Name="EditorPanel"
-                    Margin="40"
+                    Margin="0"
                     HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                     Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -237,7 +260,7 @@
                                 Style="{StaticResource IconButtonStyle}"
                                 ToolTipService.ToolTip="最大化/还原"
                                 Click="ToggleEditorMaximize_Click">
-                            <FontIcon x:Name="EditorMaximizeIcon" FontSize="12" Glyph="&#xE740;" />
+                            <FontIcon x:Name="EditorMaximizeIcon" FontSize="12" Glyph="&#xE73F;" />
                         </Button>
                         <Button Grid.Column="2"
                                 Style="{StaticResource IconButtonStyle}"
@@ -254,22 +277,11 @@
                     </SelectorBar>
 
                     <Grid Grid.Row="2">
-                        <TextBox x:Name="RawEditor"
-                                 AcceptsReturn="True"
-                                 TextWrapping="NoWrap"
-                                 IsSpellCheckEnabled="False"
-                                 FontFamily="Consolas"
-                                 FontSize="12"
-                                 Text="{x:Bind ViewModel.EditorText, Mode=TwoWay}"
-                                 Visibility="{x:Bind ViewModel.IsRawTab, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                        <TextBox AcceptsReturn="True"
-                                 IsReadOnly="True"
-                                 TextWrapping="NoWrap"
-                                 IsSpellCheckEnabled="False"
-                                 FontFamily="Consolas"
-                                 FontSize="12"
-                                 Text="{x:Bind ViewModel.RuntimePreview, Mode=OneWay}"
-                                 Visibility="{x:Bind ViewModel.IsRuntimeTab, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        <local:CodeEditor x:Name="RawEditor"
+                                          Visibility="{x:Bind ViewModel.IsRawTab, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        <local:CodeEditor x:Name="RuntimeEditor"
+                                          IsReadOnly="True"
+                                          Visibility="{x:Bind ViewModel.IsRuntimeTab, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                         <ProgressRing Width="28" Height="28"
                                       HorizontalAlignment="Center" VerticalAlignment="Center"
                                       IsActive="{x:Bind ViewModel.IsEditorBusy, Mode=OneWay}"

@@ -21,30 +21,21 @@ public sealed partial class ProfileRowViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsRefreshing { get; set; }
 
-    /// <summary>时间行显示模式：false=更新时间（默认），true=到期时间。点击卡片时间行切换。</summary>
+    /// <summary>点击卡片后、配置真正应用完成前为 true，卡片会盖上进度遮罩。</summary>
     [ObservableProperty]
-    public partial bool ShowExpire { get; set; }
-
-    /// <summary>卡片时间行：到期时间或更新时间，点击切换。</summary>
-    public string ToggleTimeText => ShowExpire
-        ? (string.IsNullOrEmpty(ExpireText) ? "长期有效" : ExpireText)
-        : $"更新于 {UpdatedText}";
-
-    public void ToggleTime() => ShowExpire = !ShowExpire;
-
-    partial void OnShowExpireChanged(bool value) => OnPropertyChanged(nameof(ToggleTimeText));
+    public partial bool IsActivating { get; set; }
 
     public string SourceText => string.IsNullOrEmpty(Source) ? "本地" : Source!;
 
-    public string TrafficText => FormatSubscriptionInfo(SubscriptionUserInfo);
-
-    public bool HasTraffic => !string.IsNullOrEmpty(TrafficText);
-
-    public double UsagePercent { get; }
+    /// <summary>剩余流量百分比：进度条满格表示余量充足，和「剩余」文案保持一致。</summary>
+    public double RemainingPercent { get; }
 
     public bool HasUsageBar { get; }
 
     public string ExpireText { get; }
+
+    /// <summary>没有到期信息时整行隐藏，避免卡片中间留一条空白行。</summary>
+    public bool HasExpire => !string.IsNullOrEmpty(ExpireText);
 
     public string UsageText { get; }
 
@@ -75,9 +66,9 @@ public sealed partial class ProfileRowViewModel : ObservableObject
         var info = SubscriptionUsage.Parse(item.SubscriptionUserInfo);
         if (info is not null && info.Total > 0)
         {
-            UsagePercent = Math.Clamp(info.Used * 100.0 / info.Total, 0, 100);
+            RemainingPercent = 100 - Math.Clamp(info.Used * 100.0 / info.Total, 0, 100);
             HasUsageBar = true;
-            UsageText = $"{Format.Bytes(info.Used)} / {Format.Bytes(info.Total)}";
+            UsageText = $"剩余 {Format.Bytes(Math.Max(0, info.Total - info.Used))} / {Format.Bytes(info.Total)}";
         }
         else if (info is not null)
         {
@@ -91,15 +82,6 @@ public sealed partial class ProfileRowViewModel : ObservableObject
         ExpireText = info is null
             ? ""
             : SubscriptionUsage.FormatExpire(info.Expire);
-    }
-
-    private static string FormatSubscriptionInfo(string? raw)
-    {
-        var info = SubscriptionUsage.Parse(raw);
-        if (info is null) return "";
-        return info.Total > 0
-            ? $"{Format.Bytes(info.Used)} / {Format.Bytes(info.Total)}"
-            : $"↑ {Format.Bytes(info.Upload)}  ↓ {Format.Bytes(info.Download)}";
     }
 }
 
@@ -165,7 +147,6 @@ public sealed partial class ProfilesViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(IsRawTab));
         OnPropertyChanged(nameof(IsRuntimeTab));
-        if (value == 1) _ = RefreshRuntimePreviewAsync();
     }
 
     public ProfilesViewModel(MomomiHost host, DispatcherQueue dispatcher)
@@ -283,6 +264,7 @@ public sealed partial class ProfilesViewModel : ObservableObject
     private async Task ActivateAsync(ProfileRowViewModel? row)
     {
         if (row is null) return;
+        row.IsActivating = true;
         IsBusy = true;
         try
         {
@@ -298,6 +280,7 @@ public sealed partial class ProfilesViewModel : ObservableObject
         }
         finally
         {
+            row.IsActivating = false;
             IsBusy = false;
         }
     }
@@ -537,7 +520,7 @@ public sealed partial class ProfilesViewModel : ObservableObject
     partial void OnEditorErrorChanged(string value) => HasEditorError = !string.IsNullOrEmpty(value);
 
     /// <summary>生成运行时配置文本：订阅原始内容叠加全局注入项（端口/DNS/TUN 等）。</summary>
-    private async Task RefreshRuntimePreviewAsync()
+    public async Task LoadRuntimePreviewAsync()
     {
         if (_editorRow is null) return;
 

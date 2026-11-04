@@ -63,7 +63,7 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
 
     /// <summary>当前订阅剩余流量占比 0-100（用于进度条）；无总量时为 0。</summary>
     [ObservableProperty]
-    public partial double SubscriptionUsagePercent { get; set; }
+    public partial double SubscriptionRemainingPercent { get; set; }
 
     /// <summary>是否有订阅用量信息（无则隐藏整块）。</summary>
     [ObservableProperty]
@@ -216,20 +216,20 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
             HasSubscriptionTotal = false;
             SubscriptionName = "";
             SubscriptionUsageText = "";
-            SubscriptionUsagePercent = 0;
+            SubscriptionRemainingPercent = 0;
             return;
         }
 
         SubscriptionName = string.IsNullOrWhiteSpace(name) ? "当前订阅" : name;
         if (info.Total > 0)
         {
-            SubscriptionUsageText = $"已用 {Format.Bytes(info.Used)} / {Format.Bytes(info.Total)}";
-            SubscriptionUsagePercent = Math.Clamp((double)info.Used / info.Total * 100, 0, 100);
+            SubscriptionUsageText = $"剩余 {Format.Bytes(Math.Max(0, info.Total - info.Used))} / {Format.Bytes(info.Total)}";
+            SubscriptionRemainingPercent = 100 - Math.Clamp((double)info.Used / info.Total * 100, 0, 100);
             HasSubscriptionTotal = true;
         }
         else
         {
-            SubscriptionUsageText = $"已用 ↑ {Format.Bytes(info.Upload)}  ↓ {Format.Bytes(info.Download)}";
+            SubscriptionUsageText = $"↑ {Format.Bytes(info.Upload)}  ↓ {Format.Bytes(info.Download)}";
             HasSubscriptionTotal = false;
         }
 

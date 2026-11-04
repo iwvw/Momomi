@@ -20,11 +20,11 @@ public sealed partial class MainWindow : Window
     private MiniWindow? _miniWindow;
     private bool _forceExit;
     private bool _modeBarLoading;
-    private double _paneWidth = 200;
+    private double _paneWidth = 176;
     private double _dragStartWidth;
     private Microsoft.UI.Xaml.DispatcherTimer? _sizeSaveTimer;
 
-    private const double MinPaneWidth = 160;
+    private const double MinPaneWidth = 144;
     private const double MaxPaneWidth = 420;
 
     public ModeSelectorViewModel ModeSelector { get; }
@@ -48,7 +48,7 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
-            presenter.PreferredMinimumWidth = 1200;
+            presenter.PreferredMinimumWidth = 1280;
             presenter.PreferredMinimumHeight = 800;
         }
 
@@ -118,6 +118,7 @@ public sealed partial class MainWindow : Window
         AppHost.Host.Core.StateChanged += (_, _) => Dispatch(UpdateTrayState);
         AppHost.Host.Core.StateChanged += OnCoreStateForRestore;
         AppHost.Host.Core.StateChanged += OnCoreStateForAutoQuit;
+        AppHost.Host.ProxiesReloaded += OnProxiesReloadedForRestore;
         ViewModels.AppSignals.SwitchesChanged += (_, _) => Dispatch(UpdateTrayState);
 
         _ = Hotkeys.LoadAsync();
@@ -503,64 +504,79 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private bool _restoreInFlight;
+    private int _restoreInFlight;
 
     /// <summary>内核进入运行态时，恢复上次为各代理组手动选择的节点。</summary>
     private void OnCoreStateForRestore(object? sender, CoreStateChanged e)
     {
-        if (e.State != CoreState.Running || _restoreInFlight) return;
-        _restoreInFlight = true;
-        _ = Task.Run(async () =>
+        if (e.State != CoreState.Running) return;
+        _ = RestoreProxySelectionsAsync(TimeSpan.FromMilliseconds(800));
+    }
+
+    /// <summary>
+    /// 订阅刷新/切换配置后重新套用用户选择。
+    ///
+    /// 内核的 store-selected 只是把 cache.db 里的旧映射 ForceSet 回去，不校验节点是否
+    /// 属于当前订阅；不同订阅里同名的组会串用旧选择（例如直连组被套成手动）。
+    /// 这里在内核重载后以本应用记录的「用户最后选择」为准再覆盖一次，让两套持久化
+    /// 状态重新对齐；启动时的恢复见 <see cref="OnCoreStateForRestore"/>。
+    /// </summary>
+    private void OnProxiesReloadedForRestore(object? sender, EventArgs e)
+    {
+        _ = RestoreProxySelectionsAsync(TimeSpan.FromMilliseconds(500));
+    }
+
+    private async Task RestoreProxySelectionsAsync(TimeSpan delay)
+    {
+        if (Interlocked.Exchange(ref _restoreInFlight, 1) == 1) return;
+        try
         {
-            try
+            // 等待内核 API 就绪。
+            if (delay > TimeSpan.Zero) await Task.Delay(delay).ConfigureAwait(false);
+            var host = AppHost.Host;
+            var saved = await ProxySelectionStore.LoadAsync(host.Settings).ConfigureAwait(false);
+            if (saved.Count == 0 || host.Core.Api is null) return;
+
+            var proxies = await host.Core.Api.GetProxiesAsync().ConfigureAwait(false);
+            var applied = 0;
+            foreach (var (group, node) in saved)
             {
-                // 等待内核 API 就绪。
-                await Task.Delay(800).ConfigureAwait(false);
-                var host = AppHost.Host;
-                var saved = await ProxySelectionStore.LoadAsync(host.Settings).ConfigureAwait(false);
-                if (saved.Count == 0 || host.Core.Api is null) return;
-
-                var proxies = await host.Core.Api.GetProxiesAsync().ConfigureAwait(false);
-                var applied = 0;
-                foreach (var (group, node) in saved)
+                if (!proxies.TryGetValue(group, out var groupItem)) continue;
+                if (groupItem.All is null || !groupItem.All.Contains(node)) continue;
+                if (string.Equals(groupItem.Now, node, StringComparison.Ordinal)) continue;
+                try
                 {
-                    if (!proxies.TryGetValue(group, out var groupItem)) continue;
-                    if (groupItem.All is null || !groupItem.All.Contains(node)) continue;
-                    if (string.Equals(groupItem.Now, node, StringComparison.Ordinal)) continue;
-                    try
-                    {
-                        await host.Core.Api.SelectProxyAsync(group, node).ConfigureAwait(false);
-                        applied++;
-                    }
-                    catch
-                    {
-                    }
+                    await host.Core.Api.SelectProxyAsync(group, node).ConfigureAwait(false);
+                    applied++;
                 }
-
-                // 顺带裁剪失效记录：这里已经拿到完整的组与节点列表，
-                // 不需要额外请求。订阅切换后旧组名会一直残留，不清理会无限增长。
-                var groups = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
-                foreach (var (name, item) in proxies)
+                catch
                 {
-                    if (item.All is { Count: > 0 })
-                        groups[name] = item.All;
-                }
-                await ProxySelectionStore.PruneAsync(host.Settings, groups).ConfigureAwait(false);
-
-                if (applied > 0)
-                {
-                    await Task.Delay(300).ConfigureAwait(false);
-                    AppSignals.RaiseProxiesChanged();
                 }
             }
-            catch
+
+            // 顺带裁剪失效记录：这里已经拿到完整的组与节点列表，
+            // 不需要额外请求。订阅切换后旧组名会一直残留，不清理会无限增长。
+            var groups = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
+            foreach (var (name, item) in proxies)
             {
+                if (item.All is { Count: > 0 })
+                    groups[name] = item.All;
             }
-            finally
+            await ProxySelectionStore.PruneAsync(host.Settings, groups).ConfigureAwait(false);
+
+            if (applied > 0)
             {
-                _restoreInFlight = false;
+                await Task.Delay(300).ConfigureAwait(false);
+                AppSignals.RaiseProxiesChanged();
             }
-        });
+        }
+        catch
+        {
+        }
+        finally
+        {
+            Volatile.Write(ref _restoreInFlight, 0);
+        }
     }
 
     /// <summary>切换导航样式：0 = 左侧，1 = 顶部。</summary>
@@ -1285,7 +1301,7 @@ public sealed partial class MainWindow : Window
         UpdateTrayState();
     }
 
-    private const double DefaultWindowWidth = 1080;
+    private const double DefaultWindowWidth = 1280;
     private const double DefaultWindowHeight = 700;
 
     /// <summary>恢复上次窗口尺寸；无记录时用较小的默认尺寸。</summary>
@@ -1300,7 +1316,7 @@ public sealed partial class MainWindow : Window
                 w = (int)DefaultWindowWidth;
                 h = (int)DefaultWindowHeight;
             }
-            w = Math.Max(w, 1200);
+            w = Math.Max(w, 1280);
             h = Math.Max(h, 800);
             AppWindow.Resize(new Windows.Graphics.SizeInt32(w, h));
         }
@@ -1327,12 +1343,12 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            var saved = await AppHost.Host.Settings.GetIntAsync("ui.paneWidth", 200);
+            var saved = await AppHost.Host.Settings.GetIntAsync("ui.paneWidth", 176);
             _paneWidth = Math.Clamp(saved, MinPaneWidth, MaxPaneWidth);
         }
         catch
         {
-            _paneWidth = 200;
+            _paneWidth = 176;
         }
         ApplyPaneWidth();
     }

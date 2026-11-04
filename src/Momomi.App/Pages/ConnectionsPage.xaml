@@ -380,8 +380,11 @@
                                     </Grid>
                                     <Grid Style="{StaticResource TagChipStyle}"
                                             Visibility="{x:Bind HasChain, Mode=OneTime, Converter={StaticResource BoolToVisibility}}">
-                                        <TextBlock Text="{x:Bind Chain}" TextTrimming="CharacterEllipsis"
-                                                   FontFamily="{StaticResource NodeNameFontFamily}" />
+                                        <controls:ProxyNameView NameText="{x:Bind Chain}"
+                                                                ChainMode="True"
+                                                                TextSize="12"
+                                                                MaxWidth="300"
+                                                                VerticalAlignment="Center" />
                                     </Grid>
                                     <Grid Style="{StaticResource TagChipStyle}"
                                             Visibility="{x:Bind HasRule, Mode=OneTime, Converter={StaticResource BoolToVisibility}}">

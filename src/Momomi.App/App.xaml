@@ -24,6 +24,9 @@
             <!-- 页面内容最大宽度：对齐 Windows 设置的限宽居中范式 -->
             <x:Double x:Key="PageContentMaxWidth">1064</x:Double>
 
+            <!-- 编辑器字体：FlagsEmoji 提供旗帜连字，Consolas 负责等宽代码，Segoe UI Emoji 兜底其他 emoji -->
+            <FontFamily x:Key="EditorFontFamily">ms-appx:///Assets/FlagsEmoji.ttf#Twemoji Mozilla, Consolas, Segoe UI Emoji</FontFamily>
+
             <!-- 标题栏右侧预留少量拖拽区，让顶栏控件与窗口按钮之间留约 4px 间距 -->
             <x:Double x:Key="TitleBarMinDragRegionWidth">4</x:Double>
 
@@ -67,14 +70,12 @@
                 <Setter Property="MaxWidth" Value="320" />
             </Style>
 
-            <!-- 节点名称字体：优先用 FlagsEmoji 提供国旗字形（Windows 从 Win10 起移除了 Segoe UI Emoji 的国旗连字，
-                 🇺🇸 会退化成 US 两个字母），其余字形（拉丁/中文/普通 emoji）回退到系统字体 -->
-            <FontFamily x:Key="NodeNameFontFamily">ms-appx:///Assets/FlagsEmoji.ttf#Twemoji Mozilla, Segoe UI, Microsoft YaHei UI, Segoe UI Emoji</FontFamily>
-
             <!-- 节点按钮：直接用原生 Button 模板（hover/按下填充由系统负责），
                  自身无边框，描边由外层 Border 提供，避免 hover 时覆盖。
-                 VerticalContentAlignment 必须是 Stretch：Center 会让内容按自身尺寸居中，
-                 完整模式的两行内容高度传不到按钮，按钮被 MinItemHeight 钳住后就把第二行裁掉。 -->
+                 VerticalContentAlignment 必须是 Stretch：让内容 Grid 拉满按钮内容区，
+                 再由内部 Row0="*" 把图标+名称真正居中。Center 在这套模板下不会改变
+                 内容 Grid 的拉伸方式，Auto 行仍会贴顶，导致卡片底部空一截。
+                 高度由外层 MinItemHeight（简单 42 / 完整 60）保证，不会被裁。 -->
             <Style x:Key="NodeButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />

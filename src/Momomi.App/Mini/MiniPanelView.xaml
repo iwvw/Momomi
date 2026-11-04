@@ -7,6 +7,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:local="using:Momomi.App.Mini"
     xmlns:vm="using:Momomi.App.ViewModels"
+    xmlns:controls="using:Momomi.App.Controls"
     mc:Ignorable="d">
 
     <UserControl.Resources>
@@ -251,12 +252,11 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0"
-                                       VerticalAlignment="Center"
-                                       Style="{StaticResource BodyStrongTextBlockStyle}"
-                                       FontFamily="{StaticResource NodeNameFontFamily}"
-                                       TextTrimming="CharacterEllipsis"
-                                       Text="{x:Bind Name}" />
+                            <controls:ProxyNameView Grid.Column="0"
+                                                    NameText="{x:Bind Name}"
+                                                    TextSize="14"
+                                                    IsSemiBold="True"
+                                                    VerticalAlignment="Center" />
                             <Grid Grid.Column="1" Width="28" Height="28" VerticalAlignment="Center">
                                 <ProgressRing Width="16" Height="16"
                                               HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -273,7 +273,6 @@
                             <ComboBox Grid.Column="2"
                                       Width="180"
                                       VerticalAlignment="Center"
-                                      FontFamily="{StaticResource NodeNameFontFamily}"
                                       PlaceholderText="选择节点"
                                       ItemsSource="{x:Bind Nodes}"
                                       SelectedItem="{x:Bind Selected, Mode=OneWay}"
@@ -287,12 +286,11 @@
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0"
-                                                       MaxWidth="96"
-                                                       VerticalAlignment="Center"
-                                                       FontFamily="{StaticResource NodeNameFontFamily}"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       Text="{x:Bind Name}" />
+                                            <controls:ProxyNameView Grid.Column="0"
+                                                                    NameText="{x:Bind Name}"
+                                                                    TextSize="13"
+                                                                    MaxWidth="120"
+                                                                    VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="1"
                                                        VerticalAlignment="Center"
                                                        FontSize="12"
@@ -329,7 +327,7 @@
             </Grid>
             <ProgressBar Height="4"
                          Minimum="0" Maximum="100"
-                         Value="{x:Bind ViewModel.SubscriptionUsagePercent, Mode=OneWay}"
+                         Value="{x:Bind ViewModel.SubscriptionRemainingPercent, Mode=OneWay}"
                          Visibility="{x:Bind ViewModel.HasSubscriptionTotal, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
         </StackPanel>
     </Grid>

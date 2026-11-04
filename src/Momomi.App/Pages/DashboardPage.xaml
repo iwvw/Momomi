@@ -234,7 +234,7 @@
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                            Text="{x:Bind ViewModel.ProfileUsageText, Mode=OneWay}" />
                                 <ProgressBar Maximum="100"
-                                             Value="{x:Bind ViewModel.ProfileUsagePercent, Mode=OneWay}"
+                                             Value="{x:Bind ViewModel.ProfileRemainingPercent, Mode=OneWay}"
                                              Height="4"
                                              Visibility="{x:Bind ViewModel.HasProfileUsage, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                                 <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
