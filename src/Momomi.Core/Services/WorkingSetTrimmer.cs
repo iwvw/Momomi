@@ -80,6 +80,15 @@ public static class WorkingSetTrimmer
     private static bool _hasTrimmed;
 
     /// <summary>
+    /// 用户是否明确要求「常驻时把工作集压到最低」。
+    ///
+    /// 默认策略是只在系统内存紧张时才回收，因为回收会让下次展开重新缺页。
+    /// 但主窗口收进托盘时，用户的意图很明确——不要占着内存；
+    /// 此时即便物理内存充裕也照常回收，代价只是下次点开托盘多几次缺页。
+    /// </summary>
+    private static bool _preferLowMemory;
+
+    /// <summary>
     /// 当前是否有界面正在渲染。
     ///
     /// 用来源集合而不是单个 bool：主窗口、迷你面板、托盘菜单会互相独立地
@@ -139,7 +148,6 @@ public static class WorkingSetTrimmer
             LastActiveMs.Remove(source);
         }
     }
-
     /// <summary>
     /// 报告某个界面刚有渲染活动（鼠标移动、按键、窗口事件等）。
     ///
@@ -249,10 +257,11 @@ public static class WorkingSetTrimmer
     /// 物理内存明明充裕时这么做纯粹是自己制造卡顿。
     ///
     /// 阈值取 3 GB：低于这个量系统本身就开始感到压力，
-    /// 这时候交还几十兆是有意义的。
+    /// 这时候交还几十兆是有意义的。用户显式要求低内存时也同意义。
     /// </summary>
     private static bool MemoryPressure()
     {
+        if (Volatile.Read(ref _preferLowMemory)) return true;
         var available = AvailableBytes();
         return available >= 0 && available < 3L * 1024 * 1024 * 1024;
     }
@@ -286,6 +295,19 @@ public static class WorkingSetTrimmer
         {
             _deferredTrim?.Change(Timeout.Infinite, Timeout.Infinite);
         }
+    }
+
+    /// <summary>
+    /// 开启/关闭「常驻也保持低占用」。
+    ///
+    /// 开启后 <see cref="ScheduleTrim"/> 与空闲看门狗不再受物理内存余量限制，
+    /// 只要界面没有渲染活动就回收。主窗口收进托盘时打开，重新显示时关掉，
+    /// 这样常见使用流（打开 → 看 → 收起）能在托盘期间把占用压到最低。
+    /// </summary>
+    public static void SetPreferLowMemory(bool value)
+    {
+        Volatile.Write(ref _preferLowMemory, value);
+        if (!value) CancelScheduledTrim();
     }
 
     private static void RunDeferredTrim(string reason)

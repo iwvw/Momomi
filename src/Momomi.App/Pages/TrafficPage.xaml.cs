@@ -22,14 +22,16 @@ public sealed partial class TrafficPage : Page
     {
         base.OnNavigatedTo(e);
         _loading = true;
-        RangeBar.SelectedItem = RangeBar.Items[ViewModel.SelectedRangeIndex];
+        RangeBar.SelectedIndex = ViewModel.SelectedRangeIndex;
         await ViewModel.LoadAsync();
         _loading = false;
     }
 
-    private void Range_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    private void Range_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_loading) return;
-        ViewModel.SelectedRangeIndex = sender.Items.IndexOf(sender.SelectedItem);
+        if (sender is not CommunityToolkit.WinUI.Controls.Segmented segmented) return;
+        if (segmented.SelectedIndex < 0) return;
+        ViewModel.SelectedRangeIndex = segmented.SelectedIndex;
     }
 }

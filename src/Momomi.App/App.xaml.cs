@@ -343,7 +343,11 @@ public partial class App : Application
         {
             var main = Main;
             if (main is not null)
-                main.DispatcherQueue.TryEnqueue(() => main.StartMinimizedToTray());
+                main.DispatcherQueue.TryEnqueue(() =>
+                {
+                    main.MarkSilentStartup();
+                    main.StartMinimizedToTray();
+                });
         }
         else
         {

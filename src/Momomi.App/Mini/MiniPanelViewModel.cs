@@ -208,6 +208,9 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
         }
     }
 
+    private int _usageBand = -1;
+    private long _usageTotal = -1;
+
     private void ApplySubscriptionUsage(string name, SubscriptionUsage? info)
     {
         if (info is null || (info.Total <= 0 && info.Used <= 0))
@@ -223,9 +226,16 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
         SubscriptionName = string.IsNullOrWhiteSpace(name) ? "当前订阅" : name;
         if (info.Total > 0)
         {
-            SubscriptionUsageText = $"剩余 {Format.Bytes(Math.Max(0, info.Total - info.Used))} / {Format.Bytes(info.Total)}";
-            SubscriptionRemainingPercent = 100 - Math.Clamp((double)info.Used / info.Total * 100, 0, 100);
-            HasSubscriptionTotal = true;
+            var usedPercent = Math.Clamp((double)info.Used / info.Total * 100, 0, 100);
+            var band = (int)usedPercent / 5;
+            if (band != _usageBand || _usageTotal != info.Total)
+            {
+                _usageBand = band;
+                _usageTotal = info.Total;
+                SubscriptionUsageText = $"剩余 {Format.Bytes(Math.Max(0, info.Total - info.Used))} / {Format.Bytes(info.Total)}";
+                SubscriptionRemainingPercent = 100 - usedPercent;
+                HasSubscriptionTotal = true;
+            }
         }
         else
         {

@@ -18,10 +18,10 @@ public sealed partial class DashboardViewModel : ObservableObject
     private readonly Queue<double> _downHistory = new();
 
     [ObservableProperty]
-    public partial string UpRate { get; set; } = "0 B/s";
+    public partial string UpRate { get; set; } = "0.0 MB/s";
 
     [ObservableProperty]
-    public partial string DownRate { get; set; } = "0 B/s";
+    public partial string DownRate { get; set; } = "0.0 MB/s";
 
     [ObservableProperty]
     public partial string UpTotal { get; set; } = "0 B";
@@ -179,6 +179,7 @@ public sealed partial class DashboardViewModel : ObservableObject
         _core.TrafficUpdated += _onTraffic;
         _core.MemoryUpdated += _onMemory;
         _core.ConnectionsUpdated += _onConnections;
+        _core.AddConnectionsConsumer();
         AppSignals.ProxiesChanged += _onProxiesReloaded;
         AppSignals.MainWindowVisibilityChanged += _onMainWindowVisibility;
         AppSignals.KernelInstallProgressChanged += _onKernelInstall;
@@ -230,6 +231,7 @@ public sealed partial class DashboardViewModel : ObservableObject
         _core.TrafficUpdated -= _onTraffic;
         _core.MemoryUpdated -= _onMemory;
         _core.ConnectionsUpdated -= _onConnections;
+        _core.RemoveConnectionsConsumer();
         AppSignals.ProxiesChanged -= _onProxiesReloaded;
         AppSignals.MainWindowVisibilityChanged -= _onMainWindowVisibility;
         AppSignals.KernelInstallProgressChanged -= _onKernelInstall;
@@ -571,8 +573,8 @@ public sealed partial class DashboardViewModel : ObservableObject
 
     private void OnTraffic(TrafficSnapshot t)
     {
-        UpRate = Format.Rate(t.Up);
-        DownRate = Format.Rate(t.Down);
+        UpRate = Format.RateMb(t.Up);
+        DownRate = Format.RateMb(t.Down);
         UpTotal = Format.Bytes(t.UpTotal);
         DownTotal = Format.Bytes(t.DownTotal);
 

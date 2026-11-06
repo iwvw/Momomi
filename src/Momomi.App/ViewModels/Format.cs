@@ -11,6 +11,10 @@ public static class Format
         return $"{v / 1024 / 1024 / 1024:0.00} GB/s";
     }
 
+    /// <summary>固定用 MB/s、保留一位小数：首页实时速率卡片需要稳定的单位与位数，避免数字宽度跳动。</summary>
+    public static string RateMb(double bytesPerSecond)
+        => $"{bytesPerSecond / 1024 / 1024:0.0} MB/s";
+
     public static string Bytes(long bytes)
     {
         if (bytes < 1024) return $"{bytes} B";

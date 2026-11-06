@@ -43,4 +43,10 @@ public sealed partial class LogsPage : Page, IPageLifecycle
         if (LevelBox.SelectedValue is string level)
             ViewModel.Level = level;
     }
+
+    private void Realtime_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not CommunityToolkit.WinUI.Controls.Segmented segmented) return;
+        ViewModel.IsPaused = segmented.SelectedIndex == 1;
+    }
 }

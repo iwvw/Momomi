@@ -32,6 +32,14 @@ public interface ICoreManager : IDisposable
     IMihomoApiClient? Api { get; }
     bool IsElevatedMode { get; }
 
+    bool ConnectionsWanted { get; }
+
+    /// <summary>登记一个连接列表消费者（页面/面板），返回时开始高频轮询。</summary>
+    void AddConnectionsConsumer();
+
+    /// <summary>注销一个连接列表消费者；计数归零后轮询降频。</summary>
+    void RemoveConnectionsConsumer();
+
     event EventHandler<CoreStateChanged>? StateChanged;
     event EventHandler<TrafficSnapshot>? TrafficUpdated;
     event EventHandler<MemorySnapshot>? MemoryUpdated;
@@ -74,6 +82,29 @@ public sealed class CoreManager : ICoreManager
     public string? LastError => _lastError;
     public IMihomoApiClient? Api => _api;
     public bool IsElevatedMode { get; private set; }
+
+    private int _connectionsWanted;
+
+    /// <summary>
+    /// 是否有界面在消费连接列表。为 false 时轮询降到 30 秒一次，
+    /// 避免隐藏期间每秒反序列化连接快照白白制造内存分配。
+    ///
+    /// 用计数而不是布尔：概览页与连接页可能同时订阅，任一页面解绑都不能
+    /// 把另一页需要的快照关掉。
+    /// </summary>
+    public bool ConnectionsWanted => Volatile.Read(ref _connectionsWanted) > 0;
+
+    public void AddConnectionsConsumer() => Interlocked.Increment(ref _connectionsWanted);
+
+    public void RemoveConnectionsConsumer()
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _connectionsWanted);
+            if (current <= 0) return;
+            if (Interlocked.CompareExchange(ref _connectionsWanted, current - 1, current) == current) return;
+        }
+    }
 
     public event EventHandler<CoreStateChanged>? StateChanged;
     public event EventHandler<TrafficSnapshot>? TrafficUpdated;
@@ -327,12 +358,30 @@ public sealed class CoreManager : ICoreManager
     {
         while (!ct.IsCancellationRequested)
         {
-            var snapshot = await api.GetConnectionsAsync(ct).ConfigureAwait(false);
-            if (snapshot is not null) ConnectionsUpdated?.Invoke(this, snapshot);
+            // 界面没有订阅连接列表时（主窗口收进托盘、页面已解绑、迷你面板已释放），
+            // 每秒拉一次完整连接列表要反序列化几百 KB 的 JSON，分配出来的页会很快
+            // 把刚交还的工作集又填满——这正是「隐藏后内存数字过一会儿又涨回去」的主因。
+            // 没人看的时候把频率降到 30 秒一次，只够流量记录取样，不再制造分配风暴。
+            if (ConnectionsWanted)
+            {
+                try
+                {
+                    var snapshot = await api.GetConnectionsAsync(ct).ConfigureAwait(false);
+                    if (snapshot is not null) ConnectionsUpdated?.Invoke(this, snapshot);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch
+                {
+                }
+            }
 
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
+                var period = ConnectionsWanted ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(30);
+                await Task.Delay(period, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

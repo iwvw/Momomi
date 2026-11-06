@@ -7,6 +7,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:Momomi.Core.Models"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
     mc:Ignorable="d">
 
     <Grid RowSpacing="16">
@@ -28,9 +29,12 @@
                         <ComboBoxItem Content="warning" />
                         <ComboBoxItem Content="error" />
                     </ComboBox>
-                    <ToggleSwitch VerticalAlignment="Center"
-                                  OffContent="实时" OnContent="暂停"
-                                  IsOn="{x:Bind ViewModel.IsPaused, Mode=TwoWay}" />
+                    <toolkit:Segmented x:Name="RealtimeBar" MinHeight="0" VerticalAlignment="Center"
+                                       SelectedIndex="0"
+                                       SelectionChanged="Realtime_SelectionChanged">
+                        <toolkit:SegmentedItem Content="实时" />
+                        <toolkit:SegmentedItem Content="暂停" />
+                    </toolkit:Segmented>
                     <Button VerticalAlignment="Center"
                             Command="{x:Bind ViewModel.CopyAllCommand}" Content="复制全部" />
                     <Button VerticalAlignment="Center"

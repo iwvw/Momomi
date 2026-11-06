@@ -419,6 +419,9 @@ public sealed partial class MainWindow : Window
             {
                 try
                 {
+                    // 静默启动（只驻留托盘、不打开主窗口）或主窗口已收进托盘时不预热：
+                    // 那会让整个迷你面板的可视化树与交换链常驻内存，而用户可能几小时都不点托盘。
+                    if (_silentStartup || _miniWindowReleased) return;
                     EnsureMiniWindow();
                 }
                 catch (Exception ex)
@@ -1000,7 +1003,9 @@ public sealed partial class MainWindow : Window
         // （交换链、着色器缓存、字形纹理），GC 完全碰不到它们。
         // 不主动剥出去，任务管理器里那几十上百兆会一直挂着。
         WorkingSetTrimmer.EndActivity(ActivitySources.MainWindow);
+        WorkingSetTrimmer.SetPreferLowMemory(true);
         ReleasePageContent();
+        ReleaseMiniWindow();
 
         // 立即回收，不排队也不看内存压力。
         //
@@ -1093,6 +1098,7 @@ public sealed partial class MainWindow : Window
     private void EnsureMiniWindow()
     {
         if (_miniWindow is not null) return;
+        _miniWindowReleased = false;
         if (DispatcherQueue.HasThreadAccess)
             CreateMiniWindow();
         else
@@ -1101,7 +1107,7 @@ public sealed partial class MainWindow : Window
 
     private void CreateMiniWindow()
     {
-        if (_miniWindow is not null) return;
+        if (_miniWindow is not null || _miniWindowReleased) return;
         var mini = new MiniWindow();
         _miniWindow = mini;
         // 窗口可能在主题切换之后才创建（预热、托盘点击），继承当前主题。
@@ -1130,11 +1136,16 @@ public sealed partial class MainWindow : Window
     }
 
     private bool _warmingMiniWindow;
+    private bool _miniWindowReleased;
+    private bool _silentStartup;
+
+    /// <summary>标记本次启动为静默启动（只驻留托盘、不打开主窗口）。</summary>
+    public void MarkSilentStartup() => _silentStartup = true;
 
     /// <summary>在后台构建下一个迷你窗口，保证隐藏后再次呼出时不再付出构造开销。</summary>
     private void WarmupNextMiniWindow()
     {
-        if (_miniWindow is not null || _warmingMiniWindow) return;
+        if (_miniWindowReleased || _miniWindow is not null || _warmingMiniWindow) return;
         _warmingMiniWindow = true;
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
@@ -1166,10 +1177,12 @@ public sealed partial class MainWindow : Window
 
     public void ShowAndActivate()
     {
+        _miniWindowReleased = false;
         EnsureInitialPageLoaded();
 
         // 窗口要开始渲染了，登记活动来源，
         // 否则空闲看门狗可能在用户刚点开的瞬间清工作集，造成首帧卡顿。
+        WorkingSetTrimmer.SetPreferLowMemory(false);
         WorkingSetTrimmer.BeginActivity(ActivitySources.MainWindow);
 
         AppWindow.Show();
@@ -1187,7 +1200,6 @@ public sealed partial class MainWindow : Window
         NavigateKeepingNoBackStack(_lastPageType);
     }
 
-    /// <summary>隐藏到托盘时释放当前页面内容（保留页面类型），降低常驻内存。</summary>
     private void ReleasePageContent()
     {
         try
@@ -1206,6 +1218,12 @@ public sealed partial class MainWindow : Window
             }
 
             NavFrame.Content = null;
+
+            // 隐藏期间这两个静态缓存没有保留价值：国旗 SVG 与进程图标都是解码后的原生位图，
+            // 收进托盘后长期不用，却会把私有内存基准一直抬着。
+            Converters.SvgImageSourceConverter.ClearCache();
+            ViewModels.ProcessIconProvider.ClearCache();
+
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, blocking: false);
         }
         catch (Exception ex)
@@ -1214,9 +1232,35 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// 主窗口收进托盘时销毁常驻的迷你窗口。
+    ///
+    /// 迷你窗口平时保持「已预热但隐藏」的状态，好处是呼出时不付出构造开销；
+    /// 代价是一整个 XAML 可视化树 + 交换链 + 字形缓存常驻内存。
+    /// 主窗口隐藏意味着用户已经离开界面，这时继续留着纯属浪费；
+    /// 之后点托盘图标会经 <see cref="EnsureMiniWindow"/> 重建，重新付出构造与预热。
+    /// 重建期间 <see cref="_miniWindowReleased"/> 拦住「预热下一个」的自动重建，
+    /// 否则关口时窗口又会立刻被建回来。
+    /// </summary>
+    private void ReleaseMiniWindow()
+    {
+        if (_miniWindow is null) return;
+        _miniWindowReleased = true;
+        try
+        {
+            _miniWindow.ForceClose();
+        }
+        catch (Exception ex)
+        {
+            global::Momomi.App.App.WriteLog($"释放迷你窗口失败：{ex}");
+        }
+        _miniWindow = null;
+    }
+
     private void ExitFromTray()
     {
         _forceExit = true;
+        _miniWindowReleased = true;
         _miniWindow?.ForceClose();
         _miniWindow = null;
         _tray?.Dispose();

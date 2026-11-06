@@ -16,9 +16,21 @@ public static class ProcessIconProvider
     private static readonly object Gate = new();
     private const int MaxEntries = 256;
 
-    public static ImageSource? Get(string? processPath)
+    /// <summary>
+    /// 清空图标缓存。主窗口收进托盘时调用：图标是解码后的位图，
+    /// 常驻几十个进程图标就能占住可观的原生内存，隐藏期间完全没有保留价值。
+    /// </summary>
+    public static void ClearCache()
     {
-        if (string.IsNullOrWhiteSpace(processPath)) return null;
+        lock (Gate)
+        {
+            Cache.Clear();
+            Order.Clear();
+        }
+    }
+
+    public static ImageSource? Get(string? processPath)
+    {        if (string.IsNullOrWhiteSpace(processPath)) return null;
 
         lock (Gate)
         {

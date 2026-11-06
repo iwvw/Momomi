@@ -16,6 +16,15 @@ public sealed class SvgImageSourceConverter : IValueConverter
     private static readonly Dictionary<string, ImageSource> Cache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object Gate = new();
 
+    /// <summary>
+    /// 清空缓存。主窗口收进托盘时调用：国旗图片是原生 SVG 资源，
+    /// 隐藏后长期不用，继续持有只会让私有内存基准抬高；
+    /// 再次显示时重新解码即可（数量有限，开销很小）。
+    /// </summary>
+    public static void ClearCache()
+    {
+        lock (Gate) Cache.Clear();
+    }
     public object Convert(object value, Type targetType, object parameter, string language)
     {
         if (value is not string uri || string.IsNullOrWhiteSpace(uri)) return null!;

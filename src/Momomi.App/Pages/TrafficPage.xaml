@@ -8,6 +8,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:Momomi.App.ViewModels"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
     mc:Ignorable="d">
 
     <Grid RowSpacing="16">
@@ -22,6 +23,13 @@
                           Subtitle="{x:Bind ViewModel.StatusText, Mode=OneWay}">
             <local:PageHeader.Actions>
                 <StackPanel Orientation="Horizontal" Spacing="8">
+                    <toolkit:Segmented x:Name="RangeBar" MinHeight="0" VerticalAlignment="Center"
+                                       SelectionChanged="Range_SelectionChanged">
+                        <toolkit:SegmentedItem Content="6 小时" />
+                        <toolkit:SegmentedItem Content="24 小时" />
+                        <toolkit:SegmentedItem Content="7 天" />
+                        <toolkit:SegmentedItem Content="30 天" />
+                    </toolkit:Segmented>
                     <Button VerticalAlignment="Center"
                             Command="{x:Bind ViewModel.RefreshCommand}" Content="刷新" />
                     <Button VerticalAlignment="Center"
@@ -35,41 +43,35 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <Grid Grid.Column="0" Style="{StaticResource CardStyle}" Padding="14,12">
-                <StackPanel Spacing="4">
+            <Grid Grid.Column="0" Style="{StaticResource CardStyle}" Padding="16,14">
+                <StackPanel Spacing="6">
                     <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="累计上传" />
                     <TextBlock Style="{StaticResource SubtitleTextBlockStyle}"
+                               TextTrimming="CharacterEllipsis"
                                Text="{x:Bind ViewModel.TotalUpText, Mode=OneWay}" />
                 </StackPanel>
             </Grid>
-            <Grid Grid.Column="1" Style="{StaticResource CardStyle}" Padding="14,12">
-                <StackPanel Spacing="4">
+            <Grid Grid.Column="1" Style="{StaticResource CardStyle}" Padding="16,14">
+                <StackPanel Spacing="6">
                     <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="累计下载" />
                     <TextBlock Style="{StaticResource SubtitleTextBlockStyle}"
+                               TextTrimming="CharacterEllipsis"
                                Text="{x:Bind ViewModel.TotalDownText, Mode=OneWay}" />
                 </StackPanel>
             </Grid>
-            <Grid Grid.Column="2" Style="{StaticResource CardStyle}" Padding="14,12">
-                <StackPanel Spacing="4">
+            <Grid Grid.Column="2" Style="{StaticResource CardStyle}" Padding="16,14">
+                <StackPanel Spacing="6">
                     <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="区间峰值速率" />
                     <TextBlock Style="{StaticResource SubtitleTextBlockStyle}"
+                               TextTrimming="CharacterEllipsis"
                                Text="{x:Bind ViewModel.PeakText, Mode=OneWay}" />
                 </StackPanel>
             </Grid>
-
-            <SelectorBar Grid.Column="3" x:Name="RangeBar" VerticalAlignment="Center"
-                         SelectionChanged="Range_SelectionChanged">
-                <SelectorBarItem Text="6 小时" />
-                <SelectorBarItem Text="24 小时" />
-                <SelectorBarItem Text="7 天" />
-                <SelectorBarItem Text="30 天" />
-            </SelectorBar>
         </Grid>
 
         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
@@ -78,8 +80,33 @@
             <StackPanel Spacing="12" Padding="0,0,0,24" MaxWidth="{StaticResource PageContentMaxWidth}">
                 <Grid Style="{StaticResource CardStyle}" Padding="16,14">
                     <StackPanel Spacing="8">
-                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="速率趋势（按分钟峰值）" />
+                        <Grid>
+                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}"
+                                       VerticalAlignment="Center"
+                                       Text="速率趋势（按分钟峰值）" />
+                            <StackPanel Orientation="Horizontal" Spacing="12"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Rectangle Width="10" Height="10" RadiusX="2" RadiusY="2"
+                                               VerticalAlignment="Center" Fill="#22C55E" />
+                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                               VerticalAlignment="Center"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="下载" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Rectangle Width="10" Height="10" RadiusX="2" RadiusY="2"
+                                               VerticalAlignment="Center" Fill="#F59E0B" />
+                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                               VerticalAlignment="Center"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               Text="上传" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Grid>
                         <controls:SparklineChart Height="140"
+                                                 AxisFormat="rate"
+                                                 Labels="{x:Bind ViewModel.RateLabels, Mode=OneWay}"
                                                  Values="{x:Bind ViewModel.DownPoints, Mode=OneWay}"
                                                  Maximum="{x:Bind ViewModel.MaxRate, Mode=OneWay}">
                             <controls:SparklineChart.Stroke>
@@ -90,6 +117,8 @@
                             </controls:SparklineChart.Fill>
                         </controls:SparklineChart>
                         <controls:SparklineChart Height="90"
+                                                 AxisFormat="rate"
+                                                 Labels="{x:Bind ViewModel.RateLabels, Mode=OneWay}"
                                                  Values="{x:Bind ViewModel.UpPoints, Mode=OneWay}"
                                                  Maximum="{x:Bind ViewModel.MaxRate, Mode=OneWay}">
                             <controls:SparklineChart.Stroke>
@@ -106,6 +135,8 @@
                     <StackPanel Spacing="8">
                         <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="内核内存占用" />
                         <controls:SparklineChart Height="90"
+                                                 AxisFormat="bytes"
+                                                 Labels="{x:Bind ViewModel.MemoryLabels, Mode=OneWay}"
                                                  Values="{x:Bind ViewModel.MemoryPoints, Mode=OneWay}"
                                                  Maximum="{x:Bind ViewModel.MaxMemory, Mode=OneWay}">
                             <controls:SparklineChart.Stroke>

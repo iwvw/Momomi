@@ -57,6 +57,12 @@ public sealed partial class TrafficViewModel : ObservableObject
     public partial IReadOnlyList<double> MemoryPoints { get; set; } = Array.Empty<double>();
 
     [ObservableProperty]
+    public partial IReadOnlyList<string> RateLabels { get; set; } = Array.Empty<string>();
+
+    [ObservableProperty]
+    public partial IReadOnlyList<string> MemoryLabels { get; set; } = Array.Empty<string>();
+
+    [ObservableProperty]
     public partial double MaxRate { get; set; }
 
     [ObservableProperty]
@@ -128,6 +134,7 @@ public sealed partial class TrafficViewModel : ObservableObject
                 UpSeries.Clear();
                 DownSeries.Clear();
                 MemorySeries.Clear();
+                var times = new List<DateTimeOffset>(_allRecords.Count);
 
                 long prevUp = 0, prevDown = 0;
                 var first = true;
@@ -146,12 +153,15 @@ public sealed partial class TrafficViewModel : ObservableObject
                     UpSeries.Add(upDelta);
                     DownSeries.Add(downDelta);
                     MemorySeries.Add(r.Memory);
+                    times.Add(DateTimeOffset.TryParse(r.Bucket, out var ts) ? ts : DateTimeOffset.Now);
                 }
 
                 var seriesPoints = Math.Min(UpSeries.Count, 180);
                 UpPoints = Downsample(UpSeries, seriesPoints);
                 DownPoints = Downsample(DownSeries, seriesPoints);
                 MemoryPoints = Downsample(MemorySeries, seriesPoints);
+                RateLabels = DownsampleLabels(times, seriesPoints);
+                MemoryLabels = RateLabels;
 
                 MaxRate = Math.Max(UpPoints.DefaultIfEmpty(0).Max(), DownPoints.DefaultIfEmpty(0).Max());
                 MaxMemory = MemoryPoints.DefaultIfEmpty(0).Max();
@@ -224,6 +234,32 @@ public sealed partial class TrafficViewModel : ObservableObject
             result.Add(peak);
         }
         return result;
+    }
+
+    private static IReadOnlyList<string> DownsampleLabels(IReadOnlyList<DateTimeOffset> times, int target)
+    {
+        if (times.Count == 0) return Array.Empty<string>();
+
+        var labels = new List<string>(Math.Min(times.Count, target));
+        if (times.Count <= target)
+        {
+            foreach (var t in times) labels.Add(FormatAxisTime(t));
+            return labels;
+        }
+
+        var step = (double)times.Count / target;
+        for (var i = 0; i < target; i++)
+        {
+            var index = Math.Min(times.Count - 1, (int)(i * step));
+            labels.Add(FormatAxisTime(times[index]));
+        }
+        return labels;
+    }
+
+    private static string FormatAxisTime(DateTimeOffset time)
+    {
+        var local = time.LocalDateTime;
+        return local.Date == DateTime.Now.Date ? local.ToString("HH:mm") : local.ToString("MM-dd HH:mm");
     }
 
     [RelayCommand]

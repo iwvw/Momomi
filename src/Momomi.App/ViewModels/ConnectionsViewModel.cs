@@ -385,6 +385,7 @@ public sealed partial class ConnectionsViewModel : ObservableObject
     {
         if (_attached) return;
         _attached = true;
+        _core.AddConnectionsConsumer();
         _core.ConnectionsUpdated += _onConnectionsUpdated;
     }
 
@@ -392,6 +393,7 @@ public sealed partial class ConnectionsViewModel : ObservableObject
     {
         if (!_attached) return;
         _attached = false;
+        _core.RemoveConnectionsConsumer();
         _core.ConnectionsUpdated -= _onConnectionsUpdated;
     }
 

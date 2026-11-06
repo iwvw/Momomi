@@ -159,22 +159,33 @@
                     </Grid.ColumnDefinitions>
 
                     <Button Grid.Column="0" Style="{StaticResource DashboardCardButtonStyle}"
-                            VerticalAlignment="Stretch" VerticalContentAlignment="Center"
+                            VerticalAlignment="Stretch" VerticalContentAlignment="Stretch"
                             ToolTipService.ToolTip="前往流量"
                             Click="GoTraffic_Click">
-                        <StackPanel Spacing="10">
-                            <Grid ColumnSpacing="8">
+                        <Grid RowSpacing="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" VerticalAlignment="Center"
                                            Style="{StaticResource BodyStrongTextBlockStyle}" Text="实时速率" />
-                                <FontIcon Grid.Column="2" FontSize="12" VerticalAlignment="Center"
+                                <FontIcon Grid.Column="2" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0"
+                                          Foreground="{ThemeResource SystemFillColorSuccessBrush}" Glyph="&#xE896;" />
+                                <FontIcon Grid.Column="3" FontSize="12" VerticalAlignment="Center"
                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE76C;" />
                             </Grid>
-                            <controls:SparklineChart Height="96"
+                            <controls:SparklineChart Grid.Row="1"
+                                                     AxisFormat="mb"
+                                                     VerticalAlignment="Stretch"
                                                      Values="{x:Bind ViewModel.DownPoints, Mode=OneWay}"
                                                      Maximum="{x:Bind ViewModel.MaxRate, Mode=OneWay}">
                                 <controls:SparklineChart.Stroke>
@@ -184,7 +195,9 @@
                                     <SolidColorBrush Color="#2022C55E" />
                                 </controls:SparklineChart.Fill>
                             </controls:SparklineChart>
-                            <controls:SparklineChart Height="64"
+                            <controls:SparklineChart Grid.Row="2"
+                                                     AxisFormat="mb"
+                                                     VerticalAlignment="Stretch"
                                                      Values="{x:Bind ViewModel.UpPoints, Mode=OneWay}"
                                                      Maximum="{x:Bind ViewModel.MaxRate, Mode=OneWay}">
                                 <controls:SparklineChart.Stroke>
@@ -194,15 +207,23 @@
                                     <SolidColorBrush Color="#20F59E0B" />
                                 </controls:SparklineChart.Fill>
                             </controls:SparklineChart>
-                            <StackPanel Orientation="Horizontal" Spacing="16">
-                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                           Text="{x:Bind ViewModel.DownRate, Mode=OneWay}" />
-                                <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                                           Text="{x:Bind ViewModel.UpRate, Mode=OneWay}" />
+                            <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="11" VerticalAlignment="Center"
+                                              Foreground="{ThemeResource SystemFillColorSuccessBrush}" Glyph="&#xE896;" />
+                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                               Text="{x:Bind ViewModel.DownRate, Mode=OneWay}" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="11" VerticalAlignment="Center"
+                                              Foreground="{ThemeResource SystemFillColorCautionBrush}" Glyph="&#xE898;" />
+                                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                               Text="{x:Bind ViewModel.UpRate, Mode=OneWay}" />
+                                </StackPanel>
                             </StackPanel>
-                        </StackPanel>
+                        </Grid>
                     </Button>
 
                     <Grid Grid.Column="1" RowSpacing="12">
