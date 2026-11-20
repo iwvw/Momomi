@@ -20,6 +20,7 @@
             <converters:SelectedToBrushConverter x:Key="SelectedToBrush" />
             <converters:SelectedBorderBrushConverter x:Key="SelectedBorderBrush" />
             <converters:SvgImageSourceConverter x:Key="SvgImageSource" />
+            <converters:EmptyToVisibilityConverter x:Key="EmptyToVisibility" />
 
             <!-- 页面内容最大宽度：对齐 Windows 设置的限宽居中范式 -->
             <x:Double x:Key="PageContentMaxWidth">1064</x:Double>
@@ -53,11 +54,11 @@
             </Style>
 
             <Style x:Key="RateUpBrush" TargetType="TextBlock">
-                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCautionBrush}" />
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorAttentionBrush}" />
             </Style>
 
             <Style x:Key="RateDownBrush" TargetType="TextBlock">
-                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorSuccessBrush}" />
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorNeutralBrush}" />
             </Style>
 
             <Style x:Key="TagChipStyle" TargetType="Grid">

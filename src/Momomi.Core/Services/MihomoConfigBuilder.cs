@@ -27,6 +27,15 @@ public static class MihomoConfigBuilder
 {
     public static string BuildRuntimeYaml(string subscriptionYaml, RuntimeYamlOptions options)
     {
+        var root = BuildRuntimeYamlNode(subscriptionYaml, options);
+        var stream = new YamlStream(new YamlDocument(root));
+        using var writer = new StringWriter();
+        stream.Save(writer, assignAnchors: false);
+        return writer.ToString();
+    }
+
+    public static YamlMappingNode BuildRuntimeYamlNode(string subscriptionYaml, RuntimeYamlOptions options)
+    {
         var yaml = new YamlStream();
         using var reader = new StringReader(subscriptionYaml);
         yaml.Load(reader);
@@ -38,8 +47,6 @@ public static class MihomoConfigBuilder
         if (root is null)
         {
             root = new YamlMappingNode();
-            yaml.Documents.Clear();
-            yaml.Documents.Add(new YamlDocument(root));
         }
 
         var keysToStrip = new[]
@@ -115,9 +122,7 @@ public static class MihomoConfigBuilder
             root.Children.Remove(new YamlScalarNode("tun"));
         }
 
-        using var writer = new StringWriter();
-        yaml.Save(writer, assignAnchors: false);
-        return writer.ToString();
+        return root;
     }
 
     /// <summary>
@@ -213,15 +218,18 @@ public static class MihomoConfigBuilder
         };
     }
 
+    private const string FallbackSubscription = """
+        proxies: []
+        proxy-groups: []
+        rules:
+          - MATCH,DIRECT
+        """;
+
     public static string BuildFallbackYaml(RuntimeYamlOptions options)
-    {
-        return BuildRuntimeYaml("""
-            proxies: []
-            proxy-groups: []
-            rules:
-              - MATCH,DIRECT
-            """, options);
-    }
+        => BuildRuntimeYaml(FallbackSubscription, options);
+
+    public static YamlMappingNode BuildFallbackNode(RuntimeYamlOptions options)
+        => BuildRuntimeYamlNode(FallbackSubscription, options);
 
     /// <summary>
     /// 从运行时配置读取 proxy-groups 的声明顺序。
@@ -233,40 +241,73 @@ public static class MihomoConfigBuilder
     /// </summary>
     public static IReadOnlyList<string> ReadProxyGroupOrder(string yamlPath)
     {
+        var root = ReadRootCached(yamlPath);
+        if (root is null) return Array.Empty<string>();
+        if (!root.Children.TryGetValue(new YamlScalarNode("proxy-groups"), out var node)) return Array.Empty<string>();
+        if (node is not YamlSequenceNode groups) return Array.Empty<string>();
+
+        var order = new List<string>();
+        foreach (var item in groups.Children)
+        {
+            if (item is not YamlMappingNode group) continue;
+            if (!group.Children.TryGetValue(new YamlScalarNode("name"), out var nameNode)) continue;
+            if (nameNode is YamlScalarNode nameScalar && nameScalar.Value is { Length: > 0 } name)
+                order.Add(name);
+        }
+        return order;
+    }
+
+    private static readonly object YamlRootCacheGate = new();
+    private static (string Path, DateTime WriteTime, long Length) YamlRootCacheKey = default;
+    private static YamlMappingNode? YamlRootCache;
+
+    /// <summary>
+    /// 读取并解析整份 runtime.yaml 的根映射,按「路径 + 最后写入时间 + 文件长度」缓存。
+    ///
+    /// 原先代理组顺序 / 节点端点 / 传输层各建一份缓存、各自解析一遍同一文件;
+    /// 一次页面重建常连着调用其中 2~3 个,等于把同一份上千行的 YAML 解析多次。
+    /// 这里共用一份解析结果,三个读取方法都从它派生,只解析一次。
+    /// 解析后节点不再改动,多线程只读访问是安全的。
+    /// </summary>
+    private static YamlMappingNode? ReadRootCached(string yamlPath)
+    {
         try
         {
             var info = new FileInfo(yamlPath);
-            if (!info.Exists) return Array.Empty<string>();
+            if (!info.Exists) return null;
 
             var key = (yamlPath, info.LastWriteTimeUtc, info.Length);
-            lock (GroupOrderCacheGate)
+            lock (YamlRootCacheGate)
             {
-                if (GroupOrderCacheKey == key && GroupOrderCache is not null)
-                    return GroupOrderCache;
+                if (YamlRootCacheKey == key && YamlRootCache is not null)
+                    return YamlRootCache;
             }
 
-            var order = ParseProxyGroupOrder(yamlPath);
-
-            lock (GroupOrderCacheGate)
+            YamlMappingNode? root = null;
+            try
             {
-                GroupOrderCacheKey = key;
-                GroupOrderCache = order;
+                var yaml = new YamlStream();
+                using var reader = new StreamReader(yamlPath);
+                yaml.Load(reader);
+                root = yaml.Documents.Count > 0 ? yaml.Documents[0].RootNode as YamlMappingNode : null;
             }
-            return order;
+            catch
+            {
+                root = null;
+            }
+
+            lock (YamlRootCacheGate)
+            {
+                YamlRootCacheKey = key;
+                YamlRootCache = root;
+            }
+            return root;
         }
         catch
         {
-            return Array.Empty<string>();
+            return null;
         }
     }
-
-    private static readonly object GroupOrderCacheGate = new();
-    private static (string Path, DateTime WriteTime, long Length) GroupOrderCacheKey = default;
-    private static IReadOnlyList<string>? GroupOrderCache;
-
-    private static readonly object ProxyEndpointCacheGate = new();
-    private static (string Path, DateTime WriteTime, long Length) ProxyEndpointCacheKey = default;
-    private static IReadOnlyDictionary<string, ProxyEndpoint>? ProxyEndpointCache;
 
     /// <summary>
     /// 从运行时配置读取每个节点可直连的 server/port，供 TCP 延迟探测使用。
@@ -280,66 +321,28 @@ public static class MihomoConfigBuilder
     /// </summary>
     public static IReadOnlyDictionary<string, ProxyEndpoint> ReadProxyEndpoints(string yamlPath)
     {
-        try
-        {
-            var info = new FileInfo(yamlPath);
-            if (!info.Exists) return new Dictionary<string, ProxyEndpoint>();
-
-            var key = (yamlPath, info.LastWriteTimeUtc, info.Length);
-            lock (ProxyEndpointCacheGate)
-            {
-                if (ProxyEndpointCacheKey == key && ProxyEndpointCache is not null)
-                    return ProxyEndpointCache;
-            }
-
-            var endpoints = ParseProxyEndpoints(yamlPath);
-
-            lock (ProxyEndpointCacheGate)
-            {
-                ProxyEndpointCacheKey = key;
-                ProxyEndpointCache = endpoints;
-            }
-            return endpoints;
-        }
-        catch
-        {
-            return new Dictionary<string, ProxyEndpoint>();
-        }
-    }
-
-    private static IReadOnlyDictionary<string, ProxyEndpoint> ParseProxyEndpoints(string yamlPath)
-    {
         var result = new Dictionary<string, ProxyEndpoint>(StringComparer.Ordinal);
-        try
+        var root = ReadRootCached(yamlPath);
+        if (root is null) return result;
+        if (!root.Children.TryGetValue(new YamlScalarNode("proxies"), out var node)) return result;
+        if (node is not YamlSequenceNode proxies) return result;
+
+        foreach (var item in proxies.Children)
         {
-            var yaml = new YamlStream();
-            using var reader = new StreamReader(yamlPath);
-            yaml.Load(reader);
+            if (item is not YamlMappingNode proxy) continue;
 
-            if (yaml.Documents.Count == 0) return result;
-            if (yaml.Documents[0].RootNode is not YamlMappingNode root) return result;
-            if (!root.Children.TryGetValue(new YamlScalarNode("proxies"), out var node)) return result;
-            if (node is not YamlSequenceNode proxies) return result;
+            var name = GetScalar(proxy, "name");
+            var server = GetScalar(proxy, "server");
+            var type = GetScalar(proxy, "type");
+            var portText = GetScalar(proxy, "port");
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(server)) continue;
+            if (!int.TryParse(portText, out var port) || port is <= 0 or > 65535) continue;
 
-            foreach (var item in proxies.Children)
-            {
-                if (item is not YamlMappingNode proxy) continue;
-
-                var name = GetScalar(proxy, "name");
-                var server = GetScalar(proxy, "server");
-                var type = GetScalar(proxy, "type");
-                var portText = GetScalar(proxy, "port");
-                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(server)) continue;
-                if (!int.TryParse(portText, out var port) || port is <= 0 or > 65535) continue;
 
                 // QUIC 类协议（hysteria/hysteria2/tuic）走 UDP，没有可测的 TCP 握手。
                 if (IsQuicOnly(type)) continue;
 
-                result[name] = new ProxyEndpoint(server, port);
-            }
-        }
-        catch
-        {
+            result[name] = new ProxyEndpoint(server, port);
         }
         return result;
     }
@@ -349,10 +352,6 @@ public static class MihomoConfigBuilder
            && (type.Equals("hysteria", StringComparison.OrdinalIgnoreCase)
                || type.Equals("hysteria2", StringComparison.OrdinalIgnoreCase)
                || type.Equals("tuic", StringComparison.OrdinalIgnoreCase));
-
-    private static readonly object ProxyTransportCacheGate = new();
-    private static (string Path, DateTime WriteTime, long Length) ProxyTransportCacheKey = default;
-    private static IReadOnlyDictionary<string, string>? ProxyTransportCache;
 
     /// <summary>
     /// 从运行时配置读取每个节点的传输层（ws / grpc / h2 / http / tcp）。
@@ -364,60 +363,21 @@ public static class MihomoConfigBuilder
     /// </summary>
     public static IReadOnlyDictionary<string, string> ReadProxyTransports(string yamlPath)
     {
-        try
-        {
-            var info = new FileInfo(yamlPath);
-            if (!info.Exists) return new Dictionary<string, string>();
-
-            var key = (yamlPath, info.LastWriteTimeUtc, info.Length);
-            lock (ProxyTransportCacheGate)
-            {
-                if (ProxyTransportCacheKey == key && ProxyTransportCache is not null)
-                    return ProxyTransportCache;
-            }
-
-            var transports = ParseProxyTransports(yamlPath);
-
-            lock (ProxyTransportCacheGate)
-            {
-                ProxyTransportCacheKey = key;
-                ProxyTransportCache = transports;
-            }
-            return transports;
-        }
-        catch
-        {
-            return new Dictionary<string, string>();
-        }
-    }
-
-    private static IReadOnlyDictionary<string, string> ParseProxyTransports(string yamlPath)
-    {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        try
+        var root = ReadRootCached(yamlPath);
+        if (root is null) return result;
+        if (!root.Children.TryGetValue(new YamlScalarNode("proxies"), out var node)) return result;
+        if (node is not YamlSequenceNode proxies) return result;
+
+        foreach (var item in proxies.Children)
         {
-            var yaml = new YamlStream();
-            using var reader = new StreamReader(yamlPath);
-            yaml.Load(reader);
+            if (item is not YamlMappingNode proxy) continue;
 
-            if (yaml.Documents.Count == 0) return result;
-            if (yaml.Documents[0].RootNode is not YamlMappingNode root) return result;
-            if (!root.Children.TryGetValue(new YamlScalarNode("proxies"), out var node)) return result;
-            if (node is not YamlSequenceNode proxies) return result;
+            var name = GetScalar(proxy, "name");
+            if (string.IsNullOrWhiteSpace(name)) continue;
 
-            foreach (var item in proxies.Children)
-            {
-                if (item is not YamlMappingNode proxy) continue;
-
-                var name = GetScalar(proxy, "name");
-                if (string.IsNullOrWhiteSpace(name)) continue;
-
-                var network = GetScalar(proxy, "network");
-                result[name] = string.IsNullOrWhiteSpace(network) ? "tcp" : network;
-            }
-        }
-        catch
-        {
+            var network = GetScalar(proxy, "network");
+            result[name] = string.IsNullOrWhiteSpace(network) ? "tcp" : network;
         }
         return result;
     }
@@ -428,33 +388,4 @@ public static class MihomoConfigBuilder
            && scalar.Value is { Length: > 0 } text
             ? text
             : null;
-
-    private static IReadOnlyList<string> ParseProxyGroupOrder(string yamlPath)
-    {
-        try
-        {
-            var yaml = new YamlStream();
-            using var reader = new StreamReader(yamlPath);
-            yaml.Load(reader);
-
-            if (yaml.Documents.Count == 0) return Array.Empty<string>();
-            if (yaml.Documents[0].RootNode is not YamlMappingNode root) return Array.Empty<string>();
-            if (!root.Children.TryGetValue(new YamlScalarNode("proxy-groups"), out var node)) return Array.Empty<string>();
-            if (node is not YamlSequenceNode groups) return Array.Empty<string>();
-
-            var order = new List<string>();
-            foreach (var item in groups.Children)
-            {
-                if (item is not YamlMappingNode group) continue;
-                if (!group.Children.TryGetValue(new YamlScalarNode("name"), out var nameNode)) continue;
-                if (nameNode is YamlScalarNode scalar && scalar.Value is { Length: > 0 } name)
-                    order.Add(name);
-            }
-            return order;
-        }
-        catch
-        {
-            return Array.Empty<string>();
-        }
-    }
 }

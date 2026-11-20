@@ -70,12 +70,35 @@ public sealed partial class ProxyNameView : UserControl
         set => SetValue(ChainModeProperty, value);
     }
 
+    private RectangleGeometry? _clip;
+
     public ProxyNameView()
     {
         InitializeComponent();
         Loaded += (_, _) => Rebuild();
-        Root.SizeChanged += (_, e) =>
-            Root.Clip = new RectangleGeometry { Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
+        Root.SizeChanged += (_, _) => ApplyClip();
+    }
+
+    private void ApplyClip()
+    {
+        var w = Root.ActualWidth;
+        var h = Root.ActualHeight;
+        if (w <= 0 || h <= 0)
+        {
+            _clip = null;
+            Root.Clip = null;
+            return;
+        }
+
+        if (_clip is null)
+        {
+            _clip = new RectangleGeometry { Rect = new Rect(0, 0, w, h) };
+            Root.Clip = _clip;
+        }
+        else if (_clip.Rect.Width != w || _clip.Rect.Height != h)
+        {
+            _clip.Rect = new Rect(0, 0, w, h);
+        }
     }
 
     private static void OnVisualChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -88,13 +111,15 @@ public sealed partial class ProxyNameView : UserControl
         Root.Children.Clear();
         Root.ColumnDefinitions.Clear();
         Root.RowDefinitions.Clear();
-        Root.Clip = null;
 
         var name = NameText;
-        if (string.IsNullOrEmpty(name)) return;
+        if (!string.IsNullOrEmpty(name))
+        {
+            if (ChainMode) BuildChain(name);
+            else BuildSingle(name);
+        }
 
-        if (ChainMode) BuildChain(name);
-        else BuildSingle(name);
+        ApplyClip();
     }
 
     private void BuildSingle(string name)

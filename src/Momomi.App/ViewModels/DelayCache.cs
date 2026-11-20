@@ -23,6 +23,9 @@ public static class DelayCache
     /// <summary>某个节点有新结果时触发。参数为节点名，订阅方据此刷新对应行。</summary>
     public static event EventHandler<string>? Updated;
 
+    /// <summary>一批节点同时有新结果时触发一次。参数为本批发生变化的节点名集合。</summary>
+    public static event EventHandler<IReadOnlyCollection<string>>? UpdatedBatch;
+
     /// <summary>取节点延迟；从未测过返回 null。</summary>
     public static int? Get(string name)
     {
@@ -70,7 +73,8 @@ public static class DelayCache
             }
         }
 
-        foreach (var name in changed) Updated?.Invoke(null, name);
+        if (changed.Count == 0) return;
+        UpdatedBatch?.Invoke(null, changed);
     }
 
     /// <summary>

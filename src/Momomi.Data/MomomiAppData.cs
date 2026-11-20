@@ -44,6 +44,25 @@ public static class MomomiAppData
         return legacy;
     }
 
+    /// <summary>
+    /// 仅用于单实例判定的目录解析:沿用 <see cref="ResolveDirectory"/> 的落地规则,
+    /// 但不迁移旧数据、不建 legacy 目录,避免在获取互斥体之前触发数据搬迁。
+    /// </summary>
+    public static string ResolveDirectoryForIdentity()
+    {
+        var overridden = Environment.GetEnvironmentVariable(OverrideVariable);
+        if (!string.IsNullOrWhiteSpace(overridden))
+            return Path.GetFullPath(overridden);
+
+        var legacy = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppFolderName);
+
+        if (IsPackaged()) return legacy;
+
+        var portable = Path.Combine(AppContext.BaseDirectory, DataFolderName);
+        return TryPrepareWritable(portable, out _) ?? legacy;
+    }
+
     /// <summary>当前进程是否运行在 MSIX 包身份下（打包形态）。</summary>
     private static bool IsPackaged()
     {

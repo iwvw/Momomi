@@ -330,7 +330,7 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
             try
             {
                 using var doc = JsonDocument.Parse(line);
-                await onItem(doc.RootElement.Clone()).ConfigureAwait(false);
+                await onItem(doc.RootElement).ConfigureAwait(false);
             }
             catch (JsonException)
             {

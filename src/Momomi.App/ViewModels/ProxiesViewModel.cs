@@ -82,8 +82,50 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
             _ => _all.ToList(),
         };
 
-        Nodes.Clear();
-        foreach (var n in sorted) Nodes.Add(n);
+        SyncNodes(sorted);
+    }
+
+    private void SyncNodes(IReadOnlyList<ProxyItemViewModel> target)
+    {
+        if (Nodes.Count == target.Count)
+        {
+            var same = true;
+            for (var i = 0; i < target.Count; i++)
+            {
+                if (ReferenceEquals(Nodes[i], target[i])) continue;
+                same = false;
+                break;
+            }
+            if (same) return;
+        }
+
+        var targetSet = new HashSet<ProxyItemViewModel>(target);
+        for (var i = Nodes.Count - 1; i >= 0; i--)
+        {
+            if (!targetSet.Contains(Nodes[i])) Nodes.RemoveAt(i);
+        }
+
+        var pos = new Dictionary<ProxyItemViewModel, int>(Nodes.Count);
+        for (var i = 0; i < Nodes.Count; i++) pos[Nodes[i]] = i;
+
+        for (var i = 0; i < target.Count; i++)
+        {
+            var node = target[i];
+            if (i < Nodes.Count && ReferenceEquals(Nodes[i], node)) continue;
+
+            if (pos.TryGetValue(node, out var existing))
+            {
+                Nodes.Move(existing, i);
+                var lo = Math.Min(existing, i);
+                var hi = Math.Max(existing, i);
+                for (var k = lo; k <= hi; k++) pos[Nodes[k]] = k;
+            }
+            else
+            {
+                Nodes.Insert(i, node);
+                for (var k = i; k < Nodes.Count; k++) pos[Nodes[k]] = k;
+            }
+        }
     }
 
     partial void OnSortIndexChanged(int value) => ApplySort();
@@ -222,6 +264,8 @@ public sealed partial class ProxiesViewModel : ObservableObject
     private bool _loaded;
     private IReadOnlyDictionary<string, ProxyItem> _proxies =
         new Dictionary<string, ProxyItem>();
+    private Dictionary<string, ProxyGroupViewModel> _groupIndex = new(StringComparer.Ordinal);
+    private Dictionary<string, List<ProxyItemViewModel>> _nodesByName = new(StringComparer.Ordinal);
     private readonly EventHandler<string> _onModeChanged;
     private readonly EventHandler<CoreStateChanged> _onStateChanged;
 
@@ -451,10 +495,10 @@ public sealed partial class ProxiesViewModel : ObservableObject
             if (_suppressSelfReload) return;
             _dispatcher.TryEnqueue(() => _ = LoadAsync(force: true));
         };
-        _onDelayCached = (_, name) => _dispatcher.TryEnqueue(() => ApplyCachedDelay(name));
+        _onDelayCached = (_, names) => _dispatcher.TryEnqueue(() => ApplyCachedDelays(names));
     }
 
-    private readonly EventHandler<string> _onDelayCached;
+    private readonly EventHandler<IReadOnlyCollection<string>> _onDelayCached;
 
     /// <summary>
     /// 把全局缓存里的新值写进本面板对应节点。
@@ -463,18 +507,17 @@ public sealed partial class ProxiesViewModel : ObservableObject
     /// （那会丢掉客户端测出来的值，策略组在快照里恒为 null），
     /// 只按名字更新现有节点实例，然后重算组继承。
     /// </summary>
-    private void ApplyCachedDelay(string name)
+    private void ApplyCachedDelays(IReadOnlyCollection<string> names)
     {
-        var delay = DelayCache.Get(name);
-        if (delay is null) return;
-        var alive = DelayCache.GetAlive(name) ?? delay > 0;
-
         var touched = false;
-        foreach (var group in Groups)
+        foreach (var name in names)
         {
-            foreach (var node in group.AllNodes)
+            var delay = DelayCache.Get(name);
+            if (delay is null) continue;
+            if (!_nodesByName.TryGetValue(name, out var list)) continue;
+            var alive = DelayCache.GetAlive(name) ?? delay > 0;
+            foreach (var node in list)
             {
-                if (!string.Equals(node.Name, name, StringComparison.Ordinal)) continue;
                 node.Delay = delay;
                 node.IsAlive = alive;
                 touched = true;
@@ -516,7 +559,7 @@ public sealed partial class ProxiesViewModel : ObservableObject
         ModeState.Changed += _onModeChanged;
         _core.StateChanged += _onStateChanged;
         AppSignals.ProxiesChanged += _onSignals;
-        DelayCache.Updated += _onDelayCached;
+        DelayCache.UpdatedBatch += _onDelayCached;
 
         // 记住偏好加载的任务，供 LoadAsync 等待。
         //
@@ -599,7 +642,7 @@ public sealed partial class ProxiesViewModel : ObservableObject
         ModeState.Changed -= _onModeChanged;
         _core.StateChanged -= _onStateChanged;
         AppSignals.ProxiesChanged -= _onSignals;
-        DelayCache.Updated -= _onDelayCached;
+        DelayCache.UpdatedBatch -= _onDelayCached;
     }
 
     public void ReportStatus(string text) => _dispatcher.TryEnqueue(() => StatusText = text);
@@ -702,11 +745,33 @@ public sealed partial class ProxiesViewModel : ObservableObject
         HasData = Groups.Count > 0;
         StatusText = $"共 {Groups.Count} 个代理组";
         RaiseAllExpandedChanged();
+        BuildIndexes();
 
         // 重建后立刻补齐组的延迟：BuildNodes 只能给真实节点带上缓存值，
         // 策略组条目（「稳定」组里的「手动」）在 _proxies 里恒为 null，
         // 必须在这里沿 now 链继承一次，否则每次刷新都会变回「—」。
         ApplyGroupDelaysFromMembers();
+    }
+
+    private void BuildIndexes()
+    {
+        var groups = new Dictionary<string, ProxyGroupViewModel>(StringComparer.Ordinal);
+        var nodes = new Dictionary<string, List<ProxyItemViewModel>>(StringComparer.Ordinal);
+        foreach (var group in Groups)
+        {
+            groups[group.Name] = group;
+            foreach (var node in group.AllNodes)
+            {
+                if (!nodes.TryGetValue(node.Name, out var list))
+                {
+                    list = new List<ProxyItemViewModel>();
+                    nodes[node.Name] = list;
+                }
+                list.Add(node);
+            }
+        }
+        _groupIndex = groups;
+        _nodesByName = nodes;
     }
 
     private static List<ProxyItemViewModel> BuildNodes(
@@ -809,16 +874,11 @@ public sealed partial class ProxiesViewModel : ObservableObject
     /// </summary>
     public void SyncNodeDelay(string name, int delay, bool alive)
     {
-        foreach (var group in Groups)
+        if (!_nodesByName.TryGetValue(name, out var list)) return;
+        foreach (var node in list)
         {
-            foreach (var node in group.AllNodes)
-            {
-                if (string.Equals(node.Name, name, StringComparison.Ordinal))
-                {
-                    node.IsAlive = alive;
-                    node.Delay = delay;
-                }
-            }
+            node.IsAlive = alive;
+            node.Delay = delay;
         }
     }
 
@@ -1021,7 +1081,7 @@ public sealed partial class ProxiesViewModel : ObservableObject
             }
 
             // now 指向另一个组：递归求那个组，再继承它的结果。
-            var inner = Groups.FirstOrDefault(g => string.Equals(g.Name, now, StringComparison.Ordinal));
+            var inner = _groupIndex.TryGetValue(now, out var found) ? found : null;
             if (inner is null) return false;
             if (!ResolveGroupDelay(inner, resolved, visiting)) return false;
 
@@ -1037,14 +1097,8 @@ public sealed partial class ProxiesViewModel : ObservableObject
     /// <summary>在界面上按名字找节点实例（同名节点可能出现在多个组，取第一个）。</summary>
     private ProxyItemViewModel? FindNodeByName(string name)
     {
-        foreach (var group in Groups)
-        {
-            foreach (var node in group.AllNodes)
-            {
-                if (string.Equals(node.Name, name, StringComparison.Ordinal)) return node;
-            }
-        }
-        return null;
+        if (!_nodesByName.TryGetValue(name, out var list)) return null;
+        return list.Count > 0 ? list[0] : null;
     }
 
     /// <summary>
@@ -1059,13 +1113,13 @@ public sealed partial class ProxiesViewModel : ObservableObject
     internal void ApplyDelayBatch(
         IReadOnlyDictionary<string, int> results, HashSet<ProxyItemViewModel>? scope = null)
     {
-        foreach (var group in Groups)
+        foreach (var kv in results)
         {
-            foreach (var node in group.AllNodes)
+            if (!_nodesByName.TryGetValue(kv.Key, out var list)) continue;
+            foreach (var node in list)
             {
-                if (!results.TryGetValue(node.Name, out var delay)) continue;
-                node.Delay = delay;
-                node.IsAlive = delay > 0;
+                node.Delay = kv.Value;
+                node.IsAlive = kv.Value > 0;
                 if (scope is null || scope.Contains(node)) node.IsTesting = false;
             }
         }

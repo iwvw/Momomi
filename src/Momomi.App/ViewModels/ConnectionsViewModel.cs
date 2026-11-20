@@ -89,7 +89,10 @@ public sealed partial class ConnectionRowViewModel : ObservableObject
     public partial string DownRate { get; set; }
 
     /// <summary>进程大图标，用于列表左侧显示。</summary>
-    public Microsoft.UI.Xaml.Media.ImageSource? Icon { get; }
+    [ObservableProperty]
+    public partial Microsoft.UI.Xaml.Media.ImageSource? Icon { get; set; }
+
+    partial void OnIconChanged(Microsoft.UI.Xaml.Media.ImageSource? value) => OnPropertyChanged(nameof(HasIcon));
 
     // 排序用的原始数值（非绑定，仅排序时读取）。
     public long UploadBytes { get; private set; }
@@ -259,6 +262,7 @@ public sealed partial class ConnectionsViewModel : ObservableObject
         if (_latest is null)
         {
             Rankings.Clear();
+            _rankingSource = null;
             return;
         }
 
@@ -313,6 +317,9 @@ public sealed partial class ConnectionsViewModel : ObservableObject
             if (at >= 0) Rankings.Move(at, i);
             else Rankings.Insert(i, row);
         }
+
+        _rankingSource = _latest;
+        _rankingDimension = RankingDimension;
     }
 
     private void ClearDrilldown()
@@ -367,8 +374,19 @@ public sealed partial class ConnectionsViewModel : ObservableObject
     }
 
     private ConnectionsSnapshot? _latest;
-    private readonly Dictionary<string, (long Up, long Down, DateTimeOffset At)> _previous = new();
+    private Dictionary<string, (long Up, long Down, DateTimeOffset At)> _previous = new(StringComparer.Ordinal);
+    private Dictionary<string, (long Up, long Down, DateTimeOffset At)> _nextBuffer = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ConnectionRowViewModel> _rowCache = new();
+    private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
+    private readonly List<string> _staleScratch = new();
+    private readonly List<ConnectionRowViewModel> _rows = new();
+    private readonly List<ConnectionRowViewModel> _sortedRows = new();
+    private readonly List<ConnectionRowViewModel> _prevInput = new();
+    private string _lastSortBy = "";
+    private bool _lastSortDescending;
+    private bool _hasSorted;
+    private ConnectionsSnapshot? _rankingSource;
+    private string _rankingDimension = "";
     private DateTimeOffset _lastRender = DateTimeOffset.MinValue;
     private readonly EventHandler<ConnectionsSnapshot> _onConnectionsUpdated;
 
@@ -418,57 +436,53 @@ public sealed partial class ConnectionsViewModel : ObservableObject
     {
         var keyword = Filter?.Trim() ?? "";
         var drilldown = SelectedRanking?.Name;
+        var hasKeyword = keyword.Length > 0;
 
         // 行对象按连接 Id 复用：只对新增行建对象、对消失行回收，其余原地刷新。
         // 避免每秒整表重建导致 ListView 重新实例化容器与滚动跳顶。
-        var next = new Dictionary<string, (long Up, long Down, DateTimeOffset At)>(snapshot.Connections.Count);
-        var rows = new List<ConnectionRowViewModel>(snapshot.Connections.Count);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var next = _nextBuffer;
+        var rows = _rows;
+        var seen = _seen;
+        next.Clear();
+        rows.Clear();
+        seen.Clear();
 
         foreach (var c in snapshot.Connections)
         {
-            var matches = (keyword.Length == 0
-                || (c.Metadata.Host?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
-                || (c.Metadata.Process?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
-                || (c.Metadata.DestinationIP?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false))
-                && (drilldown is null || MatchesRanking(c, drilldown));
-            if (!matches) continue;
+            if (hasKeyword && !MatchesKeyword(c, keyword)) continue;
+            if (drilldown is not null && !MatchesRanking(c, drilldown)) continue;
 
-            if (!_rowCache.TryGetValue(c.Id, out var row))
-            {
-                row = new ConnectionRowViewModel(c);
-                _rowCache[c.Id] = row;
-            }
-            else
-            {
-                row.Update(c, now);
-            }
-
-            if (_previous.TryGetValue(c.Id, out var prev))
-            {
-                var seconds = Math.Max(0.001, (now - prev.At).TotalSeconds);
-                var upRate = (long)Math.Max(0, (c.Upload - prev.Up) / seconds);
-                var downRate = (long)Math.Max(0, (c.Download - prev.Down) / seconds);
-                row.SetRate(upRate, downRate);
-            }
-
-            next[c.Id] = (c.Upload, c.Download, now);
-            seen.Add(c.Id);
-            rows.Add(row);
+            AddRow(c, now, rows, seen, next);
         }
 
         // 回收已消失连接的缓存行，避免无界增长。
         if (_rowCache.Count > seen.Count)
         {
-            var stale = _rowCache.Keys.Where(k => !seen.Contains(k)).ToList();
-            foreach (var k in stale) _rowCache.Remove(k);
+            _staleScratch.Clear();
+            foreach (var k in _rowCache.Keys)
+                if (!seen.Contains(k)) _staleScratch.Add(k);
+            foreach (var k in _staleScratch) _rowCache.Remove(k);
         }
 
-        _previous.Clear();
-        foreach (var kv in next) _previous[kv.Key] = kv.Value;
+        (_previous, _nextBuffer) = (_nextBuffer, _previous);
 
-        rows = SortRows(rows);
-        SyncItems(rows);
+        var sortChanged = SortDescending != _lastSortDescending
+            || !string.Equals(SortBy, _lastSortBy, StringComparison.Ordinal);
+        var valueSort = string.Equals(SortBy, "upload", StringComparison.Ordinal)
+            || string.Equals(SortBy, "download", StringComparison.Ordinal);
+        var membersChanged = !SameSequence(rows, _prevInput);
+
+        if (!_hasSorted || sortChanged || membersChanged || valueSort)
+        {
+            SortRowsInto(rows, _sortedRows);
+            _lastSortBy = SortBy;
+            _lastSortDescending = SortDescending;
+            _hasSorted = true;
+            _prevInput.Clear();
+            _prevInput.AddRange(rows);
+        }
+
+        SyncItems(_sortedRows);
 
         Count = snapshot.Connections.Count;
         FilteredCount = rows.Count;
@@ -479,7 +493,10 @@ public sealed partial class ConnectionsViewModel : ObservableObject
         OnPropertyChanged(nameof(TotalText));
         OnPropertyChanged(nameof(MemoryText));
 
-        if (IsRankingView) RebuildRankings();
+        if (IsRankingView
+            && (!ReferenceEquals(_rankingSource, _latest)
+                || !string.Equals(_rankingDimension, RankingDimension, StringComparison.Ordinal)))
+            RebuildRankings();
     }
 
     /// <summary>按目标顺序对 Items 做最小改动（复用实例），保持滚动位置与容器。</summary>
@@ -548,7 +565,7 @@ public sealed partial class ConnectionsViewModel : ObservableObject
         return string.Equals(actual, key, StringComparison.OrdinalIgnoreCase);
     }
 
-    private List<ConnectionRowViewModel> SortRows(List<ConnectionRowViewModel> rows)
+    private void SortRowsInto(List<ConnectionRowViewModel> rows, List<ConnectionRowViewModel> destination)
     {
         IOrderedEnumerable<ConnectionRowViewModel> ordered = SortBy switch
         {
@@ -568,7 +585,58 @@ public sealed partial class ConnectionsViewModel : ObservableObject
                 ? rows.OrderByDescending(r => r.DurationSeconds)
                 : rows.OrderBy(r => r.DurationSeconds),
         };
-        return ordered.ThenBy(r => r.Host, StringComparer.OrdinalIgnoreCase).ToList();
+        destination.Clear();
+        foreach (var r in ordered.ThenBy(r => r.Host, StringComparer.OrdinalIgnoreCase))
+            destination.Add(r);
+    }
+
+    private static bool MatchesKeyword(ConnectionItem c, string keyword)
+        => (c.Metadata.Host?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
+        || (c.Metadata.Process?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false)
+        || (c.Metadata.DestinationIP?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false);
+
+    private static bool SameSequence(List<ConnectionRowViewModel> a, List<ConnectionRowViewModel> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (var i = 0; i < a.Count; i++)
+            if (!ReferenceEquals(a[i], b[i])) return false;
+        return true;
+    }
+
+    private void AddRow(
+        ConnectionItem c,
+        DateTimeOffset now,
+        List<ConnectionRowViewModel> rows,
+        HashSet<string> seen,
+        Dictionary<string, (long Up, long Down, DateTimeOffset At)> next)
+    {
+        if (!_rowCache.TryGetValue(c.Id, out var row))
+        {
+            row = new ConnectionRowViewModel(c);
+            _rowCache[c.Id] = row;
+            if (row.Icon is null && !string.IsNullOrWhiteSpace(c.Metadata.ProcessPath))
+            {
+                var target = row;
+                ProcessIconProvider.Resolve(c.Metadata.ProcessPath, _dispatcher,
+                    (_, image) => { if (image is not null) target.Icon = image; });
+            }
+        }
+        else
+        {
+            row.Update(c, now);
+        }
+
+        if (_previous.TryGetValue(c.Id, out var prev))
+        {
+            var seconds = Math.Max(0.001, (now - prev.At).TotalSeconds);
+            var upRate = (long)Math.Max(0, (c.Upload - prev.Up) / seconds);
+            var downRate = (long)Math.Max(0, (c.Download - prev.Down) / seconds);
+            row.SetRate(upRate, downRate);
+        }
+
+        next[c.Id] = (c.Upload, c.Download, now);
+        seen.Add(c.Id);
+        rows.Add(row);
     }
 
     partial void OnSortByChanged(string value)

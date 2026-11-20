@@ -65,7 +65,7 @@ public sealed partial class MainWindow : Window
         {
             // 最大化/最小化时不要覆盖已保存的常规尺寸。
             if (AppWindow.Presenter is OverlappedPresenter p
-                && p.State == OverlappedPresenterState.Maximized)
+                && p.State is OverlappedPresenterState.Maximized or OverlappedPresenterState.Minimized)
                 return;
             _sizeSaveTimer?.Stop();
             _sizeSaveTimer?.Start();
@@ -113,6 +113,7 @@ public sealed partial class MainWindow : Window
         HookThemeChange();
 
         AppWindow.Closing += OnAppWindowClosing;
+        AppWindow.Changed += OnAppWindowChanged;
         Closed += OnClosed;
 
         AppHost.Host.Core.StateChanged += (_, _) => Dispatch(UpdateTrayState);
@@ -965,6 +966,30 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private bool _minimizedPaused;
+
+    private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (AppWindow.Presenter is not OverlappedPresenter presenter) return;
+
+        var minimized = presenter.State == OverlappedPresenterState.Minimized;
+        if (minimized == _minimizedPaused) return;
+        _minimizedPaused = minimized;
+
+        if (minimized)
+        {
+            ViewModels.AppSignals.RaiseMainWindowVisibility(false);
+            WorkingSetTrimmer.EndActivity(ActivitySources.MainWindow);
+            ReleasePageContent();
+        }
+        else
+        {
+            WorkingSetTrimmer.BeginActivity(ActivitySources.MainWindow);
+            EnsureInitialPageLoaded();
+            ViewModels.AppSignals.RaiseMainWindowVisibility(true);
+        }
+    }
+
     private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         if (_forceExit) return;
@@ -982,6 +1007,11 @@ public sealed partial class MainWindow : Window
 
     private void OnClosed(object sender, WindowEventArgs args)
     {
+        AppWindow.Changed -= OnAppWindowChanged;
+        AppHost.Host.Core.StateChanged -= OnCoreStateForRestore;
+        AppHost.Host.Core.StateChanged -= OnCoreStateForAutoQuit;
+        AppHost.Host.ProxiesReloaded -= OnProxiesReloadedForRestore;
+        ModeSelector.Dispose();
         Hotkeys.Dispose();
         _tray?.Dispose();
         _tray = null;
@@ -1213,8 +1243,6 @@ public sealed partial class MainWindow : Window
             // 收进托盘后长期不用，却会把私有内存基准一直抬着。
             // 国旗 SVG 缓存不在这里清：迷你面板的 ProxyNameView 与主窗口共用它，
             // 清掉会让下次呼出迷你面板时在动画期间逐个重新解码。
-            ViewModels.ProcessIconProvider.ClearCache();
-
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, blocking: false);
         }
         catch (Exception ex)

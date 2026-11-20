@@ -54,29 +54,62 @@ public interface IProfileService
 public sealed class ProfileService : IProfileService
 {
     private static readonly object ClientGate = new();
-    private static HttpClient? _http;
-    private static bool _httpUsesProxy = true;
+    private static ClientSlot? _slot;
 
-    /// <summary>
-    /// 取订阅用的 HttpClient，并在「是否经代理」开关变化时重建。
-    ///
-    /// 代理对象是在 HttpClientHandler 构造时绑定的，运行期改 DownloadProxy 的开关
-    /// 不会影响已经建好的 handler。不重建的话，用户切换开关后必须重启程序才生效——
-    /// 这类「改了设置没反应」的问题排查成本很高，这里直接换实例。
-    /// 旧实例不 Dispose：可能还有并发请求在用它，交给 GC 回收即可（切换是低频操作）。
-    /// </summary>
-    private static HttpClient Http
+    private static ClientSlot RentClient()
     {
-        get
+        lock (ClientGate)
         {
             var useProxy = DownloadProxy.SubscriptionUseProxy;
-            lock (ClientGate)
+            if (_slot is null || _slot.UsesProxy != useProxy)
             {
-                if (_http is not null && _httpUsesProxy == useProxy) return _http;
+                _slot?.Retire();
+                _slot = new ClientSlot(useProxy);
+            }
+            _slot.Enter();
+            return _slot;
+        }
+    }
 
-                _http = CreateClient(useProxy);
-                _httpUsesProxy = useProxy;
-                return _http;
+    private sealed class ClientSlot
+    {
+        private int _inUse;
+        private int _retired;
+        private int _disposed;
+
+        public ClientSlot(bool usesProxy)
+        {
+            UsesProxy = usesProxy;
+            Client = CreateClient(usesProxy);
+        }
+
+        public bool UsesProxy { get; }
+        public HttpClient Client { get; }
+
+        public void Enter() => Interlocked.Increment(ref _inUse);
+
+        public void Exit()
+        {
+            if (Interlocked.Decrement(ref _inUse) == 0 && Volatile.Read(ref _retired) == 1)
+                DisposeOnce();
+        }
+
+        public void Retire()
+        {
+            Interlocked.Exchange(ref _retired, 1);
+            if (Volatile.Read(ref _inUse) == 0)
+                DisposeOnce();
+        }
+
+        private void DisposeOnce()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            try
+            {
+                Client.Dispose();
+            }
+            catch
+            {
             }
         }
     }
@@ -133,11 +166,19 @@ public sealed class ProfileService : IProfileService
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
         linked.CancelAfter(timeout);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.UserAgent.ParseAdd(ua);
-        using var response = await Http.SendAsync(request, linked.Token).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false);
+        var slot = RentClient();
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.UserAgent.ParseAdd(ua);
+            using var response = await slot.Client.SendAsync(request, linked.Token).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            slot.Exit();
+        }
     }
 
     private static string SafeFileName(string name)
@@ -206,26 +247,34 @@ public sealed class ProfileService : IProfileService
 
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.UserAgent.ParseAdd(ua);
-            using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token).ConfigureAwait(false);
-
-            string? userInfo = null;
-            if (response.Headers.TryGetValues("subscription-userinfo", out var values))
-                userInfo = string.Join("; ", values);
-
-            string? name = null;
-            if (response.Headers.TryGetValues("profile-title", out var titleValues))
+            var slot = RentClient();
+            try
             {
-                var raw = string.Join("", titleValues).Trim();
-                name = DecodeProfileTitle(raw);
-            }
+                using var response = await slot.Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token).ConfigureAwait(false);
 
-            if (string.IsNullOrWhiteSpace(name)
-                && response.Content.Headers.TryGetValues("Content-Disposition", out var cdValues))
+                string? userInfo = null;
+                if (response.Headers.TryGetValues("subscription-userinfo", out var values))
+                    userInfo = string.Join("; ", values);
+
+                string? name = null;
+                if (response.Headers.TryGetValues("profile-title", out var titleValues))
+                {
+                    var raw = string.Join("", titleValues).Trim();
+                    name = DecodeProfileTitle(raw);
+                }
+
+                if (string.IsNullOrWhiteSpace(name)
+                    && response.Content.Headers.TryGetValues("Content-Disposition", out var cdValues))
+                {
+                    name = ParseFileName(string.Join(";", cdValues));
+                }
+
+                return new SubscriptionMeta(name, userInfo);
+            }
+            finally
             {
-                name = ParseFileName(string.Join(";", cdValues));
+                slot.Exit();
             }
-
-            return new SubscriptionMeta(name, userInfo);
         }
         catch
         {

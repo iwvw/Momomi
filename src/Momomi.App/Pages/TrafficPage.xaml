@@ -150,7 +150,9 @@
                 </Grid>
 
                 <Grid Style="{StaticResource CardStyle}" Padding="0,4,0,4">
-                    <ListView ItemsSource="{x:Bind ViewModel.Items}" SelectionMode="None">
+                    <ListView ItemsSource="{x:Bind ViewModel.Items}" SelectionMode="None"
+                              MaxHeight="420"
+                              ItemContainerTransitions="{x:Null}">
                         <ListView.HeaderTemplate>
                             <DataTemplate>
                                 <Grid ColumnSpacing="16" Padding="16,8">
@@ -193,6 +195,19 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
+
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+                        <ProgressRing Width="28" Height="28" HorizontalAlignment="Center"
+                                      IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
+                                      Visibility="{x:Bind ViewModel.IsBusy, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock HorizontalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Text="暂无历史数据"
+                                   Visibility="{x:Bind ViewModel.Items.Count, Mode=OneWay, Converter={StaticResource EmptyToVisibility}}" />
+                    </StackPanel>
                 </Grid>
 
                 <Grid Style="{StaticResource CardStyle}" Padding="16,8">

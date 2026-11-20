@@ -101,9 +101,12 @@ public sealed partial class SparklineChart : UserControl
     private readonly Border _tooltip;
     private readonly TextBlock _tipLabel = new() { FontSize = 11 };
     private readonly TextBlock _tipValue = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+    private readonly Line[] _axisLines;
+    private readonly TextBlock[] _axisTexts;
 
     private IReadOnlyList<double> _current = Array.Empty<double>();
     private double _niceMax = 1;
+    private double _axisMax;
     private double _plotLeft;
     private double _plotRight;
 
@@ -140,6 +143,26 @@ public sealed partial class SparklineChart : UserControl
             IsHitTestVisible = false,
             Child = new StackPanel { Spacing = 1, Children = { _tipLabel, _tipValue } },
         };
+
+        _axisTexts = new TextBlock[AxisSplits + 1];
+        _axisLines = new Line[AxisSplits + 1];
+        for (var i = 0; i <= AxisSplits; i++)
+        {
+            _axisTexts[i] = new TextBlock { FontSize = 11, Opacity = 0.85 };
+            _axisLines[i] = new Line
+            {
+                StrokeThickness = 1,
+                StrokeDashArray = new DoubleCollection { 3, 3 },
+                IsHitTestVisible = false,
+            };
+            _plot.Children.Add(_axisLines[i]);
+            _plot.Children.Add(_axisTexts[i]);
+        }
+        _plot.Children.Add(_area);
+        _plot.Children.Add(_line);
+        _plot.Children.Add(_cursorLine);
+        _plot.Children.Add(_cursorDot);
+        _plot.Children.Add(_tooltip);
 
         _xAxis = new Grid { Margin = new Thickness(0, 4, 0, 0) };
         _xAxis.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -183,13 +206,6 @@ public sealed partial class SparklineChart : UserControl
         var axisBrush = ThemeBrush("TextFillColorTertiaryBrush", Microsoft.UI.Colors.Gray);
         var gridBrush = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x24, 0x80, 0x80, 0x80));
 
-        _plot.Children.Clear();
-        _plot.Children.Add(_area);
-        _plot.Children.Add(_line);
-        _plot.Children.Add(_cursorLine);
-        _plot.Children.Add(_cursorDot);
-        _plot.Children.Add(_tooltip);
-
         _line.Stroke = Stroke;
         if (Fill is not null) _area.Fill = Fill;
         _cursorLine.Stroke = axisBrush;
@@ -204,28 +220,6 @@ public sealed partial class SparklineChart : UserControl
         _xMid.Foreground = axisBrush;
         _xEnd.Foreground = axisBrush;
 
-        if (_current.Count == 0)
-        {
-            _line.Points.Clear();
-            _area.Points.Clear();
-            _area.Visibility = Visibility.Collapsed;
-            _xStart.Text = "";
-            _xMid.Text = "";
-            _xEnd.Text = "";
-            HideCursor();
-            return;
-        }
-
-        var rawMax = Maximum > 0 ? Maximum : _current.Max();
-        _niceMax = NiceCeiling(rawMax);
-        if (_niceMax <= 0) _niceMax = 1;
-
-        var gutter = DrawAxis(w, h, axisBrush, gridBrush);
-        _plotLeft = gutter;
-        _plotRight = w - PadRight;
-        DrawSeries(h);
-        _xAxis.Margin = new Thickness(gutter, 4, PadRight, 0);
-
         var labels = Labels;
         if (labels is { Count: > 0 })
         {
@@ -239,26 +233,46 @@ public sealed partial class SparklineChart : UserControl
             _xMid.Text = "";
             _xEnd.Text = "";
         }
+
+        if (_current.Count == 0)
+        {
+            _line.Points.Clear();
+            _area.Points.Clear();
+            _area.Visibility = Visibility.Collapsed;
+            foreach (var line in _axisLines) line.Visibility = Visibility.Collapsed;
+            foreach (var text in _axisTexts) text.Visibility = Visibility.Collapsed;
+            HideCursor();
+            return;
+        }
+
+        var rawMax = Maximum > 0 ? Maximum : _current.Max();
+        var candidate = NiceCeiling(rawMax);
+        if (candidate <= 0) candidate = 1;
+
+        if (candidate > _axisMax || candidate < _axisMax * 0.5)
+            _axisMax = candidate;
+
+        _niceMax = _axisMax <= 0 ? 1 : _axisMax;
+
+        var gutter = DrawAxis(w, h, axisBrush, gridBrush);
+        _plotLeft = gutter;
+        _plotRight = w - PadRight;
+        DrawSeries(h);
+        _xAxis.Margin = new Thickness(gutter, 4, PadRight, 0);
     }
 
     private double DrawAxis(double w, double h, Brush axisBrush, Brush gridBrush)
     {
         var plotHeight = h - PadTop - PadBottom;
 
-        var texts = new List<TextBlock>(AxisSplits + 1);
         var gutter = 0d;
         for (var i = 0; i <= AxisSplits; i++)
         {
-            var text = new TextBlock
-            {
-                Text = FormatValue(_niceMax * (1 - i / (double)AxisSplits)),
-                FontSize = 11,
-                Foreground = axisBrush,
-                Opacity = 0.85,
-            };
+            var text = _axisTexts[i];
+            text.Text = FormatValue(_niceMax * (1 - i / (double)AxisSplits));
+            text.Foreground = axisBrush;
             text.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             gutter = Math.Max(gutter, text.DesiredSize.Width);
-            texts.Add(text);
         }
         gutter = Math.Ceiling(gutter) + AxisGap;
 
@@ -267,23 +281,18 @@ public sealed partial class SparklineChart : UserControl
             var frac = i / (double)AxisSplits;
             var y = PadTop + plotHeight * frac;
 
-            var grid = new Line
-            {
-                X1 = gutter,
-                X2 = w,
-                Y1 = y,
-                Y2 = y,
-                Stroke = gridBrush,
-                StrokeThickness = 1,
-                StrokeDashArray = new DoubleCollection { 3, 3 },
-                IsHitTestVisible = false,
-            };
-            _plot.Children.Insert(_plot.Children.Count - 5, grid);
+            var grid = _axisLines[i];
+            grid.X1 = gutter;
+            grid.X2 = w;
+            grid.Y1 = y;
+            grid.Y2 = y;
+            grid.Stroke = gridBrush;
+            grid.Visibility = Visibility.Visible;
 
-            var text = texts[i];
+            var text = _axisTexts[i];
             Canvas.SetLeft(text, 0);
             Canvas.SetTop(text, Math.Max(0, Math.Min(h - text.DesiredSize.Height, y - text.DesiredSize.Height / 2)));
-            _plot.Children.Insert(_plot.Children.Count - 5, text);
+            text.Visibility = Visibility.Visible;
         }
 
         return gutter;

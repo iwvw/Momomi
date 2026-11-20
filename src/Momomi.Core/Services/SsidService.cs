@@ -14,6 +14,12 @@ public sealed class SsidService : IDisposable
     private string? _lastSsid;
     private bool _proxyPausedBySsid;
 
+    private static readonly Regex SsidPattern = new(@"SSID\s*:\s*(.+)", RegexOptions.Compiled);
+
+    private static readonly TimeSpan DebounceDelay = TimeSpan.FromMilliseconds(400);
+    private readonly object _debounceGate = new();
+    private CancellationTokenSource? _debounceCts;
+
     public SsidService(MomomiHost host)
     {
         _host = host;
@@ -29,10 +35,44 @@ public sealed class SsidService : IDisposable
     public void Dispose()
     {
         NetworkInformation.NetworkStatusChanged -= OnNetworkStatusChanged;
+        lock (_debounceGate)
+        {
+            _debounceCts?.Cancel();
+            _debounceCts = null;
+        }
     }
 
     private void OnNetworkStatusChanged(object? sender)
-        => _ = CheckAsync();
+    {
+        CancellationTokenSource cts;
+        lock (_debounceGate)
+        {
+            _debounceCts?.Cancel();
+            cts = new CancellationTokenSource();
+            _debounceCts = cts;
+        }
+        _ = DebouncedCheckAsync(cts);
+    }
+
+    private async Task DebouncedCheckAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(DebounceDelay, cts.Token).ConfigureAwait(false);
+            await CheckAsync().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            lock (_debounceGate)
+            {
+                if (ReferenceEquals(_debounceCts, cts)) _debounceCts = null;
+            }
+            cts.Dispose();
+        }
+    }
 
     /// <summary>读取当前 SSID（无 WiFi 或获取失败返回 null）。</summary>
     public static string? GetCurrentSsid()
@@ -54,7 +94,7 @@ public sealed class SsidService : IDisposable
             {
                 var trimmed = line.Trim();
                 if (!trimmed.StartsWith("SSID", StringComparison.OrdinalIgnoreCase)) continue;
-                var match = Regex.Match(trimmed, @"SSID\s*:\s*(.+)");
+                var match = SsidPattern.Match(trimmed);
                 if (!match.Success) continue;
                 var ssid = match.Groups[1].Value.Trim();
                 return string.IsNullOrEmpty(ssid) ? null : ssid;

@@ -70,6 +70,7 @@ public sealed class CoreManager : ICoreManager
 
     private IMihomoApiClient? _api;
     private CancellationTokenSource? _streamCts;
+    private CancellationTokenSource? _connectionsCts;
     private CoreState _state = CoreState.Stopped;
     private string? _version;
     private string? _lastError;
@@ -94,7 +95,11 @@ public sealed class CoreManager : ICoreManager
     /// </summary>
     public bool ConnectionsWanted => Volatile.Read(ref _connectionsWanted) > 0;
 
-    public void AddConnectionsConsumer() => Interlocked.Increment(ref _connectionsWanted);
+    public void AddConnectionsConsumer()
+    {
+        Interlocked.Increment(ref _connectionsWanted);
+        EnsureConnectionsStream();
+    }
 
     public void RemoveConnectionsConsumer()
     {
@@ -102,7 +107,11 @@ public sealed class CoreManager : ICoreManager
         {
             var current = Volatile.Read(ref _connectionsWanted);
             if (current <= 0) return;
-            if (Interlocked.CompareExchange(ref _connectionsWanted, current - 1, current) == current) return;
+            if (Interlocked.CompareExchange(ref _connectionsWanted, current - 1, current) == current)
+            {
+                if (current - 1 <= 0) StopConnectionsStream();
+                return;
+            }
         }
     }
 
@@ -110,7 +119,31 @@ public sealed class CoreManager : ICoreManager
     public event EventHandler<TrafficSnapshot>? TrafficUpdated;
     public event EventHandler<MemorySnapshot>? MemoryUpdated;
     public event EventHandler<ConnectionsSnapshot>? ConnectionsUpdated;
-    public event EventHandler<LogEntry>? LogReceived;
+
+    private readonly object _logGate = new();
+    private EventHandler<LogEntry>? _logReceived;
+    private int _logSubscribers;
+    private CancellationTokenSource? _logCts;
+
+    public event EventHandler<LogEntry>? LogReceived
+    {
+        add
+        {
+            if (value is null) return;
+            lock (_logGate) _logReceived += value;
+            if (Interlocked.Increment(ref _logSubscribers) == 1) EnsureLogStream();
+        }
+        remove
+        {
+            if (value is null) return;
+            lock (_logGate) _logReceived -= value;
+            if (Interlocked.Decrement(ref _logSubscribers) <= 0)
+            {
+                Interlocked.Exchange(ref _logSubscribers, 0);
+                StopLogStream();
+            }
+        }
+    }
 
     public CoreManager(IMihomoProcessManager process, ISettingsService settings, IElevatedClient elevated, ISystemProxyService systemProxy, CorePaths paths)
     {
@@ -350,8 +383,75 @@ public sealed class CoreManager : ICoreManager
             _ = RunStreamAsync(() => api.StartTrafficStreamAsync(s => { TrafficUpdated?.Invoke(this, s); return Task.CompletedTask; }, ct), ct);
             _ = RunStreamAsync(() => api.StartMemoryStreamAsync(s => { MemoryUpdated?.Invoke(this, s); return Task.CompletedTask; }, ct), ct);
             _ = RunStreamAsync(() => PollConnectionsAsync(api, ct), ct);
-            _ = RunStreamAsync(() => api.StartLogStreamAsync(s => { LogReceived?.Invoke(this, s); return Task.CompletedTask; }, ct), ct);
+            if (Volatile.Read(ref _logSubscribers) > 0)
+                StartLogStreamLocked(api);
+            if (ConnectionsWanted)
+                StartConnectionsStreamLocked(api);
         }
+    }
+
+    private void EnsureLogStream()
+    {
+        lock (_streamGate)
+        {
+            if (_logCts is not null) return;
+            var api = _api;
+            if (api is null || _state != CoreState.Running) return;
+            StartLogStreamLocked(api);
+        }
+    }
+
+    private void StopLogStream()
+    {
+        lock (_streamGate) StopLogStreamLocked();
+    }
+
+    private void StartLogStreamLocked(IMihomoApiClient api)
+    {
+        if (_logCts is not null) return;
+        var cts = new CancellationTokenSource();
+        _logCts = cts;
+        var ct = cts.Token;
+        _ = RunStreamAsync(() => api.StartLogStreamAsync(s => { _logReceived?.Invoke(this, s); return Task.CompletedTask; }, ct), ct);
+    }
+
+    private void EnsureConnectionsStream()
+    {
+        lock (_streamGate)
+        {
+            if (_connectionsCts is not null) return;
+            var api = _api;
+            if (api is null || _state != CoreState.Running || !ConnectionsWanted) return;
+            StartConnectionsStreamLocked(api);
+        }
+    }
+
+    private void StopConnectionsStream()
+    {
+        lock (_streamGate) StopConnectionsStreamLocked();
+    }
+
+    private void StartConnectionsStreamLocked(IMihomoApiClient api)
+    {
+        if (_connectionsCts is not null) return;
+        var cts = new CancellationTokenSource();
+        _connectionsCts = cts;
+        var ct = cts.Token;
+        _ = RunStreamAsync(() => api.StartConnectionsStreamAsync(s => { ConnectionsUpdated?.Invoke(this, s); return Task.CompletedTask; }, ct), ct);
+    }
+
+    private void StopConnectionsStreamLocked()
+    {
+        if (_connectionsCts is null) return;
+        try
+        {
+            _connectionsCts.Cancel();
+            _connectionsCts.Dispose();
+        }
+        catch
+        {
+        }
+        _connectionsCts = null;
     }
 
     private async Task PollConnectionsAsync(IMihomoApiClient api, CancellationToken ct)
@@ -362,7 +462,7 @@ public sealed class CoreManager : ICoreManager
             // 每秒拉一次完整连接列表要反序列化几百 KB 的 JSON，分配出来的页会很快
             // 把刚交还的工作集又填满——这正是「隐藏后内存数字过一会儿又涨回去」的主因。
             // 没人看的时候把频率降到 30 秒一次，只够流量记录取样，不再制造分配风暴。
-            if (ConnectionsWanted)
+            if (!ConnectionsWanted)
             {
                 try
                 {
@@ -380,8 +480,7 @@ public sealed class CoreManager : ICoreManager
 
             try
             {
-                var period = ConnectionsWanted ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(30);
-                await Task.Delay(period, ct).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -423,6 +522,8 @@ public sealed class CoreManager : ICoreManager
 
     private void StopStreamsLocked()
     {
+        StopLogStreamLocked();
+        StopConnectionsStreamLocked();
         if (_streamCts is null) return;
         try
         {
@@ -433,6 +534,20 @@ public sealed class CoreManager : ICoreManager
         {
         }
         _streamCts = null;
+    }
+
+    private void StopLogStreamLocked()
+    {
+        if (_logCts is null) return;
+        try
+        {
+            _logCts.Cancel();
+            _logCts.Dispose();
+        }
+        catch
+        {
+        }
+        _logCts = null;
     }
 
     public async Task StopAsync(CancellationToken ct = default)

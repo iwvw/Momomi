@@ -166,14 +166,14 @@ public sealed partial class ProfilesViewModel : ObservableObject
             var overrideNames = overrides.ToDictionary(o => o.Id, o => o.Name);
 
             // 每个订阅各自取挂载列表，用于卡片上展示"覆写 N 项"。
+            var allMounts = await _host.Overrides.GetAllProfileOverridesAsync().ConfigureAwait(false);
             var mounts = new Dictionary<long, IReadOnlyList<string>>();
             foreach (var item in list)
             {
-                var ids = await _host.Overrides.GetProfileOverridesAsync(item.Id);
-                mounts[item.Id] = ids
-                    .Where(overrideNames.ContainsKey)
-                    .Select(id => overrideNames[id])
-                    .ToList();
+                var names = allMounts.TryGetValue(item.Id, out var ids)
+                    ? ids.Where(overrideNames.ContainsKey).Select(id => overrideNames[id]).ToList()
+                    : new List<string>();
+                mounts[item.Id] = names;
             }
 
             _dispatcher.TryEnqueue(() =>

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security;
 using System.Security.Principal;
@@ -243,38 +244,83 @@ public interface ISettingsService
 public sealed class SettingsService : ISettingsService
 {
     private readonly SettingsRepository _repo;
+    private readonly SemaphoreSlim _cacheLock = new(1, 1);
+    private volatile ConcurrentDictionary<string, string>? _cache;
 
     public SettingsService(MomomiDatabase database)
     {
         _repo = new SettingsRepository(database);
     }
 
-    public Task<string?> GetAsync(string key) => _repo.GetAsync(key);
+    private async Task<ConcurrentDictionary<string, string>> EnsureCacheAsync()
+    {
+        var cache = _cache;
+        if (cache is not null) return cache;
 
-    public Task SetAsync(string key, string value) => _repo.SetAsync(key, value);
+        await _cacheLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            cache = _cache;
+            if (cache is null)
+            {
+                var loaded = await _repo.LoadAllAsync().ConfigureAwait(false);
+                cache = new ConcurrentDictionary<string, string>(loaded, StringComparer.Ordinal);
+                _cache = cache;
+            }
+            return cache;
+        }
+        finally
+        {
+            _cacheLock.Release();
+        }
+    }
+
+    private async Task<string?> GetCachedAsync(string key)
+    {
+        var cache = await EnsureCacheAsync().ConfigureAwait(false);
+        return cache.TryGetValue(key, out var value) ? value : null;
+    }
+
+    private async Task SetCachedAsync(string key, string value)
+    {
+        await _cacheLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await _repo.SetAsync(key, value).ConfigureAwait(false);
+            _cache?[key] = value;
+        }
+        finally
+        {
+            _cacheLock.Release();
+        }
+    }
+
+    public Task<string?> GetAsync(string key) => GetCachedAsync(key);
+
+    public Task SetAsync(string key, string value) => SetCachedAsync(key, value);
 
     public async Task<bool> GetBoolAsync(string key, bool fallback = false)
     {
-        var raw = await _repo.GetAsync(key).ConfigureAwait(false);
+        var raw = await GetCachedAsync(key).ConfigureAwait(false);
         return raw is null ? fallback : raw == "true";
     }
 
-    public Task SetBoolAsync(string key, bool value) => _repo.SetAsync(key, value ? "true" : "false");
+    public Task SetBoolAsync(string key, bool value) => SetCachedAsync(key, value ? "true" : "false");
 
     public async Task<int> GetIntAsync(string key, int fallback)
     {
-        var raw = await _repo.GetAsync(key).ConfigureAwait(false);
+        var raw = await GetCachedAsync(key).ConfigureAwait(false);
         return int.TryParse(raw, out var value) ? value : fallback;
     }
 
-    public Task SetIntAsync(string key, int value) => _repo.SetAsync(key, value.ToString());
+    public Task SetIntAsync(string key, int value) => SetCachedAsync(key, value.ToString());
 
     public async Task<T> GetEnumAsync<T>(string key, T fallback) where T : struct, Enum
     {
-        var raw = await _repo.GetAsync(key).ConfigureAwait(false);
+        var raw = await GetCachedAsync(key).ConfigureAwait(false);
         return Enum.TryParse<T>(raw, ignoreCase: true, out var value) ? value : fallback;
     }
 
     public Task SetEnumAsync<T>(string key, T value) where T : struct, Enum
-        => _repo.SetAsync(key, value.ToString());
+        => SetCachedAsync(key, value.ToString());
 }

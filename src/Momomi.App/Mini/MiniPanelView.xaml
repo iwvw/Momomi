@@ -93,6 +93,7 @@
                               Visibility="{x:Bind ViewModel.IsUpdatingSubscription, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                 <Button Style="{StaticResource MiniIconButtonStyle}"
                         Visibility="{x:Bind ViewModel.IsUpdatingSubscription, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
+                        AutomationProperties.Name="更新订阅"
                         ToolTipService.ToolTip="更新订阅"
                         Command="{x:Bind ViewModel.UpdateSubscriptionCommand}">
                     <FontIcon FontSize="12" Glyph="&#xE895;" />
@@ -100,6 +101,7 @@
             </Grid>
             <Button Grid.Column="4" Style="{StaticResource MiniStopButtonStyle}"
                     Visibility="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
+                    AutomationProperties.Name="停止内核"
                     ToolTipService.ToolTip="停止内核"
                     Command="{x:Bind ViewModel.ToggleCoreCommand}">
                 <Button.Resources>
@@ -120,6 +122,7 @@
             </Button>
             <Button Grid.Column="4" Style="{StaticResource MiniIconButtonStyle}"
                     Visibility="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
+                    AutomationProperties.Name="启动内核"
                     ToolTipService.ToolTip="启动内核"
                     Command="{x:Bind ViewModel.ToggleCoreCommand}">
                 <FontIcon FontSize="12" Glyph="&#xE768;" />
@@ -133,6 +136,7 @@
                     Width="28" Height="28" Padding="0"
                     VerticalAlignment="Center"
                     HorizontalContentAlignment="Center"
+                    AutomationProperties.Name="收起"
                     ToolTipService.ToolTip="收起"
                     Click="Collapse_Click">
                 <FontIcon FontSize="12" Glyph="&#xE70D;" />
@@ -233,6 +237,7 @@
             <ListView Padding="0"
                       ItemsSource="{x:Bind ViewModel.Groups}"
                       SelectionMode="None"
+                      ItemContainerTransitions="{x:Null}"
                       ScrollViewer.HorizontalScrollMode="Disabled"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       Visibility="{x:Bind ViewModel.HasGroups, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
@@ -264,6 +269,7 @@
                                               Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                                 <Button Style="{StaticResource MiniIconButtonStyle}"
                                         Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
+                                        AutomationProperties.Name="重新测速"
                                         ToolTipService.ToolTip="重新测速"
                                         Tag="{x:Bind}"
                                         Click="TestGroup_Click">

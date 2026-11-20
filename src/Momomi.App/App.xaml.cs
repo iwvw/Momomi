@@ -36,7 +36,8 @@ public partial class App : Application
         {
             try
             {
-                var dir = (AppContext.BaseDirectory ?? "").TrimEnd('\\', '/').ToLowerInvariant();
+                var dir = (Momomi.Data.MomomiAppData.ResolveDirectoryForIdentity() ?? "")
+                    .TrimEnd('\\', '/').ToLowerInvariant();
                 return dir.Length == 0 ? "root" : dir;
             }
             catch
@@ -541,7 +542,11 @@ public partial class App : Application
                 {
                     var active = await host.Profiles.GetActiveAsync().ConfigureAwait(false);
                     if (active is { Kind: "url" })
-                        await host.Profiles.RefreshAsync(active.Id).ConfigureAwait(false);
+                        _ = Task.Run(async () =>
+                        {
+                            if (await host.Profiles.RefreshAsync(active.Id).ConfigureAwait(false))
+                                await host.ApplyActiveProfileAsync().ConfigureAwait(false);
+                        });
 
                     // 其余订阅后台错峰刷新（每个间隔数秒），避免启动时挤占网络。
                     _ = Task.Run(async () =>

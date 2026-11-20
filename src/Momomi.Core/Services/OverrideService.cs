@@ -45,6 +45,7 @@ public interface IOverrideService
     Task DeleteAsync(long id, CancellationToken ct = default);
 
     Task<IReadOnlyList<long>> GetProfileOverridesAsync(long profileId, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<long, IReadOnlyList<long>>> GetAllProfileOverridesAsync(CancellationToken ct = default);
     Task SetProfileOverridesAsync(long profileId, IReadOnlyList<long> overrideIds, CancellationToken ct = default);
 
     /// <summary>
@@ -316,6 +317,9 @@ public sealed class OverrideService : IOverrideService
 
     public Task<IReadOnlyList<long>> GetProfileOverridesAsync(long profileId, CancellationToken ct = default)
         => _repo.GetProfileOverridesAsync(profileId);
+
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<long>>> GetAllProfileOverridesAsync(CancellationToken ct = default)
+        => _repo.GetAllProfileOverridesAsync();
 
     public Task SetProfileOverridesAsync(long profileId, IReadOnlyList<long> overrideIds, CancellationToken ct = default)
         => _repo.SetProfileOverridesAsync(profileId, overrideIds);

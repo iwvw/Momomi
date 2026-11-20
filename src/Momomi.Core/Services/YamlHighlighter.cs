@@ -43,10 +43,14 @@ public readonly record struct YamlToken(YamlTokenKind Kind, int Start, int Lengt
 /// </summary>
 public static class YamlHighlighter
 {
-    private static readonly HashSet<string> Keywords = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "true", "false", "null", "yes", "no", "on", "off", "~",
-    };
+    private static bool IsKeyword(ReadOnlySpan<char> word)
+        => word.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || word.Equals("false", StringComparison.OrdinalIgnoreCase)
+            || word.Equals("null", StringComparison.OrdinalIgnoreCase)
+            || word.Equals("yes", StringComparison.OrdinalIgnoreCase)
+            || word.Equals("no", StringComparison.OrdinalIgnoreCase)
+            || word.Equals("on", StringComparison.OrdinalIgnoreCase)
+            || word.Equals("off", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>对整段文本做着色。</summary>
     public static IReadOnlyList<YamlToken> Tokenize(string text)
@@ -152,8 +156,7 @@ public static class YamlHighlighter
             {
                 var j = i;
                 while (j < end && (char.IsLetterOrDigit(text[j]) || text[j] == '_' || text[j] == '-')) j++;
-                var word = text.Substring(i, j - i);
-                if (Keywords.Contains(word))
+                if (IsKeyword(text.AsSpan(i, j - i)))
                     tokens.Add(new YamlToken(YamlTokenKind.Keyword, i, j - i));
                 i = j;
                 continue;

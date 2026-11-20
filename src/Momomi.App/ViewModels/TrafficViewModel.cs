@@ -43,9 +43,6 @@ public sealed partial class TrafficViewModel : ObservableObject
     private readonly List<TrafficMinute> _allRecords = new();
 
     public ObservableCollection<TrafficBucketViewModel> Items { get; } = new();
-    public ObservableCollection<double> UpSeries { get; } = new();
-    public ObservableCollection<double> DownSeries { get; } = new();
-    public ObservableCollection<double> MemorySeries { get; } = new();
 
     [ObservableProperty]
     public partial IReadOnlyList<double> UpPoints { get; set; } = Array.Empty<double>();
@@ -125,57 +122,35 @@ public sealed partial class TrafficViewModel : ObservableObject
                 _ => 360,
             };
 
-            _allRecords.Clear();
-            _allRecords.AddRange(await _host.Traffic.QueryAsync(from, limit));
+            var records = (await _host.Traffic.QueryAsync(from, limit)).ToList();
+
+            var computed = await Task.Run(() => Compute(records));
 
             _dispatcher.TryEnqueue(() =>
             {
                 // 图表与汇总基于全量数据（时间正序：旧→新）。
-                UpSeries.Clear();
-                DownSeries.Clear();
-                MemorySeries.Clear();
-                var times = new List<DateTimeOffset>(_allRecords.Count);
+                _allRecords.Clear();
+                _allRecords.AddRange(records);
 
-                long prevUp = 0, prevDown = 0;
-                var first = true;
-                long sumUp = 0, sumDown = 0;
+                UpPoints = computed.UpPoints;
+                DownPoints = computed.DownPoints;
+                MemoryPoints = computed.MemoryPoints;
+                RateLabels = computed.RateLabels;
+                MemoryLabels = computed.RateLabels;
 
-                foreach (var r in _allRecords.AsEnumerable().Reverse())
-                {
-                    var upDelta = first ? 0 : Math.Max(0, r.Up - prevUp);
-                    var downDelta = first ? 0 : Math.Max(0, r.Down - prevDown);
-                    prevUp = r.Up;
-                    prevDown = r.Down;
-                    first = false;
+                MaxRate = computed.MaxRate;
+                MaxMemory = computed.MaxMemory;
 
-                    sumUp += upDelta;
-                    sumDown += downDelta;
-                    UpSeries.Add(upDelta);
-                    DownSeries.Add(downDelta);
-                    MemorySeries.Add(r.Memory);
-                    times.Add(DateTimeOffset.TryParse(r.Bucket, out var ts) ? ts : DateTimeOffset.Now);
-                }
+                TotalUpText = Format.Bytes(computed.SumUp);
+                TotalDownText = Format.Bytes(computed.SumDown);
+                PeakText = $"{Format.Rate((long)computed.MaxRate)}";
 
-                var seriesPoints = Math.Min(UpSeries.Count, 180);
-                UpPoints = Downsample(UpSeries, seriesPoints);
-                DownPoints = Downsample(DownSeries, seriesPoints);
-                MemoryPoints = Downsample(MemorySeries, seriesPoints);
-                RateLabels = DownsampleLabels(times, seriesPoints);
-                MemoryLabels = RateLabels;
-
-                MaxRate = Math.Max(UpPoints.DefaultIfEmpty(0).Max(), DownPoints.DefaultIfEmpty(0).Max());
-                MaxMemory = MemoryPoints.DefaultIfEmpty(0).Max();
-
-                TotalUpText = Format.Bytes(sumUp);
-                TotalDownText = Format.Bytes(sumDown);
-                PeakText = $"{Format.Rate((long)MaxRate)}";
-
-                PageCount = Math.Max(1, (int)Math.Ceiling(_allRecords.Count / (double)PageSize));
+                PageCount = Math.Max(1, (int)Math.Ceiling(records.Count / (double)PageSize));
                 CurrentPage = 1;
 
-                StatusText = _allRecords.Count == 0
+                StatusText = records.Count == 0
                     ? "暂无历史数据（内核运行后每分钟记录一次）"
-                    : $"共 {_allRecords.Count} 条分钟记录";
+                    : $"共 {records.Count} 条分钟记录";
 
                 ApplyPage();
                 _loaded = true;
@@ -205,6 +180,57 @@ public sealed partial class TrafficViewModel : ObservableObject
         OnPropertyChanged(nameof(CanGoNext));
         OnPropertyChanged(nameof(PageText));
     }
+
+    private static TrafficComputation Compute(IReadOnlyList<TrafficMinute> records)
+    {
+        var upSeries = new List<double>(records.Count);
+        var downSeries = new List<double>(records.Count);
+        var memorySeries = new List<double>(records.Count);
+        var times = new List<DateTimeOffset>(records.Count);
+
+        long prevUp = 0, prevDown = 0;
+        var first = true;
+        long sumUp = 0, sumDown = 0;
+
+        for (var i = records.Count - 1; i >= 0; i--)
+        {
+            var r = records[i];
+            var upDelta = first ? 0 : Math.Max(0, r.Up - prevUp);
+            var downDelta = first ? 0 : Math.Max(0, r.Down - prevDown);
+            prevUp = r.Up;
+            prevDown = r.Down;
+            first = false;
+
+            sumUp += upDelta;
+            sumDown += downDelta;
+            upSeries.Add(upDelta);
+            downSeries.Add(downDelta);
+            memorySeries.Add(r.Memory);
+            times.Add(DateTimeOffset.TryParse(r.Bucket, out var ts) ? ts : DateTimeOffset.Now);
+        }
+
+        var seriesPoints = Math.Min(upSeries.Count, 180);
+        var upPoints = Downsample(upSeries, seriesPoints);
+        var downPoints = Downsample(downSeries, seriesPoints);
+        var memoryPoints = Downsample(memorySeries, seriesPoints);
+        var rateLabels = DownsampleLabels(times, seriesPoints);
+
+        var maxRate = Math.Max(upPoints.DefaultIfEmpty(0).Max(), downPoints.DefaultIfEmpty(0).Max());
+        var maxMemory = memoryPoints.DefaultIfEmpty(0).Max();
+
+        return new TrafficComputation(
+            upPoints, downPoints, memoryPoints, rateLabels, maxRate, maxMemory, sumUp, sumDown);
+    }
+
+    private sealed record TrafficComputation(
+        IReadOnlyList<double> UpPoints,
+        IReadOnlyList<double> DownPoints,
+        IReadOnlyList<double> MemoryPoints,
+        IReadOnlyList<string> RateLabels,
+        double MaxRate,
+        double MaxMemory,
+        long SumUp,
+        long SumDown);
 
     [RelayCommand]
     private void NextPage()

@@ -14,6 +14,9 @@ public sealed partial class LogsViewModel : ObservableObject
     private readonly ICoreManager _core;
     private readonly DispatcherQueue _dispatcher;
     private readonly EventHandler<LogEntry> _onLogReceived;
+    private readonly List<LogEntry> _pending = new();
+    private readonly object _pendingGate = new();
+    private bool _flushScheduled;
 
     public ObservableCollection<LogEntry> Items { get; } = new();
 
@@ -51,10 +54,41 @@ public sealed partial class LogsViewModel : ObservableObject
         if (IsPaused) return;
         if (!ShouldShow(entry.Type)) return;
 
+        var schedule = false;
+        lock (_pendingGate)
+        {
+            _pending.Add(entry);
+            if (!_flushScheduled)
+            {
+                _flushScheduled = true;
+                schedule = true;
+            }
+        }
+        if (schedule) _ = FlushLaterAsync();
+    }
+
+    private async Task FlushLaterAsync()
+    {
+        await Task.Delay(150).ConfigureAwait(false);
+        Flush();
+    }
+
+    private void Flush()
+    {
+        List<LogEntry> batch;
+        lock (_pendingGate)
+        {
+            _flushScheduled = false;
+            if (_pending.Count == 0) return;
+            batch = new List<LogEntry>(_pending);
+            _pending.Clear();
+        }
+
         _dispatcher.TryEnqueue(() =>
         {
-            Items.Add(entry);
-            while (Items.Count > MaxLines) Items.RemoveAt(0);
+            foreach (var entry in batch) Items.Add(entry);
+            var overflow = Items.Count - MaxLines;
+            for (var i = 0; i < overflow; i++) Items.RemoveAt(0);
         });
     }
 
@@ -72,7 +106,11 @@ public sealed partial class LogsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void Clear() => Items.Clear();
+    private void Clear()
+    {
+        lock (_pendingGate) _pending.Clear();
+        Items.Clear();
+    }
 
     [RelayCommand]
     private void CopyAll()

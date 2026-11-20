@@ -201,5 +201,9 @@ public sealed partial class ConnectionsPage : Page, IPageLifecycle
         package.SetText(text);
         Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
     }
+
+    private void CloseAllCancel_Click(object sender, RoutedEventArgs e) => CloseAllFlyout.Hide();
+
+    private void CloseAllConfirm_Click(object sender, RoutedEventArgs e) => CloseAllFlyout.Hide();
 }
 

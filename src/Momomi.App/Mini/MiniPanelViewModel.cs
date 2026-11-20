@@ -101,16 +101,36 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
         };
 
         _onDelayCached = (_, name) => _dispatcher.TryEnqueue(() => ApplyCachedDelay(name));
+        _onDelayCachedBatch = (_, names) => _dispatcher.TryEnqueue(() => ApplyCachedDelays(names));
 
         _core.TrafficUpdated += _onTraffic;
         _core.StateChanged += _onState;
         AppSignals.ProxiesChanged += _onProxiesChanged;
         DelayCache.Updated += _onDelayCached;
+        DelayCache.UpdatedBatch += _onDelayCachedBatch;
 
         ApplyCoreState(_core.State);
     }
 
     private readonly EventHandler<string> _onDelayCached;
+    private readonly EventHandler<IReadOnlyCollection<string>> _onDelayCachedBatch;
+
+    private void ApplyCachedDelays(IReadOnlyCollection<string> names)
+    {
+        if (names.Count == 0) return;
+        var wanted = new HashSet<string>(names, StringComparer.Ordinal);
+        foreach (var group in Groups)
+        {
+            foreach (var node in group.Nodes)
+            {
+                if (!wanted.Contains(node.Name)) continue;
+                var delay = DelayCache.Get(node.Name);
+                if (delay is not null) node.Delay = delay;
+            }
+        }
+
+        ApplyGroupDelays();
+    }
 
     /// <summary>
     /// 把全局缓存里的新值写进本面板对应行。
@@ -145,6 +165,7 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
         _core.StateChanged -= _onState;
         AppSignals.ProxiesChanged -= _onProxiesChanged;
         DelayCache.Updated -= _onDelayCached;
+        DelayCache.UpdatedBatch -= _onDelayCachedBatch;
         ModeSelector.Dispose();
     }
 

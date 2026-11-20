@@ -81,6 +81,7 @@
 
             <Button Grid.Column="3" Style="{StaticResource IconButtonStyle}"
                     Click="SortDirection_Click"
+                    AutomationProperties.Name="升序 / 降序"
                     ToolTipService.ToolTip="升序 / 降序">
                 <FontIcon FontSize="12" Glyph="{x:Bind ViewModel.SortGlyph, Mode=OneWay}" />
             </Button>
@@ -106,6 +107,7 @@
 
             <Button Grid.Column="6" Style="{StaticResource IconButtonStyle}"
                     ToolTipService.ToolTip="表格列选择"
+                    AutomationProperties.Name="表格列选择"
                     Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay}"
                     Click="Columns_Click">
                 <FontIcon FontSize="12" Glyph="&#xE8FC;" />
@@ -125,9 +127,24 @@
             </Button>
 
             <Button Grid.Column="7" Style="{StaticResource DangerButtonStyle}"
-                    Command="{x:Bind ViewModel.CloseAllCommand}"
+                    AutomationProperties.Name="关闭全部连接"
                     ToolTipService.ToolTip="关闭全部连接"
-                    Content="全部关闭" />
+                    Content="全部关闭">
+                <Button.Flyout>
+                    <Flyout x:Name="CloseAllFlyout" Placement="BottomEdgeAlignedRight">
+                        <StackPanel Width="280" Spacing="12">
+                            <TextBlock Text="确定关闭全部连接?这将中断所有正在进行的网络连接。" TextWrapping="Wrap" />
+                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                <Button Content="取消" Click="CloseAllCancel_Click" />
+                                <Button Style="{StaticResource AccentButtonStyle}"
+                                        Content="全部关闭"
+                                        Command="{x:Bind ViewModel.CloseAllCommand}"
+                                        Click="CloseAllConfirm_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
         </Grid>
 
         <Grid Grid.Row="2" MaxWidth="{StaticResource PageContentMaxWidth}"
@@ -279,6 +296,7 @@
             <ListView Grid.Row="2"
                       ItemsSource="{x:Bind ViewModel.Items}"
                       SelectionMode="None"
+                      ItemContainerTransitions="{x:Null}"
                       Padding="0,0,0,24"
                       Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">
                 <ListView.ItemContainerStyle>
@@ -315,14 +333,17 @@
                                        Visibility="{Binding Columns[6].IsVisible, ElementName=PageRoot}" />
                             <StackPanel Grid.Column="7" Orientation="Horizontal" Spacing="4">
                                 <Button Style="{StaticResource IconButtonStyle}" Width="28" Height="28"
+                                        AutomationProperties.Name="详情"
                                         ToolTipService.ToolTip="详情" Tag="{x:Bind}" Click="Details_Click">
                                     <FontIcon FontSize="12" Glyph="&#xE8A7;" />
                                 </Button>
                                 <Button Style="{StaticResource IconButtonStyle}" Width="28" Height="28"
+                                        AutomationProperties.Name="复制为规则"
                                         ToolTipService.ToolTip="复制为规则" Tag="{x:Bind}" Click="CopyRule_Click">
                                     <FontIcon FontSize="12" Glyph="&#xE8C8;" />
                                 </Button>
                                 <Button Style="{StaticResource IconButtonStyle}" Width="28" Height="28"
+                                        AutomationProperties.Name="关闭此连接"
                                         ToolTipService.ToolTip="关闭此连接"
                                         Command="{Binding DataContext.CloseConnectionCommand, ElementName=PageRoot}"
                                         CommandParameter="{x:Bind}">
@@ -338,6 +359,7 @@
             <ListView Grid.Row="2"
                       ItemsSource="{x:Bind ViewModel.Items}"
                       SelectionMode="None"
+                      ItemContainerTransitions="{x:Null}"
                       Padding="0,0,0,24"
                       Visibility="{x:Bind ViewModel.IsTableView, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
                 <ListView.ItemContainerStyle>
@@ -363,8 +385,8 @@
                                    Width="36" Height="36"
                                    Margin="0,0,12,0"
                                    VerticalAlignment="Center"
-                                   Source="{x:Bind Icon}"
-                                   Visibility="{x:Bind HasIcon, Mode=OneTime, Converter={StaticResource BoolToVisibility}}" />
+                                   Source="{x:Bind Icon, Mode=OneWay}"
+                                   Visibility="{x:Bind HasIcon, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
 
                             <StackPanel Grid.Column="1" Spacing="6">
                                 <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}"
@@ -430,6 +452,7 @@
                                         VerticalAlignment="Center" Margin="8,0,0,0">
                                 <Button Style="{StaticResource IconButtonStyle}"
                                         Width="28" Height="28"
+                                        AutomationProperties.Name="详情"
                                         ToolTipService.ToolTip="详情"
                                         Tag="{x:Bind}"
                                         Click="Details_Click">
@@ -437,6 +460,7 @@
                                 </Button>
                                 <Button Style="{StaticResource IconButtonStyle}"
                                         Width="28" Height="28"
+                                        AutomationProperties.Name="复制为规则"
                                         ToolTipService.ToolTip="复制为规则"
                                         Tag="{x:Bind}"
                                         Click="CopyRule_Click">
@@ -444,6 +468,7 @@
                                 </Button>
                                 <Button Style="{StaticResource IconButtonStyle}"
                                         Width="28" Height="28"
+                                        AutomationProperties.Name="关闭此连接"
                                         ToolTipService.ToolTip="关闭此连接"
                                         Foreground="{ThemeResource SystemFillColorCriticalBrush}"
                                         Command="{Binding DataContext.CloseConnectionCommand, ElementName=PageRoot}"
@@ -455,6 +480,16 @@
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
+
+            <TextBlock Grid.Row="2"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Text="暂无连接"
+                       Visibility="{x:Bind ViewModel.FilteredCount, Mode=OneWay, Converter={StaticResource EmptyToVisibility}}" />
         </Grid>
     </Grid>
 </Page>

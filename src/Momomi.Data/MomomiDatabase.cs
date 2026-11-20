@@ -40,7 +40,10 @@ public sealed class MomomiDatabase
             wal.CommandText = "PRAGMA journal_mode=WAL;";
             await wal.ExecuteNonQueryAsync().ConfigureAwait(false);
 
+            await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync().ConfigureAwait(false);
+
             await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
             cmd.CommandText = """
                 CREATE TABLE IF NOT EXISTS app_settings (
                     key TEXT PRIMARY KEY,
@@ -99,7 +102,9 @@ public sealed class MomomiDatabase
                     PRIMARY KEY (profile_id, override_id)
                 );
                 """;
-            await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+
+            await tx.CommitAsync().ConfigureAwait(false);
             return 0;
         }).ConfigureAwait(false);
     }
@@ -109,7 +114,7 @@ public sealed class MomomiDatabase
         var conn = new SqliteConnection(_connectionString);
         await conn.OpenAsync().ConfigureAwait(false);
         await using var pragma = conn.CreateCommand();
-        pragma.CommandText = "PRAGMA busy_timeout=5000;";
+        pragma.CommandText = "PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;";
         await pragma.ExecuteNonQueryAsync().ConfigureAwait(false);
         return conn;
     }

@@ -1,3 +1,5 @@
+using Microsoft.Data.Sqlite;
+
 namespace Momomi.Data;
 
 public sealed record SettingsRepository(MomomiDatabase Database)
@@ -11,6 +13,20 @@ public sealed record SettingsRepository(MomomiDatabase Database)
             cmd.Parameters.AddWithValue("$key", key);
             var result = await cmd.ExecuteScalarAsync();
             return result as string;
+        }).ConfigureAwait(false);
+    }
+
+    public async Task<Dictionary<string, string>> LoadAllAsync()
+    {
+        return await Database.ExecuteReadAsync(async conn =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT key, value FROM app_settings;";
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                map[reader.GetString(0)] = reader.GetString(1);
+            return map;
         }).ConfigureAwait(false);
     }
 
@@ -165,10 +181,16 @@ public sealed record ProfileRepository(MomomiDatabase Database)
     {
         await Database.ExecuteWriteAsync(async conn =>
         {
+            await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync().ConfigureAwait(false);
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "DELETE FROM profile WHERE id = $id;";
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                DELETE FROM profile_override WHERE profile_id = $id;
+                DELETE FROM profile WHERE id = $id;
+                """;
             cmd.Parameters.AddWithValue("$id", id);
-            await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
+            await tx.CommitAsync().ConfigureAwait(false);
             return 0;
         }).ConfigureAwait(false);
     }
@@ -313,21 +335,54 @@ public sealed record OverrideRepository(MomomiDatabase Database)
         }).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<long>>> GetAllProfileOverridesAsync()
+    {
+        return await Database.ExecuteReadAsync(async conn =>
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT profile_id, override_id FROM profile_override
+                ORDER BY profile_id ASC, sort_order ASC, override_id ASC;
+                """;
+            var map = new Dictionary<long, List<long>>();
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var pid = reader.GetInt64(0);
+                var oid = reader.GetInt64(1);
+                if (!map.TryGetValue(pid, out var list))
+                {
+                    list = new List<long>();
+                    map[pid] = list;
+                }
+                list.Add(oid);
+            }
+
+            var result = new Dictionary<long, IReadOnlyList<long>>(map.Count);
+            foreach (var kv in map) result[kv.Key] = kv.Value;
+            return (IReadOnlyDictionary<long, IReadOnlyList<long>>)result;
+        }).ConfigureAwait(false);
+    }
+
     /// <summary>整体替换某个订阅的覆写挂载列表（顺序即合并顺序）。</summary>
     public async Task SetProfileOverridesAsync(long profileId, IReadOnlyList<long> overrideIds)
     {
         await Database.ExecuteWriteAsync(async conn =>
         {
+            await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync().ConfigureAwait(false);
+
             await using (var del = conn.CreateCommand())
             {
+                del.Transaction = tx;
                 del.CommandText = "DELETE FROM profile_override WHERE profile_id = $pid;";
                 del.Parameters.AddWithValue("$pid", profileId);
-                await del.ExecuteNonQueryAsync();
+                await del.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
             for (var i = 0; i < overrideIds.Count; i++)
             {
                 await using var ins = conn.CreateCommand();
+                ins.Transaction = tx;
                 ins.CommandText = """
                     INSERT OR REPLACE INTO profile_override (profile_id, override_id, sort_order)
                     VALUES ($pid, $oid, $sort);
@@ -335,8 +390,10 @@ public sealed record OverrideRepository(MomomiDatabase Database)
                 ins.Parameters.AddWithValue("$pid", profileId);
                 ins.Parameters.AddWithValue("$oid", overrideIds[i]);
                 ins.Parameters.AddWithValue("$sort", i);
-                await ins.ExecuteNonQueryAsync();
+                await ins.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
+
+            await tx.CommitAsync().ConfigureAwait(false);
             return 0;
         }).ConfigureAwait(false);
     }

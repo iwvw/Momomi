@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="Momomi.App.Pages.NetworkPage"
+    NavigationCacheMode="Required"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:Momomi.App.Controls"
@@ -48,6 +49,7 @@
                                               IsActive="{x:Bind ViewModel.IsCheckingExit, Mode=OneWay}"
                                               Visibility="{x:Bind ViewModel.IsCheckingExit, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                                 <Button Style="{StaticResource IconButtonStyle}" Width="28" Height="28"
+                                        AutomationProperties.Name="复制 IP"
                                         ToolTipService.ToolTip="复制 IP"
                                         Click="CopyIp_Click"
                                         Visibility="{x:Bind ViewModel.HasExitIp, Mode=OneWay, Converter={StaticResource BoolToVisibility}}">

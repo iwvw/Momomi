@@ -297,7 +297,8 @@
                                                   Visibility="{x:Bind IsBusy, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
                                     <Button Style="{StaticResource IconButtonStyle}"
                                             HorizontalAlignment="Center" VerticalAlignment="Center"
-                                            Command="{x:Bind TestCommand}" ToolTipService.ToolTip="测速"
+                                            Command="{x:Bind TestCommand}" AutomationProperties.Name="测速"
+                                            ToolTipService.ToolTip="测速"
                                             Visibility="{x:Bind IsBusy, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}">
                                         <FontIcon FontSize="14" Glyph="&#xE9D9;" />
                                     </Button>

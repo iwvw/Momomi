@@ -516,9 +516,11 @@ public sealed partial class DashboardViewModel : ObservableObject
         if (_core.Api is null) return;
         try
         {
-            var proxies = await _core.Api.GetProxiesAsync();
+            var proxies = await _core.Api.GetProxiesAsync().ConfigureAwait(false);
 
-            var declared = MihomoConfigBuilder.ReadProxyGroupOrder(_core.Paths.RuntimeConfigPath);
+            var declared = await Task.Run(
+                () => MihomoConfigBuilder.ReadProxyGroupOrder(_core.Paths.RuntimeConfigPath))
+                .ConfigureAwait(false);
             var rank = new Dictionary<string, int>(StringComparer.Ordinal);
             for (var i = 0; i < declared.Count; i++) rank[declared[i]] = i;
 

@@ -38,8 +38,10 @@ public static class YamlOverrideMerger
     /// <param name="overrides">覆写 YAML，按优先级从低到高排列。</param>
     /// <returns>合并后的 YAML 文本；任一覆写解析失败会抛出 <see cref="YamlOverrideException"/>。</returns>
     public static string Apply(string baseYaml, IEnumerable<OverrideDocument> overrides)
+        => Apply(ParseMapping(baseYaml, "基础配置"), overrides);
+
+    public static string Apply(YamlMappingNode root, IEnumerable<OverrideDocument> overrides)
     {
-        var root = ParseMapping(baseYaml, "基础配置");
         foreach (var doc in overrides)
         {
             if (string.IsNullOrWhiteSpace(doc.Content)) continue;

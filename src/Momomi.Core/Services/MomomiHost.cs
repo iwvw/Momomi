@@ -79,7 +79,8 @@ public sealed class MomomiHost : IDisposable
         try
         {
             var bundle = Path.Combine(AppContext.BaseDirectory, "bundled");
-            if (Directory.Exists(bundle)) KernelUpdate.ProvisionFromBundle(bundle);
+            if (Directory.Exists(bundle))
+                await Task.Run(() => KernelUpdate.ProvisionFromBundle(bundle)).ConfigureAwait(false);
         }
         catch
         {
@@ -147,11 +148,14 @@ public sealed class MomomiHost : IDisposable
     public async Task<string> GenerateRuntimeYamlAsync(RuntimeYamlOptions options, CancellationToken ct = default)
     {
         var active = await Profiles.GetActiveAsync(ct).ConfigureAwait(false);
-        var baseYaml = active is null
-            ? MihomoConfigBuilder.BuildFallbackYaml(options)
-            : await Profiles.GenerateRuntimeConfigAsync(active.Id, options, ct).ConfigureAwait(false);
-
         var documents = await Overrides.ResolveActiveDocumentsAsync(active?.Id, ct).ConfigureAwait(false);
+
+        var content = active is null
+            ? null
+            : await Profiles.ReadContentAsync(active.Id, ct).ConfigureAwait(false);
+        var root = string.IsNullOrWhiteSpace(content)
+            ? MihomoConfigBuilder.BuildFallbackNode(options)
+            : MihomoConfigBuilder.BuildRuntimeYamlNode(content!, options);
 
         // 无论有没有覆写，输出都必须走 "Apply" 这条规范化路径。
         //
@@ -161,7 +165,7 @@ public sealed class MomomiHost : IDisposable
         // 结果是内核既不报错也没有任何代理（0.8.1 之前正是靠这条触发过一长串
         // 「配置重载失败 400」）。Apply 即使传入空集合也会剥掉结束标记，
         // 所以统一走它。
-        return YamlOverrideMerger.Apply(baseYaml, documents);
+        return YamlOverrideMerger.Apply(root, documents);
     }
 
     /// <summary>
