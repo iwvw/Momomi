@@ -65,7 +65,16 @@ public sealed partial class RulesViewModel : ObservableObject
         _filterTimer.Tick += (_, _) => Apply();
         _onStateChanged = (_, e) =>
         {
-            if (e.State != CoreState.Running) _all = Array.Empty<RuleItem>();
+            if (e.State != CoreState.Running)
+            {
+                _dispatcher.TryEnqueue(() =>
+                {
+                    _all = Array.Empty<RuleItem>();
+                    Items.Clear();
+                    DisabledIndexes = Array.Empty<int>();
+                    OnPropertyChanged(nameof(HasDisabled));
+                });
+            }
             // 同 Proxies：StateChanged 常在线程池上触发，LoadAsync 会写绑定属性。
             else _dispatcher.TryEnqueue(() => _ = AutoReloadAsync());
         };
@@ -222,8 +231,12 @@ public sealed partial class RulesViewModel : ObservableObject
             // 删除规则后索引会前移，这里先禁用、再全量重拉以刷新索引。
             await _core.Api.DeleteRuleAsync(row.Index).ConfigureAwait(false);
             var remaining = new List<int>(DisabledIndexes) { row.Index };
-            DisabledIndexes = remaining;
-            OnPropertyChanged(nameof(HasDisabled));
+            // 续体在线程池,绑定属性必须在 UI 线程更新。
+            _dispatcher.TryEnqueue(() =>
+            {
+                DisabledIndexes = remaining;
+                OnPropertyChanged(nameof(HasDisabled));
+            });
             await LoadAsync(force: true).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -240,8 +253,11 @@ public sealed partial class RulesViewModel : ObservableObject
         try
         {
             await _core.ReloadConfigAsync(_core.Paths.RuntimeConfigPath).ConfigureAwait(false);
-            DisabledIndexes = Array.Empty<int>();
-            OnPropertyChanged(nameof(HasDisabled));
+            _dispatcher.TryEnqueue(() =>
+            {
+                DisabledIndexes = Array.Empty<int>();
+                OnPropertyChanged(nameof(HasDisabled));
+            });
             await LoadAsync(force: true).ConfigureAwait(false);
         }
         catch (Exception ex)

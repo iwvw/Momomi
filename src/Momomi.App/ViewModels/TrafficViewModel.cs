@@ -99,10 +99,14 @@ public sealed partial class TrafficViewModel : ObservableObject
         _dispatcher = dispatcher;
     }
 
+    private int _loadVersion;
+
     public async Task LoadAsync(bool force = false)
     {
         if (_loaded && !force) return;
 
+        // 并发加载(快速切区间/刷新)时,旧请求的结果可能后到并覆盖新结果,用版本号丢弃过期结果。
+        var version = ++_loadVersion;
         IsBusy = true;
         StatusText = "正在加载…";
         try
@@ -129,6 +133,7 @@ public sealed partial class TrafficViewModel : ObservableObject
             _dispatcher.TryEnqueue(() =>
             {
                 // 图表与汇总基于全量数据（时间正序：旧→新）。
+                if (version != _loadVersion) return;
                 _allRecords.Clear();
                 _allRecords.AddRange(records);
 
@@ -195,16 +200,18 @@ public sealed partial class TrafficViewModel : ObservableObject
         for (var i = records.Count - 1; i >= 0; i--)
         {
             var r = records[i];
-            var upDelta = first ? 0 : Math.Max(0, r.Up - prevUp);
-            var downDelta = first ? 0 : Math.Max(0, r.Down - prevDown);
+            // 历史表存的是累计总量,相邻两分钟的差值是「每分钟字节数」;
+            // 图表与峰值都按 /s 展示,序列换算成每秒,避免读数被放大 60 倍。
+            var upDeltaBytes = first ? 0 : Math.Max(0, r.Up - prevUp);
+            var downDeltaBytes = first ? 0 : Math.Max(0, r.Down - prevDown);
             prevUp = r.Up;
             prevDown = r.Down;
             first = false;
 
-            sumUp += upDelta;
-            sumDown += downDelta;
-            upSeries.Add(upDelta);
-            downSeries.Add(downDelta);
+            sumUp += upDeltaBytes;
+            sumDown += downDeltaBytes;
+            upSeries.Add(upDeltaBytes / 60.0);
+            downSeries.Add(downDeltaBytes / 60.0);
             memorySeries.Add(r.Memory);
             times.Add(DateTimeOffset.TryParse(r.Bucket, out var ts) ? ts : DateTimeOffset.Now);
         }

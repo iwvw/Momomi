@@ -4,6 +4,9 @@ namespace Momomi.Data;
 
 public sealed class MomomiDatabase
 {
+    // 数据库结构版本,写入 PRAGMA user_version,供版本化迁移判断。
+    private const int SchemaVersion = 2;
+
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly string _connectionString;
 
@@ -33,12 +36,16 @@ public sealed class MomomiDatabase
 
     public async Task InitializeAsync()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
+        var directory = Path.GetDirectoryName(DatabasePath);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
         await ExecuteWriteAsync(async conn =>
         {
             await using var wal = conn.CreateCommand();
             wal.CommandText = "PRAGMA journal_mode=WAL;";
             await wal.ExecuteNonQueryAsync().ConfigureAwait(false);
+
+            var currentVersion = await ReadUserVersionAsync(conn).ConfigureAwait(false);
 
             await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync().ConfigureAwait(false);
 
@@ -104,9 +111,38 @@ public sealed class MomomiDatabase
                 """;
             await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
 
+            // 版本化迁移:老库可能已存有同一分钟的多行流量,先合并重复行再建立唯一索引,
+            // 之后由 UPSERT 保证写入幂等。后续新增列等结构性改动在此按版本号追加。
+            if (currentVersion < 2)
+            {
+                await using var migrate = conn.CreateCommand();
+                migrate.Transaction = tx;
+                migrate.CommandText = """
+                    DELETE FROM traffic_minute
+                    WHERE id NOT IN (SELECT MAX(id) FROM traffic_minute GROUP BY bucket);
+                    CREATE UNIQUE INDEX IF NOT EXISTS ux_traffic_bucket ON traffic_minute(bucket);
+                    """;
+                await migrate.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
+            await using (var version = conn.CreateCommand())
+            {
+                version.Transaction = tx;
+                version.CommandText = $"PRAGMA user_version = {SchemaVersion};";
+                await version.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
             await tx.CommitAsync().ConfigureAwait(false);
             return 0;
         }).ConfigureAwait(false);
+    }
+
+    private static async Task<int> ReadUserVersionAsync(SqliteConnection conn)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA user_version;";
+        var value = await cmd.ExecuteScalarAsync().ConfigureAwait(false);
+        return value is null ? 0 : Convert.ToInt32(value);
     }
 
     public async Task<SqliteConnection> OpenAsync()

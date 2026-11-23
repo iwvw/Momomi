@@ -296,7 +296,7 @@ public sealed partial class ConnectionsViewModel : ObservableObject
         var target = new List<RankingRowViewModel>(ordered.Count);
         foreach (var (key, acc) in ordered)
         {
-            var selected = ReferenceEquals(SelectedRanking?.Name, key);
+            var selected = string.Equals(SelectedRanking?.Name, key, StringComparison.OrdinalIgnoreCase);
             if (existing.TryGetValue(key, out var row))
                 row.Update(Format.Bytes(acc.Up), Format.Bytes(acc.Down), acc.Count, selected);
             else

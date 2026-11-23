@@ -36,6 +36,10 @@ public static class ProcessIconProvider
     private static readonly ConcurrentDictionary<string, byte> Pending = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, List<Action<string, ImageSource?>>> Waiters =
         new(StringComparer.OrdinalIgnoreCase);
+    // 等待者登记与完成回调共用这把锁,消除"完成回调摘除列表后才登记"的竞态。
+    private static readonly object Sync = new();
+    // 已解析但无图标的路径:记录终态,避免每个引用它的新行都重复提取一次。
+    private static readonly ConcurrentDictionary<string, byte> Failed = new(StringComparer.OrdinalIgnoreCase);
 
     private const int MaxEntries = 256;
     private static readonly long IdleTimeoutTicks = TimeSpan.FromMinutes(10).Ticks;
@@ -47,6 +51,7 @@ public static class ProcessIconProvider
         Cache.Clear();
         Pending.Clear();
         Waiters.Clear();
+        Failed.Clear();
     }
 
     /// <summary>只返回已缓存好的图标;未就绪时返回 null,由 <see cref="Resolve"/> 异步补上。</summary>
@@ -81,10 +86,20 @@ public static class ProcessIconProvider
             return;
         }
 
-        var waiters = Waiters.GetOrAdd(processPath, static _ => new List<Action<string, ImageSource?>>());
-        lock (waiters) waiters.Add(onReady);
+        if (Failed.ContainsKey(processPath))
+        {
+            onReady(processPath, null);
+            return;
+        }
 
-        if (!Pending.TryAdd(processPath, 0)) return;
+        bool start;
+        lock (Sync)
+        {
+            var waiters = Waiters.GetOrAdd(processPath, static _ => new List<Action<string, ImageSource?>>());
+            waiters.Add(onReady);
+            start = Pending.TryAdd(processPath, 0);
+        }
+        if (!start) return;
 
         _ = Task.Run(() =>
         {
@@ -112,13 +127,16 @@ public static class ProcessIconProvider
                 }
 
                 if (image is not null) entry.Icon = image;
+                else Failed[processPath] = 0;
 
-                if (!Waiters.TryRemove(processPath, out var list)) return;
                 List<Action<string, ImageSource?>> copy;
-                lock (list)
+                lock (Sync)
                 {
-                    copy = new List<Action<string, ImageSource?>>(list);
-                    list.Clear();
+                    // 用同一把锁摘除等待者列表:否则可能在登记前后摘除,导致等待者永久收不到通知。
+                    Waiters.TryRemove(processPath, out var list);
+                    copy = list is null
+                        ? new List<Action<string, ImageSource?>>()
+                        : new List<Action<string, ImageSource?>>(list);
                 }
 
                 foreach (var callback in copy)

@@ -89,6 +89,8 @@ internal sealed class TrayIconService : IDisposable
         _ => PopupMenuThemeMode.System,
     };
 
+    private readonly List<Action> _menuUnsubscribers = new();
+
     private TaskbarIcon CreateIcon()
     {
         var icon = (TaskbarIcon)Application.Current.Resources["MomomiTrayIcon"];
@@ -130,17 +132,17 @@ internal sealed class TrayIconService : IDisposable
             _tunItem = FindItem<ToggleMenuFlyoutItem>(menu, "TrayTunItem");
             _exitItem = FindItem<MenuFlyoutItem>(menu, "TrayExitItem");
 
-            if (_openItem is not null) _openItem.Click += (_, _) => OpenRequested?.Invoke();
-            if (_miniItem is not null) _miniItem.Click += (_, _) => ToggleMiniRequested?.Invoke();
-            if (_startCoreItem is not null) _startCoreItem.Click += (_, _) => StartCoreRequested?.Invoke();
-            if (_stopCoreItem is not null) _stopCoreItem.Click += (_, _) => StopCoreRequested?.Invoke();
-            if (_restartCoreItem is not null) _restartCoreItem.Click += (_, _) => RestartCoreRequested?.Invoke();
-            if (_modeRuleItem is not null) _modeRuleItem.Click += (_, _) => ModeRequested?.Invoke(0);
-            if (_modeGlobalItem is not null) _modeGlobalItem.Click += (_, _) => ModeRequested?.Invoke(1);
-            if (_modeDirectItem is not null) _modeDirectItem.Click += (_, _) => ModeRequested?.Invoke(2);
-            if (_systemProxyItem is not null) _systemProxyItem.Click += (_, _) => ToggleSystemProxyRequested?.Invoke();
-            if (_tunItem is not null) _tunItem.Click += (_, _) => ToggleTunRequested?.Invoke();
-            if (_exitItem is not null) _exitItem.Click += (_, _) => ExitRequested?.Invoke();
+            AddMenuClick(_openItem, () => OpenRequested?.Invoke());
+            AddMenuClick(_miniItem, () => ToggleMiniRequested?.Invoke());
+            AddMenuClick(_startCoreItem, () => StartCoreRequested?.Invoke());
+            AddMenuClick(_stopCoreItem, () => StopCoreRequested?.Invoke());
+            AddMenuClick(_restartCoreItem, () => RestartCoreRequested?.Invoke());
+            AddMenuClick(_modeRuleItem, () => ModeRequested?.Invoke(0));
+            AddMenuClick(_modeGlobalItem, () => ModeRequested?.Invoke(1));
+            AddMenuClick(_modeDirectItem, () => ModeRequested?.Invoke(2));
+            AddMenuClick(_systemProxyItem, () => ToggleSystemProxyRequested?.Invoke());
+            AddMenuClick(_tunItem, () => ToggleTunRequested?.Invoke());
+            AddMenuClick(_exitItem, () => ExitRequested?.Invoke());
         }
 
         icon.ForceCreate(enablesEfficiencyMode: false);
@@ -378,10 +380,27 @@ internal sealed class TrayIconService : IDisposable
         }
     }
 
+    /// <summary>
+    /// 订阅一个菜单项的 Click 并登记退订动作。菜单项取自进程级共享资源,寿命长于本服务,
+    /// 不退订会让共享资源长期持有本服务实例,且重建图标时会重复挂接触发多次。
+    /// </summary>
+    private void AddMenuClick(Microsoft.UI.Xaml.Controls.MenuFlyoutItemBase? item, Action action)
+    {
+        if (item is null) return;
+        Microsoft.UI.Xaml.RoutedEventHandler handler = (_, _) => action();
+        if (item is Microsoft.UI.Xaml.Controls.MenuFlyoutItem m)
+        {
+            m.Click += handler;
+            _menuUnsubscribers.Add(() => m.Click -= handler);
+        }
+    }
+
     public void Dispose()
     {
         _taskbarWatchdog?.Dispose();
         _taskbarWatchdog = null;
+        foreach (var unsubscribe in _menuUnsubscribers) unsubscribe();
+        _menuUnsubscribers.Clear();
         if (_icon is null) return;
         _icon.Visibility = Visibility.Collapsed;
         _icon.Dispose();

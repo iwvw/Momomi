@@ -116,11 +116,11 @@ public sealed partial class MainWindow : Window
         AppWindow.Changed += OnAppWindowChanged;
         Closed += OnClosed;
 
-        AppHost.Host.Core.StateChanged += (_, _) => Dispatch(UpdateTrayState);
+        AppHost.Host.Core.StateChanged += OnCoreStateForTray;
         AppHost.Host.Core.StateChanged += OnCoreStateForRestore;
         AppHost.Host.Core.StateChanged += OnCoreStateForAutoQuit;
         AppHost.Host.ProxiesReloaded += OnProxiesReloadedForRestore;
-        ViewModels.AppSignals.SwitchesChanged += (_, _) => Dispatch(UpdateTrayState);
+        ViewModels.AppSignals.SwitchesChanged += OnSwitchesChangedForTray;
 
         _ = Hotkeys.LoadAsync();
         _ = WarmupMiniWindowAsync();
@@ -129,10 +129,16 @@ public sealed partial class MainWindow : Window
     // ---- 顶栏「可更新」胶囊 ----
 
     /// <summary>订阅更新状态广播，并按需显示顶栏胶囊。</summary>
+    private void OnCoreStateForTray(object? sender, Momomi.Core.Services.CoreStateChanged e) => Dispatch(UpdateTrayState);
+
+    private void OnSwitchesChangedForTray(object? sender, EventArgs e) => Dispatch(UpdateTrayState);
+
+    private void OnAppUpdateAvailableChanged(object? sender, Momomi.App.ViewModels.AppUpdateNotice? notice)
+        => DispatcherQueue.TryEnqueue(() => ApplyUpdateNotice(notice));
+
     private void HookUpdatePill()
     {
-        ViewModels.AppSignals.AppUpdateAvailableChanged += (_, notice) =>
-            DispatcherQueue.TryEnqueue(() => ApplyUpdateNotice(notice));
+        ViewModels.AppSignals.AppUpdateAvailableChanged += OnAppUpdateAvailableChanged;
 
         // 首次打开窗口时补一次当前状态（检查可能早于本窗口创建完成）。
         ApplyUpdateNotice(ViewModels.AppSignals.AppUpdateAvailable);
@@ -846,6 +852,7 @@ public sealed partial class MainWindow : Window
         }
         catch
         {
+            _tray?.Dispose();
             _tray = null;
         }
     }
@@ -1008,9 +1015,21 @@ public sealed partial class MainWindow : Window
     private void OnClosed(object sender, WindowEventArgs args)
     {
         AppWindow.Changed -= OnAppWindowChanged;
-        AppHost.Host.Core.StateChanged -= OnCoreStateForRestore;
-        AppHost.Host.Core.StateChanged -= OnCoreStateForAutoQuit;
-        AppHost.Host.ProxiesReloaded -= OnProxiesReloadedForRestore;
+        AppWindow.Closing -= OnAppWindowClosing;
+        Closed -= OnClosed;
+        _sizeSaveTimer?.Stop();
+        // 退出路径会先 AppHost.Shutdown() 再 Close(),此时 AppHost.Host 会抛异常,
+        // 必须判断可用性,否则退订与资源释放全部被跳过。
+        if (AppHost.IsReady)
+        {
+            var core = AppHost.Host.Core;
+            core.StateChanged -= OnCoreStateForTray;
+            core.StateChanged -= OnCoreStateForRestore;
+            core.StateChanged -= OnCoreStateForAutoQuit;
+            AppHost.Host.ProxiesReloaded -= OnProxiesReloadedForRestore;
+        }
+        ViewModels.AppSignals.SwitchesChanged -= OnSwitchesChangedForTray;
+        ViewModels.AppSignals.AppUpdateAvailableChanged -= OnAppUpdateAvailableChanged;
         ModeSelector.Dispose();
         Hotkeys.Dispose();
         _tray?.Dispose();
@@ -1205,6 +1224,13 @@ public sealed partial class MainWindow : Window
         // 否则空闲看门狗可能在用户刚点开的瞬间清工作集，造成首帧卡顿。
         WorkingSetTrimmer.BeginActivity(ActivitySources.MainWindow);
 
+        // 从系统最小化恢复时要显式 Restore,否则 Show() 可能仍停在最小化态。
+        if (AppWindow.Presenter is OverlappedPresenter presenter
+            && presenter.State == OverlappedPresenterState.Minimized)
+        {
+            presenter.Restore();
+        }
+
         AppWindow.Show();
         ViewModels.AppSignals.RaiseMainWindowVisibility(true);
         SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
@@ -1272,6 +1298,7 @@ public sealed partial class MainWindow : Window
         {
         }
 
+        global::Momomi.App.App.DisposeServices();
         AppHost.Shutdown();
         Close();
     }
@@ -1321,6 +1348,7 @@ public sealed partial class MainWindow : Window
         {
         }
 
+        global::Momomi.App.App.DisposeServices();
         AppHost.Shutdown();
         Close();
     }

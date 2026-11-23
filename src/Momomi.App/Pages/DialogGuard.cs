@@ -19,9 +19,9 @@ internal static class DialogGuard
     private static bool _open;
 
     /// <summary>显示对话框；已有对话框打开时立即返回 <see cref="ContentDialogResult.None"/>。</summary>
-    public static async Task<ContentDialogResult> ShowAsync(ContentDialog dialog)
+    public static async Task<ContentDialogResult?> ShowAsync(ContentDialog dialog)
     {
-        if (_open) return ContentDialogResult.None;
+        if (_open) return null;
 
         _open = true;
         try

@@ -582,8 +582,16 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     partial void OnAutoQuitWithoutCoreDelayChanged(int value)
     {
-        if (_loading) return;
-        if (value < 0) return;
+        if (_loading || _reverting) return;
+        if (value < 0)
+        {
+            // 非法值:回退到已保存值并提示,避免「界面已改、值未存、无反馈」。
+            StatusText = "该值不能为负数";
+            var saved = _host.Settings.GetIntAsync("ui.autoQuitWithoutCoreDelay", 30).GetAwaiter().GetResult();
+            _reverting = true;
+            try { AutoQuitWithoutCoreDelay = saved; } finally { _reverting = false; }
+            return;
+        }
         _ = _host.Settings.SetIntAsync("ui.autoQuitWithoutCoreDelay", value);
     }
 
@@ -750,14 +758,21 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     partial void OnMixedPortChanged(string value)
     {
-        if (_loading) return;
-        if (int.TryParse(value, out var mp) && mp is > 0 and < 65536)
+        if (_loading || _reverting) return;
+        if (!int.TryParse(value, out var mp) || mp is <= 0 or >= 65536)
+        {
+            StatusText = "端口必须是 1-65535 之间的整数";
+            RevertPort(nameof(MixedPort), "core.mixedPort", 7890);
+            return;
+        }
+        if (mp is > 0 and < 65536)
         {
             // 与控制器端口相同时，内核会先占用它给 RESTful API，
             // 混合端口绑定失败 → 系统代理指向一个不代理的端口，表现为完全断网。
             if (int.TryParse(ControllerPort, out var cp) && cp == mp)
             {
                 StatusText = "混合端口不能与控制器端口相同";
+                RevertPort(nameof(MixedPort), "core.mixedPort", 7890);
                 return;
             }
             _ = _host.Settings.SetIntAsync("core.mixedPort", mp);
@@ -767,16 +782,43 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     partial void OnControllerPortChanged(string value)
     {
-        if (_loading) return;
-        if (int.TryParse(value, out var cp) && cp is > 0 and < 65536)
+        if (_loading || _reverting) return;
+        if (!int.TryParse(value, out var cp) || cp is <= 0 or >= 65536)
+        {
+            StatusText = "端口必须是 1-65535 之间的整数";
+            RevertPort(nameof(ControllerPort), "core.controllerPort", 9090);
+            return;
+        }
+        if (cp is > 0 and < 65536)
         {
             if (int.TryParse(MixedPort, out var mp) && mp == cp)
             {
                 StatusText = "控制器端口不能与混合端口相同";
+                RevertPort(nameof(ControllerPort), "core.controllerPort", 9090);
                 return;
             }
             _ = _host.Settings.SetIntAsync("core.controllerPort", cp);
             StatusText = "端口已保存，重启内核后生效";
+        }
+    }
+
+    private bool _reverting;
+
+    private void RevertPort(string propertyName, string settingKey, int fallback)
+    {
+        var saved = _host.Settings.GetIntAsync(settingKey, fallback).GetAwaiter().GetResult();
+        _reverting = true;
+        try
+        {
+            switch (propertyName)
+            {
+                case nameof(MixedPort): MixedPort = saved.ToString(); break;
+                case nameof(ControllerPort): ControllerPort = saved.ToString(); break;
+            }
+        }
+        finally
+        {
+            _reverting = false;
         }
     }
 
@@ -992,16 +1034,18 @@ public sealed partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task UpdateKernelAsync()
     {
+        if (IsKernelBusy) return;
         IsKernelBusy = true;
         KernelProgressVisible = true;
         KernelProgress = 0;
         KernelStatusText = "正在下载内核…";
 
-        var wasRunning = _host.Core.State == CoreState.Running;
-        if (wasRunning) await _host.Core.StopAsync();
-
+        var wasRunning = false;
         try
         {
+            wasRunning = _host.Core.State == CoreState.Running;
+            if (wasRunning) await _host.Core.StopAsync();
+
             var target = LatestKernelVersion;
             if (string.IsNullOrEmpty(target) || target == "—")
             {
@@ -1049,7 +1093,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             KernelProgressVisible = false;
             IsKernelBusy = false;
-            if (wasRunning) await _host.Core.StartAsync();
+            if (wasRunning)
+            {
+                try { await _host.Core.StartAsync(); } catch { }
+            }
         }
     }
 
@@ -1063,9 +1110,8 @@ public sealed partial class SettingsViewModel : ObservableObject
             KernelVersions.Clear();
             foreach (var v in versions) KernelVersions.Add(v);
             if (KernelVersions.Count > 0)
-                SelectedKernelVersion = string.Equals(KernelVersions[0], LatestKernelVersion, StringComparison.OrdinalIgnoreCase)
-                    ? KernelVersions[0]
-                    : KernelVersions[0];
+                SelectedKernelVersion = KernelVersions.FirstOrDefault(v =>
+                    string.Equals(v, LatestKernelVersion, StringComparison.OrdinalIgnoreCase)) ?? KernelVersions[0];
         }
         catch
         {
@@ -1078,16 +1124,18 @@ public sealed partial class SettingsViewModel : ObservableObject
         var target = SelectedKernelVersion;
         if (string.IsNullOrEmpty(target)) return;
 
+        if (IsKernelBusy) return;
         IsKernelBusy = true;
         KernelProgressVisible = true;
         KernelProgress = 0;
         KernelStatusText = $"正在下载内核 {target}…";
 
-        var wasRunning = _host.Core.State == CoreState.Running;
-        if (wasRunning) await _host.Core.StopAsync();
-
+        var wasRunning = false;
         try
         {
+            wasRunning = _host.Core.State == CoreState.Running;
+            if (wasRunning) await _host.Core.StopAsync();
+
             var progress = new Progress<double>(p =>
             {
                 KernelProgress = p * 100;
@@ -1124,7 +1172,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             KernelProgressVisible = false;
             IsKernelBusy = false;
-            if (wasRunning) await _host.Core.StartAsync();
+            if (wasRunning)
+            {
+                try { await _host.Core.StartAsync(); } catch { }
+            }
         }
     }
 
@@ -1133,8 +1184,11 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         try
         {
-            var ok = _host.Elevated.LaunchElevatedHost();
-            await Task.Delay(1200);
+            var ok = await Task.Run(() => _host.Elevated.LaunchElevatedHost());
+            // 提权宿主创建管道需要时间,轮询等待就绪而非固定延时。
+            var deadline = DateTime.UtcNow.AddSeconds(6);
+            while (DateTime.UtcNow < deadline && !_host.Elevated.IsElevatedHostRunning)
+                await Task.Delay(200);
             ElevatedHostStatus = _host.Elevated.IsElevatedHostRunning ? "运行中" : "未运行";
             StatusText = ok ? "已请求管理员权限启动提权宿主" : "提权宿主启动失败";
         }

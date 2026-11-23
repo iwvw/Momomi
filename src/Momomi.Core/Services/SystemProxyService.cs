@@ -31,6 +31,21 @@ public sealed class SystemProxyService : ISystemProxyService
     private const int InternetOptionSettingsChanged = 39;
     private const int InternetOptionRefresh = 37;
 
+    // 首次接管系统代理前快照用户原有配置,关闭时还原,避免永久覆盖第三方代理/PAC。
+    private const string SnapshotSavedKey = "proxy.original.saved";
+    private const string SnapshotEnableKey = "proxy.original.enable";
+    private const string SnapshotServerKey = "proxy.original.server";
+    private const string SnapshotOverrideKey = "proxy.original.override";
+    private const string SnapshotPacKey = "proxy.original.pac";
+    private const string AbsentMarker = "\u0001";
+
+    private readonly ISettingsService? _settings;
+
+    public SystemProxyService(ISettingsService? settings = null)
+    {
+        _settings = settings;
+    }
+
     public bool IsEnabled()
     {
         try
@@ -132,6 +147,7 @@ public sealed class SystemProxyService : ISystemProxyService
             using var key = Registry.CurrentUser.OpenSubKey(RegPath, writable: true)
                             ?? Registry.CurrentUser.CreateSubKey(RegPath);
             if (key is null) return false;
+            SaveOriginalIfNeeded();
             key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
             key.SetValue("ProxyServer", server, RegistryValueKind.String);
             key.SetValue("ProxyOverride", bypass, RegistryValueKind.String);
@@ -153,6 +169,7 @@ public sealed class SystemProxyService : ISystemProxyService
             using var key = Registry.CurrentUser.OpenSubKey(RegPath, writable: true)
                             ?? Registry.CurrentUser.CreateSubKey(RegPath);
             if (key is null) return false;
+            SaveOriginalIfNeeded();
             key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
             key.SetValue("AutoConfigURL", pacUrl, RegistryValueKind.String);
             key.DeleteValue("ProxyServer", throwOnMissingValue: false);
@@ -169,6 +186,9 @@ public sealed class SystemProxyService : ISystemProxyService
     {
         try
         {
+            // 优先还原接管前的原始配置;没有快照时退回"仅关闭代理"。
+            if (RestoreOriginal()) return true;
+
             using var key = Registry.CurrentUser.OpenSubKey(RegPath, writable: true);
             if (key is null) return false;
             key.SetValue("ProxyEnable", 0, RegistryValueKind.DWord);
@@ -180,6 +200,63 @@ public sealed class SystemProxyService : ISystemProxyService
         {
             return false;
         }
+    }
+
+    private void SaveOriginalIfNeeded()
+    {
+        if (_settings is null) return;
+        try
+        {
+            if (_settings.GetBoolAsync(SnapshotSavedKey).GetAwaiter().GetResult()) return;
+            using var key = Registry.CurrentUser.OpenSubKey(RegPath);
+            var enable = key?.GetValue("ProxyEnable") is int v && v == 1 ? "1" : "0";
+            var server = key?.GetValue("ProxyServer") as string;
+            var bypass = key?.GetValue("ProxyOverride") as string;
+            var pac = key?.GetValue("AutoConfigURL") as string;
+            _settings.SetAsync(SnapshotEnableKey, enable).GetAwaiter().GetResult();
+            _settings.SetAsync(SnapshotServerKey, server ?? AbsentMarker).GetAwaiter().GetResult();
+            _settings.SetAsync(SnapshotOverrideKey, bypass ?? AbsentMarker).GetAwaiter().GetResult();
+            _settings.SetAsync(SnapshotPacKey, pac ?? AbsentMarker).GetAwaiter().GetResult();
+            _settings.SetBoolAsync(SnapshotSavedKey, true).GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
+    }
+
+    private bool RestoreOriginal()
+    {
+        if (_settings is null) return false;
+        try
+        {
+            if (!_settings.GetBoolAsync(SnapshotSavedKey).GetAwaiter().GetResult()) return false;
+
+            using var key = Registry.CurrentUser.OpenSubKey(RegPath, writable: true)
+                            ?? Registry.CurrentUser.CreateSubKey(RegPath);
+            if (key is null) return false;
+
+            var enable = _settings.GetAsync(SnapshotEnableKey).GetAwaiter().GetResult() == "1" ? 1 : 0;
+            key.SetValue("ProxyEnable", enable, RegistryValueKind.DWord);
+            ApplyOrDelete(key, "ProxyServer", _settings.GetAsync(SnapshotServerKey).GetAwaiter().GetResult());
+            ApplyOrDelete(key, "ProxyOverride", _settings.GetAsync(SnapshotOverrideKey).GetAwaiter().GetResult());
+            ApplyOrDelete(key, "AutoConfigURL", _settings.GetAsync(SnapshotPacKey).GetAwaiter().GetResult());
+            Notify();
+
+            _settings.SetBoolAsync(SnapshotSavedKey, false).GetAwaiter().GetResult();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void ApplyOrDelete(RegistryKey key, string name, string? value)
+    {
+        if (string.IsNullOrEmpty(value) || string.Equals(value, AbsentMarker, StringComparison.Ordinal))
+            key.DeleteValue(name, throwOnMissingValue: false);
+        else
+            key.SetValue(name, value, RegistryValueKind.String);
     }
 
     private static void Notify()

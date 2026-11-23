@@ -131,7 +131,15 @@ public sealed class UpdateCoordinator : IDisposable
             {
                 Post(() => AutoInstallStarting?.Invoke(info));
 
-                var ok = await global::Momomi.App.App.TryAutoInstallUpdateAsync().ConfigureAwait(false);
+                var ok = false;
+                try
+                {
+                    ok = await global::Momomi.App.App.TryAutoInstallUpdateAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    global::Momomi.App.App.WriteLog($"自动安装更新异常:{ex}");
+                }
                 if (!ok)
                 {
                     // 自动安装失败时退化成提示，至少让用户知道有新版本。

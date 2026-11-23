@@ -289,6 +289,11 @@ public sealed class SettingsService : ISettingsService
             await _repo.SetAsync(key, value).ConfigureAwait(false);
             _cache?[key] = value;
         }
+        catch (Exception ex)
+        {
+            // 写库失败不能静默:调用方多为 fire-and-forget,否则异常无人观察且界面仍显示「已保存」。
+            MomomiHost.CoreLog($"[Settings] 写入 {key} 失败:{ex.Message}");
+        }
         finally
         {
             _cacheLock.Release();

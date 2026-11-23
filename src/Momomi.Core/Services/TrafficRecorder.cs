@@ -15,6 +15,8 @@ public sealed class TrafficRecorder : IDisposable
     private int _connections;
     private bool _dirty;
     private DateTime _lastPrune = DateTime.MinValue;
+    private Task _pending = Task.CompletedTask;
+    private bool _disposed;
 
     /// <summary>
     /// 历史保留天数。这张表每分钟一行（1440 行/天，约 43k 行/月），
@@ -33,6 +35,7 @@ public sealed class TrafficRecorder : IDisposable
     {
         lock (_gate)
         {
+            if (_disposed) return;
             _upTotal = snapshot.UpTotal;
             _downTotal = snapshot.DownTotal;
             _dirty = true;
@@ -43,8 +46,11 @@ public sealed class TrafficRecorder : IDisposable
     {
         lock (_gate)
         {
+            if (_disposed) return;
             _memory = snapshot.Memory;
             _connections = snapshot.Connections.Count;
+            // 连接数/内存也要能被独立落盘:某些分钟没有流量快照时,否则这一段不会写入历史。
+            _dirty = true;
         }
     }
 
@@ -52,17 +58,19 @@ public sealed class TrafficRecorder : IDisposable
     {
         long up, down, memory;
         int conns;
+        bool prune;
         lock (_gate)
         {
-            if (!_dirty) return;
+            if (!_dirty || _disposed) return;
             _dirty = false;
             up = _upTotal;
             down = _downTotal;
             memory = _memory;
             conns = _connections;
+            prune = (DateTime.UtcNow - _lastPrune).TotalHours >= 24;
         }
 
-        _ = Task.Run(async () =>
+        _pending = Task.Run(async () =>
         {
             try
             {
@@ -70,14 +78,16 @@ public sealed class TrafficRecorder : IDisposable
                 await _repo.InsertAsync(bucket, up, down, memory, conns).ConfigureAwait(false);
 
                 // 每天清理一次过期历史（首次 flush 也会执行一次，顺手收掉历史遗留数据）。
-                if ((DateTime.UtcNow - _lastPrune).TotalHours >= 24)
+                if (prune)
                 {
-                    _lastPrune = DateTime.UtcNow;
                     await _repo.PruneAsync(DateTimeOffset.Now.AddDays(-RetentionDays)).ConfigureAwait(false);
+                    lock (_gate) _lastPrune = DateTime.UtcNow;
                 }
             }
             catch
             {
+                // 写库失败:把脏标记置回,下一次 flush 继续落盘(累计值不会丢,最多丢一个曲线点)。
+                lock (_gate) _dirty = true;
             }
         });
     }
@@ -85,5 +95,14 @@ public sealed class TrafficRecorder : IDisposable
     public void Dispose()
     {
         _timer.Dispose();
+        // 退出前把尚未落盘的一分钟补上,并等在途写入完成,避免丢历史。
+        Flush(null);
+        Task pending;
+        lock (_gate)
+        {
+            _disposed = true;
+            pending = _pending;
+        }
+        try { pending.Wait(TimeSpan.FromSeconds(3)); } catch { }
     }
 }

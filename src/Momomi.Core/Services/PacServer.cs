@@ -32,9 +32,10 @@ public sealed class PacServer : IDisposable
             {
                 var port = Random.Shared.Next(20000, 60000);
                 var prefix = $"http://127.0.0.1:{port}/";
+                // 声明在 try 之外,才能在 catch 里关闭本次失败的监听器。
+                var listener = new HttpListener();
                 try
                 {
-                    var listener = new HttpListener();
                     listener.Prefixes.Add(prefix);
                     listener.Start();
                     _listener = listener;
@@ -46,8 +47,8 @@ public sealed class PacServer : IDisposable
                 }
                 catch (HttpListenerException)
                 {
-                    _listener?.Close();
-                    _listener = null;
+                    // 关闭本次失败的监听器;此时 _listener 字段是 null 或旧实例,不能关它。
+                    try { listener.Close(); } catch { }
                 }
             }
             return false;

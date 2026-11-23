@@ -134,7 +134,7 @@ public static class YamlOverrideMerger
 
             if (!inDoubleQuote)
             {
-                if (ch == '"') inDoubleQuote = true;
+                if (ch == '"' && IsScalarStart(yaml, i)) inDoubleQuote = true;
                 sb.Append(ch);
                 continue;
             }
@@ -200,7 +200,7 @@ public static class YamlOverrideMerger
 
             if (!inDoubleQuote)
             {
-                if (ch == '"') inDoubleQuote = true;
+                if (ch == '"' && IsScalarStart(yaml, i)) inDoubleQuote = true;
                 sb.Append(ch);
                 continue;
             }
@@ -232,6 +232,25 @@ public static class YamlOverrideMerger
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// 判断某个位置的引号是否是「双引号标量的起始」。
+    ///
+    /// 裸标量(如 <c>5" inch</c>)或单引号标量里的引号只是普通字符,不能据此切换引号状态,
+    /// 否则后续所有行的转义处理都会错位、静默改坏配置。引号只有在值起始位置
+    /// (行首、<c>:</c>、<c>-</c>、<c>[</c>、<c>{</c>、<c>,</c> 之后)才是标量开始。
+    /// </summary>
+    private static bool IsScalarStart(string text, int quoteIndex)
+    {
+        for (var j = quoteIndex - 1; j >= 0; j--)
+        {
+            var c = text[j];
+            if (c is ' ' or '\t' or '\r') continue;
+            if (c == '\n') return true;
+            return c is ':' or '-' or '[' or '{' or ',';
+        }
+        return true;
     }
 
     private static string Serialize(YamlMappingNode root, bool withDocumentEnd = false)
@@ -274,6 +293,8 @@ public static class YamlOverrideMerger
                 throw new YamlOverrideException($"{source}：存在空的键名");
 
             var (key, mode) = ParseKey(rawKey);
+            if (string.IsNullOrEmpty(key))
+                throw new YamlOverrideException($"{source}:存在空的键名");
             var keyNode = new YamlScalarNode(key);
 
             if (mode == MergeMode.Replace || !target.Children.TryGetValue(keyNode, out var existing))
@@ -340,7 +361,7 @@ public static class YamlOverrideMerger
 /// <summary>一个待合并的覆写文档。</summary>
 /// <param name="Name">文件名或显示名，用于错误提示。</param>
 /// <param name="Content">YAML 内容。</param>
-public sealed record OverrideDocument(string Name, string Content);
+public sealed record OverrideDocument(string Name, string Content, long Id = 0);
 
 /// <summary>覆写合并失败（语法错误、结构不匹配等），消息可直接展示给用户。</summary>
 public sealed class YamlOverrideException : Exception

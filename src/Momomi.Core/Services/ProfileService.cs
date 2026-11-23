@@ -12,7 +12,7 @@ public sealed record ProfileItem(
     string FilePath,
     string? SubscriptionUserInfo,
     bool IsActive,
-    int SortOrder,
+    long SortOrder,
     string UpdatedAt)
 {
     public string KindText => Kind switch
@@ -136,6 +136,7 @@ public sealed class ProfileService : IProfileService
             // 而「订阅不走代理」的开关应当是完全直连。
             Proxy = DownloadProxy.CreateForSubscription(),
             UseProxy = useProxy,
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
         })
         {
             Timeout = Timeout.InfiniteTimeSpan,
@@ -170,7 +171,8 @@ public sealed class ProfileService : IProfileService
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.UserAgent.ParseAdd(ua);
+            try { request.Headers.UserAgent.ParseAdd(ua); }
+            catch (FormatException) { request.Headers.UserAgent.ParseAdd(DefaultUserAgent); }
             using var response = await slot.Client.SendAsync(request, linked.Token).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false);
@@ -188,7 +190,9 @@ public sealed class ProfileService : IProfileService
         foreach (var c in name)
             sb.Append(invalid.Contains(c) ? '_' : c);
         var result = sb.ToString().Trim();
-        return result.Length == 0 ? "profile" : result;
+        if (result.Length == 0) result = "profile";
+        // 名称可能来自外部(Profile-Title/文件名),过长会让整套路径超出 Windows 上限。
+        return result.Length > 60 ? result[..60] : result;
     }
 
     public async Task<IReadOnlyList<ProfileItem>> ListAsync(CancellationToken ct = default)
@@ -216,7 +220,10 @@ public sealed class ProfileService : IProfileService
         if (!LooksLikeClashConfig(content))
             throw new InvalidOperationException("下载内容不是有效的 Clash 配置（可能是错误页或需要代理访问）。");
 
-        var fileName = $"{SafeFileName(displayName)}-{DateTimeOffset.Now.ToUnixTimeSeconds()}.yaml";
+        if (!TryValidate(content, out var parseError))
+            throw new InvalidOperationException($"订阅内容无法解析:{parseError}");
+
+        var fileName = $"{SafeFileName(displayName)}-{DateTimeOffset.Now.ToUnixTimeMilliseconds()}.yaml";
         var filePath = Path.Combine(ProfilesDirectory, fileName);
         await File.WriteAllTextAsync(filePath, content, ct).ConfigureAwait(false);
 
@@ -246,7 +253,8 @@ public sealed class ProfileService : IProfileService
             linked.CancelAfter(timeout);
 
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.UserAgent.ParseAdd(ua);
+            try { request.Headers.UserAgent.ParseAdd(ua); }
+            catch (FormatException) { request.Headers.UserAgent.ParseAdd(DefaultUserAgent); }
             var slot = RentClient();
             try
             {
@@ -275,6 +283,10 @@ public sealed class ProfileService : IProfileService
             {
                 slot.Exit();
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
@@ -327,7 +339,10 @@ public sealed class ProfileService : IProfileService
             : name!.Trim();
         var content = await File.ReadAllTextAsync(sourcePath, ct).ConfigureAwait(false);
 
-        var fileName = $"{SafeFileName(displayName)}-{DateTimeOffset.Now.ToUnixTimeSeconds()}.yaml";
+        if (!TryValidate(content, out var parseError))
+            throw new InvalidOperationException($"配置文件无法解析:{parseError}");
+
+        var fileName = $"{SafeFileName(displayName)}-{DateTimeOffset.Now.ToUnixTimeMilliseconds()}.yaml";
         var filePath = Path.Combine(ProfilesDirectory, fileName);
         await File.WriteAllTextAsync(filePath, content, ct).ConfigureAwait(false);
 
@@ -342,7 +357,7 @@ public sealed class ProfileService : IProfileService
     public async Task<ProfileItem> CreateManualAsync(string name, string content, CancellationToken ct = default)
     {
         var displayName = string.IsNullOrWhiteSpace(name) ? "手动配置" : name.Trim();
-        var fileName = $"{SafeFileName(displayName)}-{DateTimeOffset.Now.ToUnixTimeSeconds()}.yaml";
+        var fileName = $"{SafeFileName(displayName)}-{DateTimeOffset.Now.ToUnixTimeMilliseconds()}.yaml";
         var filePath = Path.Combine(ProfilesDirectory, fileName);
         await File.WriteAllTextAsync(filePath, content, ct).ConfigureAwait(false);
 
@@ -365,6 +380,7 @@ public sealed class ProfileService : IProfileService
             var content = await FetchContentAsync(item.Source, ct).ConfigureAwait(false);
             // 校验内容确为订阅配置：否则错误页/HTML 会覆盖掉可用配置。
             if (!LooksLikeClashConfig(content)) return false;
+            if (!TryValidate(content, out _)) return false;
             await File.WriteAllTextAsync(item.FilePath, content, ct).ConfigureAwait(false);
             await _repo.UpdateContentAsync(id, meta.UserInfo).ConfigureAwait(false);
             return true;

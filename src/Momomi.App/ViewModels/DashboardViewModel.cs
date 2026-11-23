@@ -281,7 +281,13 @@ public sealed partial class DashboardViewModel : ObservableObject
             // 内核运行后补一次出口 IP / 延迟检测（带 30 秒去重，无需担心重复请求）。
             _ = RefreshNetworkAsync();
         }
-        else ClearLiveData();
+        else
+        {
+            // 内核停止:兜底定时器必须停,否则会每 5 秒空转。
+            _refreshTimer?.Stop();
+            _targetsChecked = false;
+            ClearLiveData();
+        }
     }
 
     private void ClearLiveData()
@@ -293,15 +299,21 @@ public sealed partial class DashboardViewModel : ObservableObject
         _downHistory.Clear();
         UpPoints = Array.Empty<double>();
         DownPoints = Array.Empty<double>();
+        MaxRate = 1;
+        UpRate = "0.0 MB/s";
+        DownRate = "0.0 MB/s";
+        UpTotal = "0 B";
+        DownTotal = "0 B";
+        Memory = "0 B";
     }
 
-    private DateTimeOffset _lastExitCheck = DateTimeOffset.MinValue;
+    private long _lastExitCheckTicks;
 
     /// <summary>刷新出口 IP 与目标延迟概览。每次进入首页都刷新出口 IP，避免陈旧。</summary>
     public async Task RefreshNetworkAsync()
     {
-        await CheckExitIpOnceAsync().ConfigureAwait(false);
-        await TestTargetsOnceAsync().ConfigureAwait(false);
+        await CheckExitIpOnceAsync();
+        await TestTargetsOnceAsync();
     }
 
     private async Task CheckExitIpOnceAsync()
@@ -310,8 +322,9 @@ public sealed partial class DashboardViewModel : ObservableObject
         // 失败不更新时间戳，DispatcherTimer（5 秒）会持续重试；成功一次后即停掉定时器，
         // 避免常驻每 5 秒发起 HTTP 探测（不断新建 HttpClient/原生资源，是私有内存增长的主因）。
         var now = DateTimeOffset.Now;
+        var nowTicks = now.UtcTicks;
         if (IsCheckingExit || _core.Api is null || _core.State != CoreState.Running
-            || now - _lastExitCheck < TimeSpan.FromSeconds(3)) return;
+            || nowTicks - Interlocked.Read(ref _lastExitCheckTicks) < TimeSpan.FromSeconds(3).Ticks) return;
         IsCheckingExit = true;
         try
         {
@@ -320,7 +333,7 @@ public sealed partial class DashboardViewModel : ObservableObject
             var country = CountryNames.GetName(code);
             if (!string.IsNullOrEmpty(ip))
             {
-                _lastExitCheck = now;
+                Interlocked.Exchange(ref _lastExitCheckTicks, nowTicks);
                 _dispatcher.TryEnqueue(() =>
                 {
                     ExitIp = ip;
@@ -378,7 +391,11 @@ public sealed partial class DashboardViewModel : ObservableObject
         }
         finally
         {
-            _dispatcher.TryEnqueue(() => IsTestingAll = false);
+            _dispatcher.TryEnqueue(() =>
+            {
+                foreach (var target in Targets) target.IsTesting = false;
+                IsTestingAll = false;
+            });
         }
     }
 

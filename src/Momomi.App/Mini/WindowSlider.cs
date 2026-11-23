@@ -172,6 +172,9 @@ internal sealed class WindowSlider : IDisposable
         {
             if (_disposed) return;
             _disposed = true;
+            // 失效在途动画的完成回调:窗口已销毁,回调再去操作 AppWindow 会抛 COM 异常。
+            _generation++;
+            _onCompleted = null;
         }
 
         SetSignal();
@@ -264,7 +267,12 @@ internal sealed class WindowSlider : IDisposable
             }
 
             if (onCompleted is not null)
-                _ = _dispatcher.TryEnqueue(() => onCompleted());
+            {
+                var cancelled = false;
+                lock (_gate) cancelled = _disposed;
+                if (!cancelled)
+                    _ = _dispatcher.TryEnqueue(() => onCompleted());
+            }
         }
     }
 

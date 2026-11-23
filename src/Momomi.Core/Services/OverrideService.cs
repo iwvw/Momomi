@@ -11,7 +11,7 @@ public sealed record OverrideItem(
     string? Source,
     string FilePath,
     bool IsGlobal,
-    int SortOrder,
+    long SortOrder,
     string UpdatedAt)
 {
     public string UpdatedText
@@ -197,11 +197,23 @@ public sealed class OverrideService : IOverrideService
         foreach (var c in name)
             sb.Append(invalid.Contains(c) ? '_' : c);
         var result = sb.ToString().Trim();
-        return result.Length == 0 ? "override" : result;
+        if (result.Length == 0) result = "override";
+        return result.Length > 60 ? result[..60] : result;
     }
 
     private string NewFilePath(string name)
-        => Path.Combine(OverridesDirectory, $"{SafeFileName(name)}-{DateTimeOffset.Now.ToUnixTimeSeconds()}.yaml");
+        => Path.Combine(
+            OverridesDirectory,
+            $"{SafeFileName(name)}-{DateTimeOffset.Now.ToUnixTimeMilliseconds()}-{Guid.NewGuid().ToString("N")[..6]}.yaml");
+
+    // 覆写文件可能正被后台读取(生成配置/预览时),直接覆盖会让读方读到半截 YAML,
+    // 因此统一写临时文件后原子替换。文件名带毫秒 + 随机后缀,避免同秒同名互相覆盖。
+    private static async Task WriteAtomicAsync(string path, string content, CancellationToken ct)
+    {
+        var temp = path + ".tmp";
+        await File.WriteAllTextAsync(temp, content, ct).ConfigureAwait(false);
+        File.Move(temp, path, overwrite: true);
+    }
 
     public async Task<string?> ReadContentAsync(long id, CancellationToken ct = default)
     {
@@ -217,7 +229,7 @@ public sealed class OverrideService : IOverrideService
 
         try
         {
-            await File.WriteAllTextAsync(item.FilePath, content, ct).ConfigureAwait(false);
+            await WriteAtomicAsync(item.FilePath, content, ct).ConfigureAwait(false);
             await _repo.TouchAsync(id).ConfigureAwait(false);
             return true;
         }
@@ -232,7 +244,7 @@ public sealed class OverrideService : IOverrideService
     {
         var displayName = string.IsNullOrWhiteSpace(name) ? "新覆写" : name.Trim();
         var filePath = NewFilePath(displayName);
-        await File.WriteAllTextAsync(filePath, content ?? DefaultContent, ct).ConfigureAwait(false);
+        await WriteAtomicAsync(filePath, content ?? DefaultContent, ct).ConfigureAwait(false);
 
         var id = await _repo.InsertAsync(displayName, "yaml", null, filePath, isGlobal).ConfigureAwait(false);
         return (await GetAsync(id, ct).ConfigureAwait(false))!;
@@ -332,7 +344,7 @@ public sealed class OverrideService : IOverrideService
 
         // 全局启用的覆写先应用，随后是该订阅挂载的，后者优先级更高。
         var ordered = new List<OverrideItem>();
-        ordered.AddRange(all.Where(i => i.IsGlobal));
+        ordered.AddRange(all.Where(i => i.IsGlobal).OrderBy(i => i.UpdatedAt, StringComparer.Ordinal));
 
         if (profileId is not null)
         {
@@ -350,7 +362,7 @@ public sealed class OverrideService : IOverrideService
             if (!File.Exists(item.FilePath)) continue;
             var content = await File.ReadAllTextAsync(item.FilePath, ct).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(content)) continue;
-            docs.Add(new OverrideDocument(item.Name, content));
+            docs.Add(new OverrideDocument(item.Name, content, item.Id));
         }
         return docs;
     }

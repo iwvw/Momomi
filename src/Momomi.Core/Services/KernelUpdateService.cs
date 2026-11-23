@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Momomi.Core.Services;
 
-public sealed record ReleaseAsset(string Name, string DownloadUrl, long Size);
+public sealed record ReleaseAsset(string Name, string DownloadUrl, long Size, string? Digest = null);
 
 public sealed record KernelRelease(
     string Tag,
@@ -130,7 +130,7 @@ public sealed class KernelUpdateService : IKernelUpdateService
             if (string.IsNullOrEmpty(latestTag))
                 return new KernelUpdateInfo(current is not null, current, null, false, channel, "未能获取版本列表");
 
-            var hasUpdate = current is null || !string.Equals(Normalize(current), Normalize(latestTag), StringComparison.OrdinalIgnoreCase);
+            var hasUpdate = ComputeHasUpdate(current, latestTag);
             return new KernelUpdateInfo(
                 Installed: current is not null,
                 CurrentVersion: current,
@@ -146,6 +146,45 @@ public sealed class KernelUpdateService : IKernelUpdateService
     }
 
     private static string Normalize(string version) => version.TrimStart('v', 'V').Split(' ')[0];
+
+    /// <summary>
+    /// 校验下载文件的 SHA256(digest 形如 <c>sha256:xxxx</c>)。digest 缺失时跳过
+    /// (上游未提供哈希时无法校验,但至少对提供哈希的资产做完整性校验)。
+    /// </summary>
+    public static async Task<bool> VerifyDigestAsync(string path, string? digest, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(digest)) return true;
+
+        var colon = digest.IndexOf(':');
+        var algorithm = colon > 0 ? digest[..colon] : "sha256";
+        var expected = (colon > 0 ? digest[(colon + 1)..] : digest).Trim();
+        if (!string.Equals(algorithm, "sha256", StringComparison.OrdinalIgnoreCase)) return true;
+
+        try
+        {
+            await using var stream = File.OpenRead(path);
+            var hash = await System.Security.Cryptography.SHA256.HashDataAsync(stream, ct).ConfigureAwait(false);
+            return string.Equals(Convert.ToHexString(hash), expected, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 按语义版本大小判断是否有更新(字符串不等会把「本地更新」误判成有更新),
+    /// 版本号缺失或无法解析时保守地认为需要更新。
+    /// </summary>
+    private static bool ComputeHasUpdate(string? current, string latestTag)
+    {
+        if (current is null) return true;
+        var cur = Normalize(current);
+        if (string.Equals(cur, "unknown", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!Version.TryParse(cur.Split('-')[0], out var curV)) return true;
+        if (!Version.TryParse(Normalize(latestTag).Split('-')[0], out var newV)) return true;
+        return newV > curV;
+    }
 
     /// <summary>列出可选版本（稳定 tag 倒序）。</summary>
     public async Task<IReadOnlyList<string>> ListVersionsAsync(CancellationToken ct = default)
@@ -232,8 +271,9 @@ public sealed class KernelUpdateService : IKernelUpdateService
                     var name = asset.TryGetProperty("name", out var n) ? n.GetString() : null;
                     var url = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
                     var size = asset.TryGetProperty("size", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetInt64() : 0;
+                    var digest = asset.TryGetProperty("digest", out var dg) && dg.ValueKind == JsonValueKind.String ? dg.GetString() : null;
                     if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(url)) continue;
-                    assets.Add(new ReleaseAsset(name, url, size));
+                    assets.Add(new ReleaseAsset(name, url, size, digest));
                 }
             }
 
@@ -274,11 +314,22 @@ public sealed class KernelUpdateService : IKernelUpdateService
             if (asset is null) return false;
 
             var archivePath = Path.Combine(_coreDirectory, "mihomo.download.zip");
-            await DownloadFileAsync(asset.DownloadUrl, archivePath, progress, ct).ConfigureAwait(false);
-
             var tempBinary = Path.Combine(_coreDirectory, "mihomo.new.exe");
-            await ExtractKernelFromZipAsync(archivePath, tempBinary, ct).ConfigureAwait(false);
-            try { File.Delete(archivePath); } catch { }
+            try
+            {
+                await DownloadFileAsync(asset.DownloadUrl, archivePath, progress, ct).ConfigureAwait(false);
+                if (!await VerifyDigestAsync(archivePath, asset.Digest, ct).ConfigureAwait(false))
+                {
+                    MomomiHost.CoreLog($"[KernelUpdate] {asset.Name} 校验失败,已中止更新。");
+                    return false;
+                }
+                await ExtractKernelFromZipAsync(archivePath, tempBinary, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                // 无论成功失败都清理下载的压缩包,避免残留。
+                try { if (File.Exists(archivePath)) File.Delete(archivePath); } catch { }
+            }
 
             var info = new FileInfo(tempBinary);
             if (!info.Exists || info.Length < 1024 * 100)
@@ -287,17 +338,34 @@ public sealed class KernelUpdateService : IKernelUpdateService
                 return false;
             }
 
+            // 先备份旧内核,替换成功后再删备份;失败则回滚,避免「旧内核已删、新内核没装上」。
+            var backup = BinaryPath + ".bak";
+            var hadOld = File.Exists(BinaryPath);
             try
             {
-                if (File.Exists(BinaryPath)) File.Delete(BinaryPath);
+                if (hadOld) File.Copy(BinaryPath, backup, overwrite: true);
+                File.Move(tempBinary, BinaryPath, overwrite: true);
             }
             catch
             {
+                if (hadOld && File.Exists(backup))
+                {
+                    try { File.Copy(backup, BinaryPath, overwrite: true); } catch { }
+                }
+                try { if (File.Exists(tempBinary)) File.Delete(tempBinary); } catch { }
+                return false;
             }
-            File.Move(tempBinary, BinaryPath, overwrite: true);
+            finally
+            {
+                try { if (File.Exists(backup)) File.Delete(backup); } catch { }
+            }
 
             await File.WriteAllTextAsync(Path.Combine(_coreDirectory, "version.txt"), release.Tag, ct).ConfigureAwait(false);
             return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
@@ -465,28 +533,45 @@ public sealed class KernelUpdateService : IKernelUpdateService
         try
         {
             var zipPath = Path.Combine(_coreDirectory, "wintun.zip");
-            await DownloadFileAsync(WintunUrl, zipPath, null, ct).ConfigureAwait(false);
-
-            using var archive = ZipFile.OpenRead(zipPath);
-            var arch = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+            try
             {
-                System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
-                System.Runtime.InteropServices.Architecture.X86 => "x86",
-                _ => "amd64",
-            };
+                await DownloadFileAsync(WintunUrl, zipPath, null, ct).ConfigureAwait(false);
 
-            var entry = archive.Entries.FirstOrDefault(e =>
-                e.FullName.Contains($"/{arch}/", StringComparison.OrdinalIgnoreCase) &&
-                e.Name.Equals("wintun.dll", StringComparison.OrdinalIgnoreCase));
+                var arch = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+                {
+                    System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
+                    System.Runtime.InteropServices.Architecture.X86 => "x86",
+                    _ => "amd64",
+                };
 
-            entry ??= archive.Entries.FirstOrDefault(e =>
-                e.Name.Equals("wintun.dll", StringComparison.OrdinalIgnoreCase));
+                byte[]? dllBytes = null;
+                using (var archive = ZipFile.OpenRead(zipPath))
+                {
+                    var entry = archive.Entries.FirstOrDefault(e =>
+                        e.FullName.Contains($"/{arch}/", StringComparison.OrdinalIgnoreCase) &&
+                        e.Name.Equals("wintun.dll", StringComparison.OrdinalIgnoreCase));
 
-            if (entry is null) return false;
+                    entry ??= archive.Entries.FirstOrDefault(e =>
+                        e.Name.Equals("wintun.dll", StringComparison.OrdinalIgnoreCase));
 
-            entry.ExtractToFile(WintunPath, overwrite: true);
-            try { File.Delete(zipPath); } catch { }
-            return true;
+                    if (entry is not null)
+                    {
+                        using var source = entry.Open();
+                        using var buffer = new MemoryStream();
+                        source.CopyTo(buffer);
+                        dllBytes = buffer.ToArray();
+                    }
+                }
+
+                // 先读完并释放 zip 句柄,再写文件、删 zip,避免 Windows 上删除被占用文件失败。
+                if (dllBytes is null) return false;
+                await File.WriteAllBytesAsync(WintunPath, dllBytes, ct).ConfigureAwait(false);
+                return true;
+            }
+            finally
+            {
+                try { if (File.Exists(zipPath)) File.Delete(zipPath); } catch { }
+            }
         }
         catch
         {

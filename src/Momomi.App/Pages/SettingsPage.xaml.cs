@@ -223,6 +223,10 @@ public sealed partial class SettingsPage : Page, IPageLifecycle
     private async void Hotkey_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (sender is not TextBox box || box.Tag is not string action) return;
+
+        // 放行 Tab/Shift+Tab,否则键盘用户无法用 Tab 离开快捷键输入框。
+        if (e.Key == Windows.System.VirtualKey.Tab) return;
+
         e.Handled = true;
 
         // 忽略单独的修饰键（等待主键）。
@@ -281,12 +285,13 @@ public sealed partial class SettingsPage : Page, IPageLifecycle
                     DefaultButton = ContentDialogButton.Primary,
                     XamlRoot = XamlRoot,
                 };
-                if (await DialogGuard.ShowAsync(dialog) == ContentDialogResult.Primary)
+                var hotkeyResult = await DialogGuard.ShowAsync(dialog);
+                if (hotkeyResult == ContentDialogResult.Primary)
                 {
                     var ok = await ViewModel.ResolveHotkeyConflictAsync(action, text, result.Conflict.Value.ToString());
                     if (ok && box is not null) box.Text = text;
                 }
-                else
+                else if (hotkeyResult is not null)
                 {
                     // 取消：把输入框恢复为当前动作的实际绑定。
                     if (box is not null) box.Text = await GetCurrentHotkeyTextAsync(action);

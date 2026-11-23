@@ -216,8 +216,16 @@ public sealed partial class MiniPanelView : UserControl
         if (!combo.IsDropDownOpen && combo.FocusState == FocusState.Unfocused) return;
 
         if (ReferenceEquals(group.Selected, node)) return;
+        var previous = group.Selected;
         group.Selected = node;
-        _ = ViewModel.SelectNodeAsync(group, node);
+        _ = ApplyNodeSelectionAsync(group, previous, node);
+    }
+
+    private async Task ApplyNodeSelectionAsync(
+        MiniProxyGroupViewModel group, MiniProxyNodeViewModel? previous, MiniProxyNodeViewModel node)
+    {
+        if (!await ViewModel.SelectNodeAsync(group, node))
+            group.Selected = previous;   // 切换失败:回滚下拉框,避免显示未生效的选择
     }
 
     private void TestGroup_Click(object sender, RoutedEventArgs e)

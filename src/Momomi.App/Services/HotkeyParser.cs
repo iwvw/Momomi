@@ -135,6 +135,9 @@ public static class HotkeyParser
         if (vk is >= 'A' and <= 'Z') return ((char)vk).ToString();
         if (vk is >= '0' and <= '9') return ((char)vk).ToString();
         if (vk is >= 0x70 and <= 0x87) return $"F{vk - 0x70 + 1}";
+        // 与 KeyToVk 对称:否则 NumPad/NumLock 绑定存成数字后,重启时解析不回来会被丢弃。
+        if (vk is >= 0x60 and <= 0x69) return $"NumPad{vk - 0x60}";
+        if (vk == 0x90) return "NumLock";
         return vk switch
         {
             0x20 => "Space",

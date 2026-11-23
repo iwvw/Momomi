@@ -48,6 +48,7 @@ public sealed class AppUpdateService : IAppUpdateService
     private readonly HttpClient _http;
     private readonly ISettingsService? _settings;
     private string? _pendingScript;
+    private string? _lastAssetDigest;
 
     public AppUpdateService(ISettingsService? settings = null)
     {
@@ -140,7 +141,9 @@ public sealed class AppUpdateService : IAppUpdateService
                 && Version.TryParse(CurrentVersion, out var currentV))
                 hasUpdate = latestV > currentV;
 
-            var downloadUrl = SelectAssetUrl(latest!, assets);
+            var asset = string.IsNullOrEmpty(latest) ? null : SelectAsset(latest, assets);
+            _lastAssetDigest = asset?.Digest;
+            var downloadUrl = asset?.DownloadUrl;
 
             var result = new AppUpdateInfo(CurrentVersion, latest, hasUpdate, htmlUrl, downloadUrl, null, notes);
             LastResult = result;
@@ -171,6 +174,8 @@ public sealed class AppUpdateService : IAppUpdateService
             var fileName = Path.GetFileName(info.DownloadUrl);
             var downloaded = Path.Combine(workDir, fileName);
             await DownloadFileAsync(info.DownloadUrl, downloaded, progress, ct).ConfigureAwait(false);
+            if (!await KernelUpdateService.VerifyDigestAsync(downloaded, _lastAssetDigest, ct).ConfigureAwait(false))
+                return info with { Error = "下载内容校验失败,已中止更新" };
 
             var setupExe = IsInstalled ? downloaded : null;
             string? extractDir = null;
@@ -241,7 +246,7 @@ public sealed class AppUpdateService : IAppUpdateService
     }
 
     /// <summary>按当前形态与架构挑选下载产物：安装版取 setup.exe，便携版取对应 zip。</summary>
-    private static string? SelectAssetUrl(string version, IReadOnlyList<ReleaseAsset> assets)
+    private static ReleaseAsset? SelectAsset(string version, IReadOnlyList<ReleaseAsset> assets)
     {
         var installed = File.Exists(Path.Combine(AppContext.BaseDirectory, "unins000.exe"));
         var arch = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
@@ -276,18 +281,20 @@ public sealed class AppUpdateService : IAppUpdateService
         }
 
         var match = assets.FirstOrDefault(a => string.Equals(a.Name, exact, StringComparison.OrdinalIgnoreCase));
-        if (match is not null) return match.DownloadUrl;
+        if (match is not null) return match;
 
         // 回退：按架构 + 形态关键词宽松匹配。先精确到当前形态关键词，再退而只按架构 + 后缀。
         var key = sep ? (full ? "full-sep" : "sep") : (full ? "full" : (installed ? "" : "portable"));
         var fallback = assets.FirstOrDefault(a =>
-                           a.Name.Contains(arch, StringComparison.OrdinalIgnoreCase)
+                           a.Name.Contains(version, StringComparison.OrdinalIgnoreCase)
+                           && a.Name.Contains(arch, StringComparison.OrdinalIgnoreCase)
                            && a.Name.Contains(key, StringComparison.OrdinalIgnoreCase)
                            && a.Name.EndsWith(kind, StringComparison.OrdinalIgnoreCase))
                        ?? assets.FirstOrDefault(a =>
-                           a.Name.Contains(arch, StringComparison.OrdinalIgnoreCase)
+                           a.Name.Contains(version, StringComparison.OrdinalIgnoreCase)
+                           && a.Name.Contains(arch, StringComparison.OrdinalIgnoreCase)
                            && a.Name.EndsWith(kind, StringComparison.OrdinalIgnoreCase));
-        return fallback?.DownloadUrl;
+        return fallback;
     }
 
     private async Task<string> FetchLatestAsync(CancellationToken ct)
@@ -327,8 +334,9 @@ public sealed class AppUpdateService : IAppUpdateService
                 var name = asset.TryGetProperty("name", out var n) ? n.GetString() : null;
                 var url = asset.TryGetProperty("browser_download_url", out var b) ? b.GetString() : null;
                 var size = asset.TryGetProperty("size", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetInt64() : 0;
+                var digest = asset.TryGetProperty("digest", out var dg) && dg.ValueKind == JsonValueKind.String ? dg.GetString() : null;
                 if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(url)) continue;
-                assets.Add(new ReleaseAsset(name, url, size));
+                assets.Add(new ReleaseAsset(name, url, size, digest));
             }
         }
         return (tag, html, notes, assets);

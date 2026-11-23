@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Security.AccessControl;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
@@ -14,6 +15,10 @@ internal static class Program
     private static readonly object Gate = new();
     private static string? _lastError;
 
+    // 每次宿主启动时由主程序随机生成并经命令行传入的会话令牌。
+    // 仅持有该令牌的请求会被执行,防止同机其它进程复用管道下发命令。
+    private static string _token = string.Empty;
+
     // 提权宿主看不到主程序的日志，内核输出必须落盘，否则 TUN 等失败无从排查。
     private static readonly string LogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -26,8 +31,10 @@ internal static class Program
             Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
             File.AppendAllText(LogPath, $"[{DateTime.Now:O}] {message}{Environment.NewLine}");
         }
-        catch
+        catch (Exception ex)
         {
+            // 日志是提权宿主唯一可观测渠道,写失败时至少要能落到 stderr。
+            try { Console.Error.WriteLine($"[Momomi.Elevated] 写日志失败:{ex.Message}"); } catch { }
         }
     }
 
@@ -39,7 +46,15 @@ internal static class Program
             return 5;
         }
 
-        var ownerSid = GetOwnerSid();
+        _token = ParseArg(args, "--token") ?? string.Empty;
+        if (_token.Length < 32)
+        {
+            Console.Error.WriteLine("缺少有效的会话令牌,拒绝启动。");
+            return 6;
+        }
+
+        // 只允许发起提权的那个用户连接(而非所有已认证用户)。
+        var clientSid = ParseArg(args, "--client-sid") ?? GetOwnerSid();
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) =>
         {
@@ -48,17 +63,18 @@ internal static class Program
         };
 
         // 监视主程序存活：主程序退出后自动结束本宿主，避免残留进程锁住可执行文件。
-        var ownerPid = ParseOwnerPid(args);
+        var ownerPid = ParseIntArg(args, "--owner");
+        var ownerStartTicks = ParseLongArg(args, "--owner-start");
         if (ownerPid > 0)
         {
-            _ = Task.Run(() => WatchOwnerAsync(ownerPid, cts.Token));
+            _ = Task.Run(() => WatchOwnerAsync(ownerPid, ownerStartTicks, cts.Token));
         }
 
         while (!cts.IsCancellationRequested)
         {
             try
             {
-                await using var server = CreateServer(ownerSid);
+                await using var server = CreateServer(clientSid);
                 await server.WaitForConnectionAsync(cts.Token).ConfigureAwait(false);
                 await HandleClientAsync(server, cts.Token).ConfigureAwait(false);
             }
@@ -69,7 +85,10 @@ internal static class Program
             catch (Exception ex)
             {
                 _lastError = ex.Message;
-                await Task.Delay(200, cts.Token).ConfigureAwait(false);
+                Log($"接受连接出错:{ex}");
+                // 用不关联取消的令牌等待,避免取消时异常从 catch 逃逸导致非正常退出。
+                try { await Task.Delay(200, CancellationToken.None).ConfigureAwait(false); }
+                catch { }
             }
         }
 
@@ -80,20 +99,22 @@ internal static class Program
         return 0;
     }
 
-    private static int ParseOwnerPid(string[] args)
+    private static string? ParseArg(string[] args, string name)
     {
         for (var i = 0; i < args.Length - 1; i++)
         {
-            if (string.Equals(args[i], "--owner", StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(args[i + 1], out var pid))
-            {
-                return pid;
-            }
+            if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase)) return args[i + 1];
         }
-        return -1;
+        return null;
     }
 
-    private static async Task WatchOwnerAsync(int ownerPid, CancellationToken ct)
+    private static int ParseIntArg(string[] args, string name)
+        => int.TryParse(ParseArg(args, name), out var value) ? value : -1;
+
+    private static long ParseLongArg(string[] args, string name)
+        => long.TryParse(ParseArg(args, name), out var value) ? value : 0;
+
+    private static async Task WatchOwnerAsync(int ownerPid, long ownerStartTicks, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -106,8 +127,9 @@ internal static class Program
                 return;
             }
 
-            if (!IsProcessAlive(ownerPid))
+            if (!IsProcessAlive(ownerPid, ownerStartTicks))
             {
+                Log("主程序已退出,提权宿主结束。");
                 lock (Gate)
                 {
                     StopCore();
@@ -117,12 +139,27 @@ internal static class Program
         }
     }
 
-    private static bool IsProcessAlive(int pid)
+    private static bool IsProcessAlive(int pid, long expectedStartTicks)
     {
         try
         {
             using var process = Process.GetProcessById(pid);
-            return !process.HasExited;
+            if (process.HasExited) return false;
+
+            // PID 会被复用:启动时间不一致说明原主程序已退出、此处是新进程。
+            if (expectedStartTicks > 0)
+            {
+                try
+                {
+                    if (process.StartTime.ToUniversalTime().Ticks != expectedStartTicks) return false;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
         catch
         {
@@ -130,19 +167,15 @@ internal static class Program
         }
     }
 
-    private static NamedPipeServerStream CreateServer(string ownerSid)
+    private static NamedPipeServerStream CreateServer(string clientSid)
     {
         var security = new PipeSecurity();
 
         // 提权进程的 Owner 会变成 BUILTIN\Administrators，因此不能只按 Owner 授权，
         // 否则普通权限的主程序连不上管道（Access denied）。
         security.AddAccessRule(new PipeAccessRule(
-            new SecurityIdentifier(ownerSid),
+            new SecurityIdentifier(clientSid),
             PipeAccessRights.FullControl,
-            AccessControlType.Allow));
-        security.AddAccessRule(new PipeAccessRule(
-            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
-            PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
             AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(
             new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
@@ -175,7 +208,8 @@ internal static class Program
         catch
         {
         }
-        return new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null).Value;
+        // 取不到用户 SID 时退回到管理员组,而不是对所有已认证用户开放。
+        return new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null).Value;
     }
 
     private static async Task HandleClientAsync(NamedPipeServerStream server, CancellationToken ct)
@@ -183,8 +217,20 @@ internal static class Program
         using var reader = new StreamReader(server, Encoding.UTF8, false, 4096, leaveOpen: true);
         using var writer = new StreamWriter(server, new UTF8Encoding(false), 4096, leaveOpen: true) { AutoFlush = true };
 
-        var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(line)) return;
+        // 限制读取时间与行长,避免未授权连接长期占用唯一实例或放大内存占用。
+        using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        readCts.CancelAfter(TimeSpan.FromSeconds(15));
+        string? line;
+        try
+        {
+            line = await reader.ReadLineAsync(readCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(line) || line.Length > 65536) return;
 
         ElevatedRequest? request;
         try
@@ -197,9 +243,10 @@ internal static class Program
             return;
         }
 
-        if (request is null)
+        if (request is null || !TokenMatches(request.Token))
         {
-            await WriteAsync(writer, new ElevatedResponse(false, "空请求")).ConfigureAwait(false);
+            // 不回显具体原因,避免给未授权调用方任何信息。
+            await WriteAsync(writer, new ElevatedResponse(false, "未授权")).ConfigureAwait(false);
             return;
         }
 
@@ -221,10 +268,43 @@ internal static class Program
         await writer.WriteLineAsync(json).ConfigureAwait(false);
     }
 
+    private static bool TokenMatches(string? token)
+    {
+        if (string.IsNullOrEmpty(token)) return false;
+        var provided = Encoding.UTF8.GetBytes(token);
+        var expected = Encoding.UTF8.GetBytes(_token);
+        return provided.Length == expected.Length && CryptographicOperations.FixedTimeEquals(provided, expected);
+    }
+
     private static ElevatedResponse StartCore(ElevatedRequest request)
     {
-        if (string.IsNullOrEmpty(request.BinaryPath) || string.IsNullOrEmpty(request.ConfigPath))
+        if (string.IsNullOrEmpty(request.BinaryPath) || string.IsNullOrEmpty(request.ConfigPath)
+            || string.IsNullOrEmpty(request.WorkingDirectory))
             return new ElevatedResponse(false, "缺少内核路径或配置路径");
+
+        string binaryPath, configPath, workingDir;
+        try
+        {
+            workingDir = Path.GetFullPath(request.WorkingDirectory);
+            binaryPath = Path.GetFullPath(request.BinaryPath);
+            configPath = Path.GetFullPath(request.ConfigPath);
+        }
+        catch (Exception ex)
+        {
+            Log($"内核路径无效:{ex.Message}");
+            return new ElevatedResponse(false, "内核路径无效");
+        }
+
+        // 只允许启动工作目录内的官方内核与其运行时配置,防止宿主被当作任意程序启动器。
+        if (!Directory.Exists(workingDir)
+            || !string.Equals(Path.GetFileName(binaryPath), "mihomo.exe", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(Path.GetFileName(configPath), "runtime.yaml", StringComparison.OrdinalIgnoreCase)
+            || !IsDirectlyInside(workingDir, binaryPath)
+            || !IsDirectlyInside(workingDir, configPath))
+        {
+            Log($"拒绝启动:二进制或配置不在允许范围({binaryPath} | {configPath})");
+            return new ElevatedResponse(false, "内核路径不在允许范围");
+        }
 
         lock (Gate)
         {
@@ -236,11 +316,9 @@ internal static class Program
             if (!File.Exists(request.ConfigPath))
                 return new ElevatedResponse(false, $"找不到配置：{request.ConfigPath}");
 
-            var workingDir = request.WorkingDirectory ?? Path.GetDirectoryName(request.BinaryPath)!;
-
             var psi = new ProcessStartInfo
             {
-                FileName = request.BinaryPath,
+                FileName = binaryPath,
                 WorkingDirectory = workingDir,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -250,12 +328,8 @@ internal static class Program
             psi.ArgumentList.Add("-d");
             psi.ArgumentList.Add(workingDir);
             psi.ArgumentList.Add("-f");
-            psi.ArgumentList.Add(request.ConfigPath);
-            if (!string.IsNullOrEmpty(request.Secret))
-            {
-                psi.ArgumentList.Add("-secret");
-                psi.ArgumentList.Add(request.Secret);
-            }
+            psi.ArgumentList.Add(configPath);
+            // secret 已写入 runtime.yaml,不再经命令行传递,避免同机进程从命令行读取。
 
             try
             {
@@ -275,9 +349,18 @@ internal static class Program
             }
             catch (Exception ex)
             {
-                return new ElevatedResponse(false, ex.Message);
+                Log($"启动内核失败:{ex}");
+                return new ElevatedResponse(false, "内核启动失败,详情见 elevated.log");
             }
         }
+    }
+
+    private static bool IsDirectlyInside(string directory, string filePath)
+    {
+        var dir = directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var parent = Path.GetDirectoryName(filePath)?
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(parent, dir, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void Capture(string? line)

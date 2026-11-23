@@ -102,6 +102,8 @@ public sealed partial class CodeEditor : UserControl
     private void OnUnloaded(object? sender, RoutedEventArgs e)
     {
         _highlightTimer?.Stop();
+        // 卸载后重新走 Loaded 流程,否则再次展开时 SetText 会以为已就绪而写不进文本。
+        _loaded = false;
     }
 
     private string GetText()
@@ -186,9 +188,17 @@ public sealed partial class CodeEditor : UserControl
     {
         if (e.Key != Windows.System.VirtualKey.Tab) return;
         e.Handled = true;
+        if (Editor.IsReadOnly) return;
 
-        var selection = Editor.TextDocument.Selection;
-        selection.TypeText("  ");
+        try
+        {
+            var selection = Editor.TextDocument.Selection;
+            selection.TypeText("  ");
+        }
+        catch
+        {
+            // 只读或文档未就绪时写入会抛 0x80070005,忽略即可。
+        }
     }
 
     /// <summary>

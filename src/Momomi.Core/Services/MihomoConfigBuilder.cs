@@ -31,7 +31,17 @@ public static class MihomoConfigBuilder
         var stream = new YamlStream(new YamlDocument(root));
         using var writer = new StringWriter();
         stream.Save(writer, assignAnchors: false);
-        return writer.ToString();
+        return StripDocumentEnd(writer.ToString());
+    }
+
+    // YamlDotNet 的 emitter 会在末尾补一行 `...`(显式文档结束标记)。写进 runtime.yaml
+    // 的文本不能带它:mihomo 会按「配置到此为止」解析并以 400 拒绝加载。
+    private static string StripDocumentEnd(string text)
+    {
+        var trimmed = text.TrimEnd();
+        if (!trimmed.EndsWith("...", StringComparison.Ordinal)) return text;
+        var keepNewline = text.EndsWith("\n", StringComparison.Ordinal);
+        return trimmed[..^3].TrimEnd() + (keepNewline ? "\n" : "");
     }
 
     public static YamlMappingNode BuildRuntimeYamlNode(string subscriptionYaml, RuntimeYamlOptions options)

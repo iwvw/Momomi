@@ -239,7 +239,17 @@ public sealed partial class ProxyGroupViewModel : ObservableObject
     {
         if (_core.Api is null || node.IsTesting) return;
         node.IsTesting = true;
-        var delay = await _owner.MeasureNodeAsync(node.Name).ConfigureAwait(false);
+        int delay;
+        try
+        {
+            delay = await _owner.MeasureNodeAsync(node.Name).ConfigureAwait(false);
+        }
+        catch
+        {
+            // 异常时也要复位旋转状态,否则节点会永久显示「测速中」。
+            _owner.Dispatcher.TryEnqueue(() => node.IsTesting = false);
+            return;
+        }
         _owner.Dispatcher.TryEnqueue(() =>
         {
             node.IsTesting = false;
@@ -609,7 +619,7 @@ public sealed partial class ProxiesViewModel : ObservableObject
             // 同 LoadDisplayModeAsync：必须等 UI 线程赋值完成，
             // 否则 LoadAsync 里 await 到的只是"已投递"，Rebuild 仍可能读到旧值。
             var done = new TaskCompletionSource();
-            _dispatcher.TryEnqueue(() =>
+            var queued = _dispatcher.TryEnqueue(() =>
             {
                 try
                 {
@@ -625,10 +635,12 @@ public sealed partial class ProxiesViewModel : ObservableObject
                 }
                 finally
                 {
-                    done.SetResult();
+                    done.TrySetResult();
                 }
             });
-            await done.Task.ConfigureAwait(false);
+            // 投递失败(队列已关闭)时必须兜底完成,否则 _prefsReady 永不完成、LoadAsync 挂起。
+            if (!queued) done.TrySetResult();
+            await done.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         }
         catch
         {

@@ -78,6 +78,10 @@ public sealed class MihomoProcessManager : IMihomoProcessManager
             if (proc is null) return false;
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromMinutes(2));
+            // 必须先把 stdout/stderr 读干:mihomo -t 在节点/规则很多时输出可观,
+            // 只重定向不读取会让子进程写满管道缓冲后阻塞、无法退出,被误判为配置无效。
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
             try
             {
                 await proc.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
@@ -87,6 +91,8 @@ public sealed class MihomoProcessManager : IMihomoProcessManager
                 try { proc.Kill(true); } catch { }
                 return false;
             }
+            try { await stdoutTask.ConfigureAwait(false); } catch { }
+            try { await stderrTask.ConfigureAwait(false); } catch { }
             return proc.ExitCode == 0;
         }
         catch
@@ -115,11 +121,7 @@ public sealed class MihomoProcessManager : IMihomoProcessManager
         psi.ArgumentList.Add(options.WorkingDirectory);
         psi.ArgumentList.Add("-f");
         psi.ArgumentList.Add(options.ConfigPath);
-        if (!string.IsNullOrEmpty(options.Secret))
-        {
-            psi.ArgumentList.Add("-secret");
-            psi.ArgumentList.Add(options.Secret);
-        }
+        // secret 已写入运行时配置,不再经命令行传递,避免同机进程从命令行读取。
 
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => CaptureLine(e.Data);
@@ -132,7 +134,15 @@ public sealed class MihomoProcessManager : IMihomoProcessManager
             _recentError.Clear();
         }
 
-        if (!process.Start()) return false;
+        if (!process.Start())
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_process, process)) _process = null;
+            }
+            process.Dispose();
+            return false;
+        }
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
         return process.HasExited == false;
@@ -195,7 +205,7 @@ public sealed class MihomoProcessManager : IMihomoProcessManager
         string? lastError;
         lock (_gate)
         {
-            exitCode = _process?.ExitCode ?? -1;
+            exitCode = (sender as Process)?.ExitCode ?? _process?.ExitCode ?? -1;
             lastError = _recentError.Count > 0 ? string.Join(Environment.NewLine, _recentError.TakeLast(10)) : null;
         }
         Exited?.Invoke(this, new CoreProcessExitedEventArgs(exitCode, lastError));
@@ -267,7 +277,13 @@ public sealed class MihomoProcessManager : IMihomoProcessManager
                         continue;
 
                     victim.Kill(entireProcessTree: true);
-                    await victim.WaitForExitAsync(ct).ConfigureAwait(false);
+                    // 加独立超时:否则进程若因权限/占位未能退出,持锁的 StartAsync 会永久卡住。
+                    using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                    {
+                        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                        try { await victim.WaitForExitAsync(timeout.Token).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { }
+                    }
                     killed.Add(victim.Id);
                 }
                 catch

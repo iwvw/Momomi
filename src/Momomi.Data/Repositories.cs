@@ -69,7 +69,7 @@ public sealed record ProfileRecord(
     string FilePath,
     string? SubscriptionUserInfo,
     bool IsActive,
-    int SortOrder,
+    long SortOrder,
     string CreatedAt,
     string UpdatedAt);
 
@@ -97,7 +97,7 @@ public sealed record ProfileRepository(MomomiDatabase Database)
                     reader.GetString(4),
                     reader.IsDBNull(5) ? null : reader.GetString(5),
                     reader.GetInt64(6) != 0,
-                    reader.GetInt32(7),
+                    reader.GetInt64(7),
                     reader.GetString(8),
                     reader.GetString(9)));
             }
@@ -125,7 +125,7 @@ public sealed record ProfileRepository(MomomiDatabase Database)
             cmd.Parameters.AddWithValue("$kind", kind);
             cmd.Parameters.AddWithValue("$source", (object?)source ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$filePath", filePath);
-            cmd.Parameters.AddWithValue("$sort", (int)DateTimeOffset.Now.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$sort", DateTimeOffset.Now.ToUnixTimeSeconds());
             cmd.Parameters.AddWithValue("$ts", DateTimeOffset.Now.ToString("O"));
             var result = await cmd.ExecuteScalarAsync();
             return Convert.ToInt64(result);
@@ -203,7 +203,7 @@ public sealed record OverrideRecord(
     string? Source,
     string FilePath,
     bool IsGlobal,
-    int SortOrder,
+    long SortOrder,
     string CreatedAt,
     string UpdatedAt);
 
@@ -230,7 +230,7 @@ public sealed record OverrideRepository(MomomiDatabase Database)
                     reader.IsDBNull(3) ? null : reader.GetString(3),
                     reader.GetString(4),
                     reader.GetInt64(5) != 0,
-                    reader.GetInt32(6),
+                    reader.GetInt64(6),
                     reader.GetString(7),
                     reader.GetString(8)));
             }
@@ -253,7 +253,7 @@ public sealed record OverrideRepository(MomomiDatabase Database)
             cmd.Parameters.AddWithValue("$source", (object?)source ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$filePath", filePath);
             cmd.Parameters.AddWithValue("$global", isGlobal ? 1 : 0);
-            cmd.Parameters.AddWithValue("$sort", (int)DateTimeOffset.Now.ToUnixTimeSeconds());
+            cmd.Parameters.AddWithValue("$sort", DateTimeOffset.Now.ToUnixTimeSeconds());
             cmd.Parameters.AddWithValue("$ts", DateTimeOffset.Now.ToString("O"));
             var result = await cmd.ExecuteScalarAsync();
             return Convert.ToInt64(result);
@@ -305,13 +305,16 @@ public sealed record OverrideRepository(MomomiDatabase Database)
     {
         await Database.ExecuteWriteAsync(async conn =>
         {
+            await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync().ConfigureAwait(false);
             await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
             cmd.CommandText = """
                 DELETE FROM override_file WHERE id = $id;
                 DELETE FROM profile_override WHERE override_id = $id;
                 """;
             cmd.Parameters.AddWithValue("$id", id);
             await cmd.ExecuteNonQueryAsync();
+            await tx.CommitAsync().ConfigureAwait(false);
             return 0;
         }).ConfigureAwait(false);
     }
@@ -409,7 +412,12 @@ public sealed record TrafficRepository(MomomiDatabase Database)
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO traffic_minute (bucket, up, down, memory, connections)
-                VALUES ($bucket, $up, $down, $memory, $conns);
+                VALUES ($bucket, $up, $down, $memory, $conns)
+                ON CONFLICT(bucket) DO UPDATE SET
+                    up = excluded.up,
+                    down = excluded.down,
+                    memory = excluded.memory,
+                    connections = excluded.connections;
                 """;
             cmd.Parameters.AddWithValue("$bucket", bucket);
             cmd.Parameters.AddWithValue("$up", up);

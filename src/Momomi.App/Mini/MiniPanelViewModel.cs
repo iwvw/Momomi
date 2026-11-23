@@ -275,12 +275,15 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
 
     private async Task ReloadAsync()
     {
+        if (_disposed) return;
         await Task.Delay(400).ConfigureAwait(false);
+        if (_disposed) return;
         await LoadAsync().ConfigureAwait(false);
     }
 
     public async Task LoadAsync(bool force = false)
     {
+        if (_disposed) return;
         if (_core.Api is null || _core.State != CoreState.Running)
         {
             _groupsLoaded = false;
@@ -315,6 +318,7 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
 
     private void Rebuild()
     {
+        if (_disposed) return;
         var declared = MihomoConfigBuilder.ReadProxyGroupOrder(_core.Paths.RuntimeConfigPath);
         var rank = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var i = 0; i < declared.Count; i++) rank[declared[i]] = i;
@@ -459,9 +463,9 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
         }
     }
 
-    public async Task SelectNodeAsync(MiniProxyGroupViewModel group, MiniProxyNodeViewModel node)
+    public async Task<bool> SelectNodeAsync(MiniProxyGroupViewModel group, MiniProxyNodeViewModel node)
     {
-        if (_core.Api is null) return;
+        if (_core.Api is null) return false;
         try
         {
             await _core.Api.SelectProxyAsync(group.Name, node.Name).ConfigureAwait(false);
@@ -502,9 +506,12 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
                     _suppressSelfReload = false;
                 }
             });
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
+            global::Momomi.App.App.WriteLog($"切换节点失败:{ex.Message}");
+            return false;
         }
     }
 

@@ -245,6 +245,8 @@ public sealed partial class OverridesViewModel : ObservableObject
     private async Task SaveEditorAsync()
     {
         if (_editing is null) return;
+        // await 期间用户可能关闭/切换编辑器,捕获局部引用避免 NRE 或串会话。
+        var editing = _editing;
 
         var content = ToStorageText(EditorText);
         var error = YamlOverrideMerger.Validate(content);
@@ -254,7 +256,7 @@ public sealed partial class OverridesViewModel : ObservableObject
             return;
         }
 
-        var ok = await _host.Overrides.SaveContentAsync(_editing.Id, content);
+        var ok = await _host.Overrides.SaveContentAsync(editing.Id, content);
         if (!ok)
         {
             SetEditorError("保存失败，请检查数据目录是否可写");
@@ -267,7 +269,7 @@ public sealed partial class OverridesViewModel : ObservableObject
         // 若当前订阅正在使用这条覆写，立刻重新生成 runtime.yaml 并热重载内核。
         try
         {
-            if (await IsInUseAsync(_editing.Id))
+            if (await IsInUseAsync(editing.Id))
             {
                 var reloaded = await _host.ApplyActiveProfileAsync();
                 StatusText = reloaded ? "已保存并热重载内核" : "已保存，但内核重载失败（可重启内核）";
@@ -324,7 +326,7 @@ public sealed partial class OverridesViewModel : ObservableObject
 
             // 除当前这条之外的其它生效覆写（全局 + 挂载）。
             var others = (await _host.Overrides.ResolveActiveDocumentsAsync(active?.Id))
-                .Where(d => d.Name != _editing?.Name)
+                .Where(d => _editing is null || d.Id != _editing.Id)
                 .ToList();
 
             string withOthers;
@@ -470,8 +472,9 @@ public sealed partial class OverridesViewModel : ObservableObject
         {
             await _host.ApplyActiveProfileAsync();
         }
-        catch
+        catch (Exception ex)
         {
+            StatusText = $"已切换,但内核重载失败:{ex.Message}";
         }
         await LoadAsync();
     }

@@ -130,12 +130,13 @@ public partial class App : Application
     /// 迷你面板则是无标题的置顶小窗，按标题查不到就会悄无声息地什么都不做。
     /// 改成枚举顶层窗口，按「进程名 + 标题」定位。
     /// </summary>
-    private static void ActivateExistingInstance()
+    private static bool ActivateExistingInstance()
     {
         try
         {
             var own = Environment.ProcessId;
             IntPtr fallback = IntPtr.Zero;
+            var found = false;
 
             EnumWindows((hwnd, _) =>
             {
@@ -153,6 +154,7 @@ public partial class App : Application
                         ShowWindow(hwnd, SW_RESTORE);
                         SetForegroundWindow(hwnd);
                         fallback = IntPtr.Zero;
+                        found = true;
                         return false;
                     }
 
@@ -170,11 +172,38 @@ public partial class App : Application
             {
                 ShowWindow(fallback, SW_RESTORE);
                 SetForegroundWindow(fallback);
+                found = true;
             }
+
+            return found;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>跨用户会话时窗口枚举不到,给出明确提示而不是静默退出。</summary>
+    private static void ShowAlreadyRunningNotice()
+    {
+        try
+        {
+            MessageBoxW(IntPtr.Zero,
+                "Momomi 已在另一个用户会话中运行。请切换到该会话使用,或先退出那边的实例。",
+                "Momomi", 0x00000040);
         }
         catch
         {
         }
+    }
+
+    /// <summary>退出时释放常驻服务(内存看门狗、更新协调器),避免定时器在进程收尾后仍触发。</summary>
+    public static void DisposeServices()
+    {
+        try { _memoryWatchdog?.Dispose(); } catch { }
+        _memoryWatchdog = null;
+        try { Updates?.Dispose(); } catch { }
+        Updates = null;
     }
 
     private static string? GetProcessName(uint pid)
@@ -264,7 +293,14 @@ public partial class App : Application
         // 单实例：已有实例在运行时，激活它的窗口后直接退出本进程，避免多开。
         if (!TryAcquireSingleInstance())
         {
-            ActivateExistingInstance();
+            // 首实例可能仍在初始化(数据库/内核首装要数秒),窗口尚未创建时枚举不到,需重试。
+            var activated = false;
+            for (var attempt = 0; attempt < 15 && !activated; attempt++)
+            {
+                activated = ActivateExistingInstance();
+                if (!activated) await Task.Delay(200);
+            }
+            if (!activated) ShowAlreadyRunningNotice();
             Exit();
             return;
         }

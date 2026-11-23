@@ -8,7 +8,8 @@ public sealed record ElevatedRequest(
     string? WorkingDirectory = null,
     string? ConfigPath = null,
     string? BinaryPath = null,
-    string? Secret = null);
+    string? Secret = null,
+    string? Token = null);
 
 public sealed record ElevatedResponse(
     bool Success,

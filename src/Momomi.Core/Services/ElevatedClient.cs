@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 
@@ -22,6 +24,8 @@ public sealed class ElevatedClient : IElevatedClient
 {
     private readonly string _hostPath;
     private readonly object _gate = new();
+    private readonly object _launchSync = new();
+    private readonly string _token;
     private Process? _hostProcess;
     private string? _launchError;
 
@@ -30,6 +34,8 @@ public sealed class ElevatedClient : IElevatedClient
     public ElevatedClient(string hostPath)
     {
         _hostPath = hostPath;
+        // 每次启动提权宿主随机生成会话令牌,只有持有该令牌的请求才会被执行。
+        _token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     }
 
     public bool IsElevatedHostRunning
@@ -113,9 +119,13 @@ public sealed class ElevatedClient : IElevatedClient
 
     public bool LaunchElevatedHost()
     {
-        lock (_gate)
+        // 启动流程最长会等 UAC 20 秒,不能占用 _gate(否则 IsElevatedHostRunning/KillOrphanHosts 全被拖住)。
+        lock (_launchSync)
         {
-            if (_hostProcess is { HasExited: false }) return true;
+            lock (_gate)
+            {
+                if (_hostProcess is { HasExited: false }) return true;
+            }
             if (!File.Exists(_hostPath)) return false;
 
             // 优先用 PowerShell Start-Process -Verb RunAs：UAC 被系统设为“不通知”而静默拒绝时，
@@ -129,14 +139,15 @@ public sealed class ElevatedClient : IElevatedClient
                 {
                     FileName = _hostPath,
                     // 显式传递主程序 PID：提权进程的父进程会被 UAC 改写，不能靠父进程关系判断存活。
-                    Arguments = $"--owner {Environment.ProcessId}",
+                    Arguments = BuildHostArguments(),
                     UseShellExecute = true,
                     Verb = "runas",
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden,
                 };
-                _hostProcess = Process.Start(psi);
-                return _hostProcess is not null;
+                var process = Process.Start(psi);
+                lock (_gate) { _hostProcess = process; }
+                return process is not null;
             }
             catch (Exception ex)
             {
@@ -146,15 +157,41 @@ public sealed class ElevatedClient : IElevatedClient
         }
     }
 
+    // 显式传递主程序 PID 与启动时间:提权进程的父进程会被 UAC 改写,不能靠父进程关系判断存活;
+    // PID 会被复用,因此额外用启动时间确认身份。同时带上受限客户端 SID 与会话令牌。
+    private string BuildHostArguments()
+    {
+        var args = new StringBuilder();
+        args.Append("--owner ").Append(Environment.ProcessId);
+        args.Append(" --owner-start ").Append(CurrentProcessStartTicks());
+        var sid = CurrentUserSid();
+        if (sid.Length > 0) args.Append(" --client-sid ").Append(sid);
+        args.Append(" --token ").Append(_token);
+        return args.ToString();
+    }
+
+    private static long CurrentProcessStartTicks()
+    {
+        try { return Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks; }
+        catch { return 0; }
+    }
+
+    private static string CurrentUserSid()
+    {
+        try { return WindowsIdentity.GetCurrent().User?.Value ?? string.Empty; }
+        catch { return string.Empty; }
+    }
+
     private bool TryLaunchViaPowerShell()
     {
         try
         {
             var escaped = _hostPath.Replace("'", "''");
+            var hostArgs = BuildHostArguments().Replace("'", "''");
             // -Wait 让 PowerShell 等待提权进程创建；UAC 静默拒绝时 Start-Process 会报错。
             var command =
                 $"try {{ $p = Start-Process -FilePath '{escaped}' " +
-                $"-ArgumentList '--owner {Environment.ProcessId}' -Verb RunAs -PassThru -WindowStyle Hidden; " +
+                $"-ArgumentList '{hostArgs}' -Verb RunAs -PassThru -WindowStyle Hidden; " +
                 $"if ($p) {{ exit 0 }} else {{ exit 2 }} }} catch {{ Write-Error $_.Exception.Message; exit 1 }}";
 
             var psi = new ProcessStartInfo
@@ -168,6 +205,9 @@ public sealed class ElevatedClient : IElevatedClient
 
             using var proc = Process.Start(psi);
             if (proc is null) return false;
+
+            // 先开始异步读取 stderr,避免子进程写满管道缓冲区后卡住、无法退出。
+            var errorTask = proc.StandardError.ReadToEndAsync();
             if (!proc.WaitForExit(20000))
             {
                 try { proc.Kill(); } catch { }
@@ -181,7 +221,7 @@ public sealed class ElevatedClient : IElevatedClient
                 return true;
             }
 
-            var err = proc.StandardError.ReadToEnd().Trim();
+            var err = errorTask.GetAwaiter().GetResult().Trim();
             _launchError = string.IsNullOrEmpty(err)
                 ? "提权被拒绝：系统可能将 UAC 设为“不通知”，请在 Windows 设置中将 UAC 调到至少“仅当应用尝试更改时通知我”。"
                 : err;
@@ -210,6 +250,7 @@ public sealed class ElevatedClient : IElevatedClient
     {
         try
         {
+            request = request with { Token = _token };
             await using var pipe = new NamedPipeClientStream(
                 ".", ElevatedProtocol.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
 
@@ -221,7 +262,7 @@ public sealed class ElevatedClient : IElevatedClient
             using var reader = new StreamReader(pipe, Encoding.UTF8, false, 4096, leaveOpen: true);
 
             var json = JsonSerializer.Serialize(request, ElevatedProtocol.JsonOptions);
-            await writer.WriteLineAsync(json).ConfigureAwait(false);
+            await writer.WriteLineAsync(json.AsMemory(), timeout.Token).ConfigureAwait(false);
 
             var line = await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(line))

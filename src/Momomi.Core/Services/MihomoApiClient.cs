@@ -134,7 +134,8 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
         {
             var v = entry.Value;
             int? delay = null;
-            if (v.TryGetProperty("history", out var history) && history.GetArrayLength() > 0)
+            if (v.TryGetProperty("history", out var history)
+                && history.ValueKind == JsonValueKind.Array && history.GetArrayLength() > 0)
             {
                 var last = history[history.GetArrayLength() - 1];
                 if (last.TryGetProperty("delay", out var d) && d.ValueKind == JsonValueKind.Number)
@@ -293,7 +294,13 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
         try
         {
             using var response = await _http.GetAsync(path, ct).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode) return null;
+            if (!response.IsSuccessStatusCode)
+            {
+                // 不要把鉴权/端口错误静默吞成"暂无数据":401/403 通常是 secret 不匹配,
+                // 记下来才能在"内核未就绪"之外定位真正原因。
+                MomomiHost.CoreLog($"[MihomoApiClient] {path} 返回 {(int)response.StatusCode} {response.ReasonPhrase}");
+                return null;
+            }
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
         }
@@ -301,17 +308,19 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
         {
             throw;
         }
-        catch
+        catch (Exception ex)
         {
+            MomomiHost.CoreLog($"[MihomoApiClient] {path} 请求失败:{ex.Message}");
             return null;
         }
     }
 
+    private static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(90);
+
     private async Task StreamAsync(string path, Func<JsonElement, Task> onItem, CancellationToken ct)
     {
+        // 鉴权走构造时设置的 Authorization 头即可,不再把 secret 拼进 URL(避免凭据进入日志/代理记录)。
         var url = new Uri(_baseUri, path);
-        if (!string.IsNullOrEmpty(Secret))
-            url = new Uri(url + (path.Contains('?') ? "&" : "?") + "token=" + Uri.EscapeDataString(Secret));
 
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -324,7 +333,22 @@ public sealed class MihomoApiClient : IMihomoApiClient, IDisposable
 
         while (!ct.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+            string? line;
+            // 空闲超时:半开连接(TCP 对端停发但未发 FIN/RST)下 ReadLine 会永久挂起,
+            // 而 _http.Timeout 在 ResponseHeadersRead 下只覆盖响应头。超时后主动断开,
+            // 交由上层重连,避免流量/连接/日志流静默卡死。
+            using (var idle = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                idle.CancelAfter(IdleTimeout);
+                try
+                {
+                    line = await reader.ReadLineAsync(idle.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    throw new IOException("mihomo 数据流空闲超时");
+                }
+            }
             if (line is null) break;
             if (line.Length == 0) continue;
             try

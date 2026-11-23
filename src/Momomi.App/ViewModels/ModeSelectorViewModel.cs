@@ -71,6 +71,7 @@ public sealed partial class ModeSelectorViewModel : ObservableObject, IDisposabl
 
     public async Task LoadAsync()
     {
+        if (_disposed) return;
         _loading = true;
         try
         {
@@ -195,7 +196,7 @@ public sealed partial class ModeSelectorViewModel : ObservableObject, IDisposabl
 
     public async Task SetSystemProxyAsync(bool enabled)
     {
-        if (_suppressSwitch) return;
+        if (_disposed || _suppressSwitch) return;
 
         if (_proxyBusy)
         {
@@ -265,7 +266,7 @@ public sealed partial class ModeSelectorViewModel : ObservableObject, IDisposabl
 
     public async Task SetTunAsync(bool enabled)
     {
-        if (_suppressSwitch) return;
+        if (_disposed || _suppressSwitch) return;
 
         // 快速连续切换收敛：切换中时记录最新请求，完成后按最后一次继续，避免连点丢状态。
         if (_switchBusy)

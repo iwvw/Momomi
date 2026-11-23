@@ -124,13 +124,16 @@ public sealed class LoopbackExemptionService : ILoopbackExemptionService
             };
             using var proc = Process.Start(psi);
             if (proc is null) return null;
-            var output = proc.StandardOutput.ReadToEnd();
-            proc.StandardError.ReadToEnd();
+            // 必须先并发读两条流:顺序 ReadToEnd 在 stderr 写满管道缓冲时会死锁。
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
             if (!proc.WaitForExit(60000))
             {
                 try { proc.Kill(); } catch { }
                 return null;
             }
+            var output = stdoutTask.GetAwaiter().GetResult();
+            _ = stderrTask.GetAwaiter().GetResult();
             return proc.ExitCode == 0 ? output : null;
         }
         catch

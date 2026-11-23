@@ -30,6 +30,9 @@ public interface ICoreManager : IDisposable
     string? LastError { get; }
     CorePaths Paths { get; }
     IMihomoApiClient? Api { get; }
+
+    /// <summary>PAC 模式下恢复系统代理的回调(由宿主注入:启动 PacServer 并写 AutoConfigURL)。</summary>
+    Func<int, bool>? RestorePacProxy { get; set; }
     bool IsElevatedMode { get; }
 
     bool ConnectionsWanted { get; }
@@ -78,6 +81,9 @@ public sealed class CoreManager : ICoreManager
     private bool _restoreSystemProxyAfterStart;
 
     public CorePaths Paths { get; }
+
+    /// <summary>PAC 模式下恢复系统代理的回调(由宿主注入:启动 PacServer 并写 AutoConfigURL)。</summary>
+    public Func<int, bool>? RestorePacProxy { get; set; }
     public CoreState State => _state;
     public string? Version => _version;
     public string? LastError => _lastError;
@@ -311,13 +317,22 @@ public sealed class CoreManager : ICoreManager
 
         if (!_elevated.IsElevatedHostRunning)
         {
-            if (!_elevated.LaunchElevatedHost())
+            var launched = await Task.Run(() => _elevated.LaunchElevatedHost(), ct).ConfigureAwait(false);
+            if (!launched)
             {
                 _lastError = _elevated.LaunchError
                     ?? "提权宿主启动失败（可能拒绝了 UAC 授权）";
                 return false;
             }
-            await Task.Delay(1200, ct).ConfigureAwait(false);
+            // 提权宿主创建管道需要时间,轮询等待就绪而非固定延时,并提供明确的失败原因。
+            var deadline = DateTime.UtcNow.AddSeconds(6);
+            while (DateTime.UtcNow < deadline && !_elevated.IsElevatedHostRunning)
+                await Task.Delay(200, ct).ConfigureAwait(false);
+            if (!_elevated.IsElevatedHostRunning)
+            {
+                _lastError = "提权宿主已启动但管道未就绪(可能被安全软件拦截)";
+                return false;
+            }
         }
 
         var response = await _elevated
@@ -633,9 +648,15 @@ public sealed class CoreManager : ICoreManager
         try
         {
             var port = _settings.GetIntAsync("core.mixedPort", 7890).GetAwaiter().GetResult();
-            // 内核重启（同一进程内）的恢复：无条件写回手动代理。
-            // PAC 模式由 PacServer 常驻监听，AutoConfigURL 在 StopAsync 时被清掉，
-            // 这里统一回到手动代理即可；App 层随后会按真实开关状态同步界面。
+            var mode = _settings.GetAsync("ui.systemProxyMode").GetAwaiter().GetResult() ?? "manual";
+            // PAC 模式下必须重启 PAC 服务并写回 AutoConfigURL,
+            // 否则热重载失败兜底重启会把 PAC 静默降级成手动代理。
+            if (mode == "pac" && RestorePacProxy is not null && RestorePacProxy(port))
+            {
+                _ = SystemProxyState.SetDesiredAsync(_settings, true);
+                return;
+            }
+
             _systemProxy.Enable($"127.0.0.1:{port}", SystemProxyState.Bypass);
 
             // 这一步是"重启内核后把代理开回来"，属于用户意图为开启的情况，
@@ -733,12 +754,34 @@ public sealed class CoreManager : ICoreManager
 
     private void OnProcessExited(object? sender, CoreProcessExitedEventArgs e)
     {
-        lock (_streamGate) StopStreamsLocked();
         if (_state is CoreState.Stopping or CoreState.Stopped) return;
-        SetState(CoreState.Error, _version,
-            string.IsNullOrWhiteSpace(e.LastError)
-                ? $"内核进程已退出（代码 {e.ExitCode}）"
-                : $"内核进程已退出（代码 {e.ExitCode}）：{e.LastError}");
+        var exitCode = e.ExitCode;
+        var lastError = e.LastError;
+
+        // 崩溃路径必须和主动停止一样清理:关掉指向已死端口的系统代理、释放 HttpClient、
+        // 停流,否则主机断网而界面只报一个内核错误。
+        _ = Task.Run(async () =>
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (_state is CoreState.Stopping or CoreState.Stopped) return;
+                await CleanupLockedAsync(CancellationToken.None).ConfigureAwait(false);
+                SetState(CoreState.Error, _version,
+                    string.IsNullOrWhiteSpace(lastError)
+                        ? $"内核进程已退出（代码 {exitCode}）"
+                        : $"内核进程已退出（代码 {exitCode}）：{lastError}");
+            }
+            catch (Exception ex)
+            {
+                Log($"[CoreManager] 内核退出后清理失败:{ex.Message}");
+                SetState(CoreState.Error, _version, $"内核进程已退出（代码 {exitCode}）");
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        });
     }
 
     private void OnWatchdog(object? state)

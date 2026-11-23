@@ -40,7 +40,7 @@ public sealed class MomomiHost : IDisposable
         Database = new MomomiDatabase(Path.Combine(_root, "momomi.db"));
         Settings = new SettingsService(Database);
         Process = new MihomoProcessManager();
-        SystemProxy = new SystemProxyService();
+        SystemProxy = new SystemProxyService(Settings);
         Startup = new StartupService();
         Traffic = new TrafficRepository(Database);
 
@@ -65,6 +65,7 @@ public sealed class MomomiHost : IDisposable
             ElevatedHostPath: Path.Combine(AppContext.BaseDirectory, "Momomi.Elevated.exe"));
 
         Core = new CoreManager(Process, Settings, Elevated, SystemProxy, paths);
+        Core.RestorePacProxy = port => Pac.Start(port) && Pac.PacUrl is { } url && SystemProxy.EnablePac(url);
         _recorder = new TrafficRecorder(Traffic);
         Core.TrafficUpdated += (_, snap) => _recorder.Record(snap);
         Core.ConnectionsUpdated += (_, snap) => _recorder.RecordConnections(snap);
@@ -128,7 +129,7 @@ public sealed class MomomiHost : IDisposable
     }
 
     /// <summary>把订阅/配置应用过程中的关键失败写进数据目录下的 core.log，便于排查「更新了却没变化」。</summary>
-    private static void CoreLog(string message)
+    internal static void CoreLog(string message)
     {
         try
         {
@@ -201,8 +202,17 @@ public sealed class MomomiHost : IDisposable
     {
         var path = Core.Paths.RuntimeConfigPath;
         var temp = path + ".tmp";
-        await File.WriteAllTextAsync(temp, yaml, ct).ConfigureAwait(false);
-        File.Move(temp, path, overwrite: true);
+        try
+        {
+            await File.WriteAllTextAsync(temp, yaml, ct).ConfigureAwait(false);
+            File.Move(temp, path, overwrite: true);
+        }
+        catch
+        {
+            // 失败时清掉半截临时文件,避免数据目录堆积。
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            throw;
+        }
     }
 
     public async Task<bool> ApplyActiveProfileAsync(CancellationToken ct = default)
@@ -298,6 +308,7 @@ public sealed class MomomiHost : IDisposable
         Pac.Dispose();
         Core.Dispose();
         _recorder.Dispose();
+        _applyGate.Dispose();
     }
 
     /// <summary>

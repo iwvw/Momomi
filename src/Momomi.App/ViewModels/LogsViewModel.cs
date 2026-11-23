@@ -51,20 +51,27 @@ public sealed partial class LogsViewModel : ObservableObject
 
     private void OnLog(LogEntry entry)
     {
-        if (IsPaused) return;
         if (!ShouldShow(entry.Type)) return;
 
         var schedule = false;
         lock (_pendingGate)
         {
             _pending.Add(entry);
-            if (!_flushScheduled)
+            // 暂停期间继续缓冲(有上限),恢复时补齐,避免暂停区间日志永久丢失。
+            var overflow = _pending.Count - MaxLines * 2;
+            if (overflow > 0) _pending.RemoveRange(0, overflow);
+            if (!_flushScheduled && !IsPaused)
             {
                 _flushScheduled = true;
                 schedule = true;
             }
         }
         if (schedule) _ = FlushLaterAsync();
+    }
+
+    partial void OnIsPausedChanged(bool value)
+    {
+        if (!value) Flush();
     }
 
     private async Task FlushLaterAsync()
@@ -80,6 +87,8 @@ public sealed partial class LogsViewModel : ObservableObject
         {
             _flushScheduled = false;
             if (_pending.Count == 0) return;
+            // 暂停期间保留缓冲,恢复时由 OnIsPausedChanged 补上。
+            if (IsPaused) return;
             batch = new List<LogEntry>(_pending);
             _pending.Clear();
         }
@@ -122,8 +131,9 @@ public sealed partial class LogsViewModel : ObservableObject
             package.SetText(text);
             Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
         }
-        catch
+        catch (Exception ex)
         {
+            global::Momomi.App.App.WriteLog($"复制日志失败:{ex.Message}");
         }
     }
 }
