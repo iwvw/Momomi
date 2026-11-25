@@ -14,6 +14,7 @@ public sealed partial class MiniPanelView : UserControl
     public event EventHandler? CollapseRequested;
 
     private bool _modeLoading;
+    private FlyoutBase? _openNodeFlyout;
 
     public MiniPanelView()
     {
@@ -202,23 +203,29 @@ public sealed partial class MiniPanelView : UserControl
 
     private void Node_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (sender is not ComboBox combo) return;
-        if (combo.Tag is not MiniProxyGroupViewModel group) return;
-        if (combo.SelectedItem is not MiniProxyNodeViewModel node) return;
+        if (sender is not ListView list) return;
+        if (list.Tag is not MiniProxyGroupViewModel group) return;
+        if (list.SelectedItem is not MiniProxyNodeViewModel node) return;
 
-        // 程序化改集合/重推 Selected 时 ComboBox 会自行触发 SelectionChanged；
-        // 这类事件不是用户操作，不能被当成切换节点回写内核。否则重启或刷新订阅后
-        // 组会被选到排序后的相邻节点，并被持久化成用户选择。
+        // 程序化改集合/重推 Selected 时 ListView 会自行触发 SelectionChanged;
+        // 这类事件不是用户操作,不能被当成切换节点回写内核。否则重启或刷新订阅后
+        // 组会被选到排序后的相邻节点,并被持久化成用户选择。
         if (group.IsSyncingSelection) return;
-
-        // 面板隐藏预热、后台刷新时 ComboBox 没有焦点，产生的选择变更同样不是用户操作。
-        // 用户真实改选一定发生在下拉展开中或控件获得焦点时。
-        if (!combo.IsDropDownOpen && combo.FocusState == FocusState.Unfocused) return;
 
         if (ReferenceEquals(group.Selected, node)) return;
         var previous = group.Selected;
         group.Selected = node;
+        _openNodeFlyout?.Hide();
         _ = ApplyNodeSelectionAsync(group, previous, node);
+    }
+
+    private void OpenNodeList_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe) return;
+        if (fe.Parent is not FrameworkElement host) return;
+        var flyout = FlyoutBase.GetAttachedFlyout(host);
+        _openNodeFlyout = flyout;
+        flyout?.ShowAt(host);
     }
 
     private async Task ApplyNodeSelectionAsync(
@@ -228,12 +235,8 @@ public sealed partial class MiniPanelView : UserControl
             group.Selected = previous;   // 切换失败:回滚下拉框,避免显示未生效的选择
     }
 
-    private void TestGroup_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement fe) return;
-        if (fe.Tag is not MiniProxyGroupViewModel group) return;
-        _ = ViewModel.TestGroupAsync(group);
-    }
+    private void TestAll_Click(object sender, RoutedEventArgs e)
+        => _ = ViewModel.TestAllGroupsAsync();
 
     private void OpenFull_Click(object sender, RoutedEventArgs e)
         => OpenFullRequested?.Invoke(this, EventArgs.Empty);

@@ -51,6 +51,9 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
     public partial bool IsRunning { get; set; }
 
     [ObservableProperty]
+    public partial bool IsTestingAll { get; set; }
+
+    [ObservableProperty]
     public partial bool HasGroups { get; set; }
 
     /// <summary>当前订阅名称（无则空）。</summary>
@@ -565,6 +568,21 @@ public sealed partial class MiniPanelViewModel : ObservableObject, IDisposable
         var cap = _delayTestConcurrency;
         if (targetCount <= 20) cap = Math.Min(cap, 10);
         return Math.Max(1, Math.Min(cap, targetCount));
+    }
+
+    public async Task TestAllGroupsAsync()
+    {
+        if (IsTestingAll) return;
+        _dispatcher.TryEnqueue(() => IsTestingAll = true);
+        try
+        {
+            foreach (var group in Groups.ToList())
+                await TestGroupAsync(group).ConfigureAwait(false);
+        }
+        finally
+        {
+            _dispatcher.TryEnqueue(() => IsTestingAll = false);
+        }
     }
 
     public async Task TestGroupAsync(MiniProxyGroupViewModel group)

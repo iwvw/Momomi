@@ -80,6 +80,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <Image Width="20" Height="20" VerticalAlignment="Center" Source="ms-appx:///Assets/AppIcon.png" />
             <TextBlock Grid.Column="1"
@@ -87,6 +88,19 @@
                        Style="{StaticResource BodyStrongTextBlockStyle}"
                        Text="Momomi" />
             <Grid Grid.Column="3" Width="28" Height="28" VerticalAlignment="Center">
+                <ProgressRing Width="16" Height="16"
+                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                              IsActive="{x:Bind ViewModel.IsTestingAll, Mode=OneWay}"
+                              Visibility="{x:Bind ViewModel.IsTestingAll, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+                <Button Style="{StaticResource MiniIconButtonStyle}"
+                        Visibility="{x:Bind ViewModel.IsTestingAll, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
+                        AutomationProperties.Name="测速"
+                        ToolTipService.ToolTip="测速全部节点组"
+                        Click="TestAll_Click">
+                    <FontIcon FontSize="12" Glyph="&#xE9D9;" />
+                </Button>
+            </Grid>
+            <Grid Grid.Column="4" Width="28" Height="28" VerticalAlignment="Center">
                 <ProgressRing Width="16" Height="16"
                               HorizontalAlignment="Center" VerticalAlignment="Center"
                               IsActive="{x:Bind ViewModel.IsUpdatingSubscription, Mode=OneWay}"
@@ -99,7 +113,7 @@
                     <FontIcon FontSize="12" Glyph="&#xE895;" />
                 </Button>
             </Grid>
-            <Button Grid.Column="4" Style="{StaticResource MiniStopButtonStyle}"
+            <Button Grid.Column="5" Style="{StaticResource MiniStopButtonStyle}"
                     Visibility="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource BoolToVisibility}}"
                     AutomationProperties.Name="停止内核"
                     ToolTipService.ToolTip="停止内核"
@@ -120,19 +134,19 @@
                 </Button.Resources>
                 <FontIcon FontSize="12" Foreground="White" Glyph="&#xE71A;" />
             </Button>
-            <Button Grid.Column="4" Style="{StaticResource MiniIconButtonStyle}"
+            <Button Grid.Column="5" Style="{StaticResource MiniIconButtonStyle}"
                     Visibility="{x:Bind ViewModel.IsRunning, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
                     AutomationProperties.Name="启动内核"
                     ToolTipService.ToolTip="启动内核"
                     Command="{x:Bind ViewModel.ToggleCoreCommand}">
                 <FontIcon FontSize="12" Glyph="&#xE768;" />
             </Button>
-            <Button Grid.Column="5" MinWidth="0" Padding="10,4"
+            <Button Grid.Column="6" MinWidth="0" Padding="10,4"
                     VerticalAlignment="Center"
                     ToolTipService.ToolTip="打开主界面"
                     Click="OpenFull_Click"
                     Content="主界面" />
-            <Button Grid.Column="6" MinWidth="0"
+            <Button Grid.Column="7" MinWidth="0"
                     Width="28" Height="28" Padding="0"
                     VerticalAlignment="Center"
                     HorizontalContentAlignment="Center"
@@ -255,57 +269,115 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <controls:ProxyNameView Grid.Column="0"
                                                     NameText="{x:Bind Name}"
                                                     TextSize="14"
                                                     IsSemiBold="True"
                                                     VerticalAlignment="Center" />
-                            <Grid Grid.Column="1" Width="28" Height="28" VerticalAlignment="Center">
-                                <ProgressRing Width="16" Height="16"
-                                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                                              IsActive="{x:Bind IsTesting, Mode=OneWay}"
-                                              Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
-                                <Button Style="{StaticResource MiniIconButtonStyle}"
-                                        Visibility="{x:Bind IsTesting, Mode=OneWay, Converter={StaticResource InverseBoolToVisibility}}"
-                                        AutomationProperties.Name="重新测速"
-                                        ToolTipService.ToolTip="重新测速"
-                                        Tag="{x:Bind}"
-                                        Click="TestGroup_Click">
-                                    <FontIcon FontSize="12" Glyph="&#xE9D9;" />
+                            <Grid Grid.Column="1"
+                                  Width="230"
+                                  VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FlyoutBase.AttachedFlyout>
+                                    <Flyout Placement="Bottom">
+                                        <Flyout.FlyoutPresenterStyle>
+                                            <Style TargetType="FlyoutPresenter">
+                                                <Setter Property="Padding" Value="4" />
+                                                <Setter Property="CornerRadius" Value="8" />
+                                            </Style>
+                                        </Flyout.FlyoutPresenterStyle>
+                                        <ListView Width="222"
+                                                  MaxHeight="320"
+                                                  Padding="0"
+                                                  SelectionMode="Single"
+                                                  ItemContainerTransitions="{x:Null}"
+                                                  ScrollViewer.HorizontalScrollMode="Disabled"
+                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                  ItemsSource="{x:Bind Nodes}"
+                                                  SelectedItem="{x:Bind Selected, Mode=OneWay}"
+                                                  SelectionChanged="Node_SelectionChanged"
+                                                  Tag="{x:Bind}">
+                                            <ListView.Resources>
+                                                <CornerRadius x:Key="ListViewItemCornerRadius">4</CornerRadius>
+                                            </ListView.Resources>
+                                            <ListView.ItemContainerStyle>
+                                                <Style TargetType="ListViewItem">
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                    <Setter Property="MinHeight" Value="0" />
+                                                    <Setter Property="Padding" Value="10,4" />
+                                                    <Setter Property="Margin" Value="0" />
+                                                    <Setter Property="CornerRadius" Value="4" />
+                                                </Style>
+                                            </ListView.ItemContainerStyle>
+                                            <ListView.ItemTemplate>
+                                                <DataTemplate x:DataType="local:MiniProxyNodeViewModel">
+                                                    <Grid ColumnSpacing="6">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <controls:ProxyNameView Grid.Column="0"
+                                                                                NameText="{x:Bind Name}"
+                                                                                TextSize="13"
+                                                                                VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   VerticalAlignment="Center"
+                                                                   TextAlignment="Right"
+                                                                   FontSize="12"
+                                                                   Foreground="{x:Bind DelayKey, Mode=OneWay, Converter={StaticResource DelayToBrush}}"
+                                                                   Text="{x:Bind DelayText, Mode=OneWay}" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListView.ItemTemplate>
+                                        </ListView>
+                                    </Flyout>
+                                </FlyoutBase.AttachedFlyout>
+                                <Button Grid.Column="0"
+                                        Height="32"
+                                        MinWidth="0"
+                                        Padding="10,0"
+                                        VerticalAlignment="Center"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Stretch"
+                                        CornerRadius="4,0,0,4"
+                                        AutomationProperties.Name="当前节点"
+                                        ToolTipService.ToolTip="选择节点"
+                                        Click="OpenNodeList_Click">
+                                    <Grid ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <controls:ProxyNameView Grid.Column="0"
+                                                                NameText="{x:Bind Selected.Name, Mode=OneWay}"
+                                                                TextSize="13"
+                                                                VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1"
+                                                   VerticalAlignment="Center"
+                                                   TextAlignment="Right"
+                                                   FontSize="12"
+                                                   Foreground="{x:Bind Selected.DelayKey, Mode=OneWay, Converter={StaticResource DelayToBrush}}"
+                                                   Text="{x:Bind Selected.DelayText, Mode=OneWay}" />
+                                    </Grid>
+                                </Button>
+                                <Button Grid.Column="1"
+                                        Width="24"
+                                        Height="32"
+                                        MinWidth="0"
+                                        Padding="0"
+                                        VerticalAlignment="Center"
+                                        CornerRadius="0,4,4,0"
+                                        AutomationProperties.Name="选择节点"
+                                        ToolTipService.ToolTip="选择节点"
+                                        Click="OpenNodeList_Click">
+                                    <FontIcon Glyph="&#xE70D;" FontSize="8"
+                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </Button>
                             </Grid>
-                            <ComboBox Grid.Column="2"
-                                      Width="180"
-                                      VerticalAlignment="Center"
-                                      PlaceholderText="选择节点"
-                                      ItemsSource="{x:Bind Nodes}"
-                                      SelectedItem="{x:Bind Selected, Mode=OneWay}"
-                                      SelectionChanged="Node_SelectionChanged"
-                                      Tag="{x:Bind}">
-                                <ComboBox.ItemTemplate>
-                                    <DataTemplate x:DataType="local:MiniProxyNodeViewModel">
-                                        <Grid ColumnSpacing="6">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <controls:ProxyNameView Grid.Column="0"
-                                                                    NameText="{x:Bind Name}"
-                                                                    TextSize="13"
-                                                                    MaxWidth="120"
-                                                                    VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="1"
-                                                       VerticalAlignment="Center"
-                                                       FontSize="12"
-                                                       Foreground="{x:Bind DelayKey, Mode=OneWay, Converter={StaticResource DelayToBrush}}"
-                                                       Text="{x:Bind DelayText, Mode=OneWay}" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </ComboBox.ItemTemplate>
-                            </ComboBox>
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>
